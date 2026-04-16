@@ -36,6 +36,7 @@ target_include_directories(nlohmann_json INTERFACE ${CMAKE_SOURCE_DIR}/third_par
 set(SOURCES
     src/main.cpp
     src/net/http_client.cpp
+    src/net/ws_client.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

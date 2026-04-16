@@ -501,7 +501,7 @@ logging:
 ### Phase 1 — 基础设施
 
 - [x] **1.1** CMake 项目搭建 + 依赖集成
-- [ ] **1.2** HTTP 客户端封装 (Boost.Beast)
+- [x] **1.2** HTTP 客户端封装 (Boost.Beast)
 - [ ] **1.3** WebSocket 客户端封装
 - [ ] **1.4** JSON 解析工具
 - [ ] **1.5** 配置加载 (YAML)
