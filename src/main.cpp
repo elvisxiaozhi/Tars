@@ -7,6 +7,8 @@
 #include <spdlog/spdlog.h>
 #include <json.hpp>
 
+#include "net/http_client.h"
+
 int main() {
     spdlog::info("polymarket-arb v0.1.0");
     spdlog::info("boost     {}.{}.{}",
@@ -28,5 +30,17 @@ int main() {
     }
 
     spdlog::info("all dependencies verified");
+
+    // HTTP 客户端测试 — 请求 Polymarket CLOB 服务器时间
+    spdlog::info("--- HTTP client test ---");
+    polymarket::net::HttpClient http(10);
+    try {
+        auto resp = http.get("https://clob.polymarket.com/time");
+        spdlog::info("GET /time status={}", resp.status_code);
+        spdlog::info("body: {}", resp.body);
+    } catch (const std::exception& e) {
+        spdlog::error("HTTP request failed: {}", e.what());
+    }
+
     return 0;
 }
