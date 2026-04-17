@@ -2,6 +2,7 @@
 *.o
 *.d
 build/
+build-xcode/
 logs/
 keystore.enc
 .env
