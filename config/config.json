@@ -1,0 +1,36 @@
+{
+    "polymarket": {
+        "clob_rest_url": "https://clob.polymarket.com",
+        "clob_ws_url": "wss://ws-subscriptions-clob.polymarket.com/ws/market",
+        "gamma_api_url": "https://gamma-api.polymarket.com",
+        "chain_id": 137
+    },
+
+    "strategy": {
+        "min_net_profit_pct": 0.5,
+        "max_trade_size_usdc": 100.0,
+        "arb_types": ["complement", "multi_outcome"],
+        "min_liquidity_usdc": 500.0,
+        "min_volume_24h": 1000.0
+    },
+
+    "risk": {
+        "max_position_per_market": 500.0,
+        "max_total_exposure": 2000.0,
+        "max_single_trade": 100.0,
+        "daily_loss_limit": 50.0,
+        "max_open_orders": 10,
+        "kill_switch": false
+    },
+
+    "logging": {
+        "level": "info",
+        "file": "./logs/bot.log",
+        "console": true
+    },
+
+    "wallet": {
+        "keystore_path": "./keystore.enc",
+        "address": ""
+    }
+}
