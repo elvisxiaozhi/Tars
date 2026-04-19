@@ -18,6 +18,8 @@ struct StrategyConfig {
     std::vector<std::string> arb_types;
     double min_liquidity_usdc = 500.0;
     double min_volume_24h = 1000.0;
+    int max_markets_to_scan = 100;
+    std::string market_filter;  // 关键词过滤，空 = 不过滤
 };
 
 struct RiskConfig {
@@ -40,12 +42,17 @@ struct WalletConfig {
     std::string address;
 };
 
+struct NetworkConfig {
+    std::string proxy_url;  // e.g. "http://127.0.0.1:7897", empty = use env var
+};
+
 struct AppConfig {
     PolymarketConfig polymarket;
     StrategyConfig strategy;
     RiskConfig risk;
     LoggingConfig logging;
     WalletConfig wallet;
+    NetworkConfig network;
 };
 
 // 从 JSON 文件加载配置

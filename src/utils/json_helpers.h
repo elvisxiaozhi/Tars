@@ -129,6 +129,59 @@ inline BestBidAsk extract_best_bid_ask(const OrderBook& ob) {
     return bba;
 }
 
+// --- 解析 Gamma API 市场 ---
+
+inline Market parse_gamma_market(const json& j) {
+    Market m;
+    m.condition_id = get_string(j, "conditionId");
+    m.question_id = get_string(j, "questionID");
+    m.question = get_string(j, "question");
+    m.description = get_string(j, "description");
+    m.market_slug = get_string(j, "slug");
+    m.active = get_bool(j, "active");
+    m.closed = get_bool(j, "closed");
+    m.accepting_orders = get_bool(j, "enableOrderBook");
+    m.neg_risk = get_bool(j, "negRisk");
+    m.minimum_order_size = get_double(j, "orderMinSize");
+    m.minimum_tick_size = get_double(j, "orderPriceMinTickSize");
+
+    // gamma 的 token ids 是 JSON 字符串: "[\"id1\", \"id2\"]"
+    // outcomes 也是: "[\"Up\", \"Down\"]"
+    // outcomePrices: "[\"0.5\", \"0.5\"]"
+    auto token_ids_str = get_string(j, "clobTokenIds");
+    auto outcomes_str = get_string(j, "outcomes");
+    auto prices_str = get_string(j, "outcomePrices");
+
+    std::vector<std::string> token_ids, outcomes;
+    std::vector<double> prices;
+
+    if (!token_ids_str.empty()) {
+        auto tids = json::parse(token_ids_str);
+        for (const auto& t : tids) token_ids.push_back(t.get<std::string>());
+    }
+    if (!outcomes_str.empty()) {
+        auto outs = json::parse(outcomes_str);
+        for (const auto& o : outs) outcomes.push_back(o.get<std::string>());
+    }
+    if (!prices_str.empty()) {
+        auto prs = json::parse(prices_str);
+        for (const auto& p : prs) {
+            if (p.is_string()) prices.push_back(std::stod(p.get<std::string>()));
+            else prices.push_back(p.get<double>());
+        }
+    }
+
+    for (size_t i = 0; i < token_ids.size(); i++) {
+        Token t;
+        t.token_id = token_ids[i];
+        t.outcome = (i < outcomes.size()) ? outcomes[i] : "";
+        t.price = (i < prices.size()) ? prices[i] : 0.0;
+        m.tokens.push_back(t);
+    }
+
+    return m;
+}
+
 // --- 解析 WebSocket 事件 ---
 
 inline WsPriceChange parse_ws_price_change(const json& j) {

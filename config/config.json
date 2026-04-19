@@ -11,7 +11,9 @@
         "max_trade_size_usdc": 100.0,
         "arb_types": ["complement", "multi_outcome"],
         "min_liquidity_usdc": 500.0,
-        "min_volume_24h": 1000.0
+        "min_volume_24h": 1000.0,
+        "max_markets_to_scan": 100,
+        "market_filter": "btc-updown"
     },
 
     "risk": {
@@ -27,6 +29,10 @@
         "level": "info",
         "file": "./logs/bot.log",
         "console": true
+    },
+
+    "network": {
+        "proxy_url": "http://127.0.0.1:7897"
     },
 
     "wallet": {

@@ -14,7 +14,7 @@ using WsCloseCallback = std::function<void()>;
 
 class WsClient {
 public:
-    explicit WsClient(int timeout_sec = 10);
+    explicit WsClient(int timeout_sec = 10, const std::string& proxy_url = "");
     ~WsClient();
 
     WsClient(const WsClient&) = delete;

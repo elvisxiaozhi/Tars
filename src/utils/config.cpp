@@ -58,6 +58,8 @@ AppConfig load_config(const std::string& path) {
         cfg.strategy.max_trade_size_usdc = jdbl(s, "max_trade_size_usdc", 100.0);
         cfg.strategy.min_liquidity_usdc = jdbl(s, "min_liquidity_usdc", 500.0);
         cfg.strategy.min_volume_24h = jdbl(s, "min_volume_24h", 1000.0);
+        cfg.strategy.max_markets_to_scan = jint(s, "max_markets_to_scan", 100);
+        cfg.strategy.market_filter = jstr(s, "market_filter");
         if (s.contains("arb_types") && s["arb_types"].is_array()) {
             for (const auto& t : s["arb_types"]) {
                 if (t.is_string()) cfg.strategy.arb_types.push_back(t.get<std::string>());
@@ -89,6 +91,12 @@ AppConfig load_config(const std::string& path) {
         auto& w = root["wallet"];
         cfg.wallet.keystore_path = jstr(w, "keystore_path");
         cfg.wallet.address = jstr(w, "address");
+    }
+
+    // network
+    if (root.contains("network")) {
+        auto& n = root["network"];
+        cfg.network.proxy_url = jstr(n, "proxy_url");
     }
 
     return cfg;

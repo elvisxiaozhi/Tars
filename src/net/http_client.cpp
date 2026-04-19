@@ -68,16 +68,20 @@ static ParsedUrl parse_url(const std::string& url) {
     return result;
 }
 
-static ProxyInfo detect_proxy() {
+static ProxyInfo detect_proxy(const std::string& config_proxy = "") {
     ProxyInfo info;
-    // Check HTTPS_PROXY / HTTP_PROXY env vars
-    const char* proxy_env = std::getenv("HTTPS_PROXY");
-    if (!proxy_env) proxy_env = std::getenv("https_proxy");
-    if (!proxy_env) proxy_env = std::getenv("HTTP_PROXY");
-    if (!proxy_env) proxy_env = std::getenv("http_proxy");
-    if (!proxy_env) return info;
-
-    std::string proxy_url(proxy_env);
+    // Config proxy takes priority over env vars
+    std::string proxy_url;
+    if (!config_proxy.empty()) {
+        proxy_url = config_proxy;
+    } else {
+        const char* proxy_env = std::getenv("HTTPS_PROXY");
+        if (!proxy_env) proxy_env = std::getenv("https_proxy");
+        if (!proxy_env) proxy_env = std::getenv("HTTP_PROXY");
+        if (!proxy_env) proxy_env = std::getenv("http_proxy");
+        if (!proxy_env) return info;
+        proxy_url = proxy_env;
+    }
     // Strip scheme
     std::string rest;
     if (proxy_url.rfind("http://", 0) == 0) {
@@ -109,10 +113,11 @@ struct HttpClient::Impl {
     int timeout_sec;
     ProxyInfo proxy;
 
-    explicit Impl(int timeout) : timeout_sec(timeout) {
+    explicit Impl(int timeout, const std::string& proxy_url = "")
+        : timeout_sec(timeout) {
         ssl_ctx.set_default_verify_paths();
         ssl_ctx.set_verify_mode(ssl::verify_peer);
-        proxy = detect_proxy();
+        proxy = detect_proxy(proxy_url);
     }
 
     HttpResponse request(http::verb method,
@@ -271,8 +276,8 @@ struct HttpClient::Impl {
     }
 };
 
-HttpClient::HttpClient(int timeout_sec)
-    : impl_(std::make_unique<Impl>(timeout_sec)) {}
+HttpClient::HttpClient(int timeout_sec, const std::string& proxy_url)
+    : impl_(std::make_unique<Impl>(timeout_sec, proxy_url)) {}
 
 HttpClient::~HttpClient() = default;
 

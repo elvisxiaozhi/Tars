@@ -1,24 +1,29 @@
-#include <chrono>
-#include <thread>
+#include <filesystem>
 
 #include <spdlog/spdlog.h>
-#include <json.hpp>
 
-#include "net/http_client.h"
-#include "net/ws_client.h"
-#include "utils/types.h"
-#include "utils/json_helpers.h"
+#include "core/market_feed.h"
 #include "utils/config.h"
 
-namespace jh = polymarket::json_helpers;
-using json = nlohmann::json;
+// 从可执行文件位置向上查找 config/config.json
+static std::string find_config(const char* argv0) {
+    namespace fs = std::filesystem;
+    // 1) 当前工作目录
+    if (fs::exists("config/config.json")) return "config/config.json";
+    // 2) 可执行文件所在目录逐级向上
+    auto dir = fs::weakly_canonical(fs::path(argv0)).parent_path();
+    for (int i = 0; i < 5; i++) {
+        auto candidate = dir / "config" / "config.json";
+        if (fs::exists(candidate)) return candidate.string();
+        if (!dir.has_parent_path() || dir == dir.parent_path()) break;
+        dir = dir.parent_path();
+    }
+    return "config/config.json";  // fallback, 让 load_config 报错
+}
 
 int main(int argc, char* argv[]) {
-    // 配置文件路径（默认 config/config.json）
-    std::string config_path = "config/config.json";
-    if (argc > 1) config_path = argv[1];
+    std::string config_path = (argc > 1) ? argv[1] : find_config(argv[0]);
 
-    // 加载配置
     polymarket::AppConfig cfg;
     try {
         cfg = polymarket::load_config(config_path);
@@ -27,30 +32,20 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 初始化日志
     polymarket::init_logging(cfg.logging);
-
     spdlog::info("polymarket-arb v0.1.0");
-    spdlog::info("config loaded from: {}", config_path);
-    spdlog::info("CLOB REST: {}", cfg.polymarket.clob_rest_url);
-    spdlog::info("CLOB WS:   {}", cfg.polymarket.clob_ws_url);
-    spdlog::info("min profit: {}%, max trade: ${:.0f}",
-                 cfg.strategy.min_net_profit_pct,
-                 cfg.strategy.max_trade_size_usdc);
-    spdlog::info("risk: daily_loss_limit=${:.0f}, kill_switch={}",
-                 cfg.risk.daily_loss_limit,
-                 cfg.risk.kill_switch ? "ON" : "OFF");
 
-    // 快速验证: 请求 CLOB 时间
-    polymarket::net::HttpClient http(10);
-    try {
-        auto resp = http.get(cfg.polymarket.clob_rest_url + "/time");
-        spdlog::info("CLOB /time: {} (status={})", resp.body, resp.status_code);
-    } catch (const std::exception& e) {
-        spdlog::error("CLOB connection failed: {}", e.what());
+    // MarketFeed: 拉取市场列表 + 订单簿 + 打印报价
+    polymarket::MarketFeed feed(cfg);
+
+    feed.fetch_markets();
+    if (feed.market_count() == 0) {
+        spdlog::error("No active markets found");
         return 1;
     }
 
-    spdlog::info("ready");
+    feed.fetch_order_books();
+    feed.print_summary();
+
     return 0;
 }

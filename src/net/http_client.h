@@ -16,7 +16,7 @@ using Headers = std::map<std::string, std::string>;
 
 class HttpClient {
 public:
-    explicit HttpClient(int timeout_sec = 10);
+    explicit HttpClient(int timeout_sec = 10, const std::string& proxy_url = "");
     ~HttpClient();
 
     HttpClient(const HttpClient&) = delete;
