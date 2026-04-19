@@ -253,8 +253,8 @@ int main(int argc, char* argv[]) {
                 if (sig.valid) {
                     std::string risk_reject;
                     if (risk.can_open_position(sig, risk_reject)) {
-                        double size = risk.compute_position_size();
-                        double shares = size / sig.entry_price;
+                        double shares = risk.compute_position_size();  // 固定 5 shares
+                        double size = shares * sig.entry_price;
                         double fee = calc_fee(shares, sig.entry_price);
 
                         polymarket::Position pos;
@@ -277,7 +277,7 @@ int main(int argc, char* argv[]) {
                         positions.push_back(pos);
                         risk.add_position();
 
-                        spdlog::info("OPEN [{}] {} {} @ {:.3f} | ${:.0f} ({:.0f} shares) | fee=${:.2f}",
+                        spdlog::info("OPEN [{}] {} {} @ {:.3f} | ${:.2f} ({} shares) | fee=${:.2f}",
                                      cfg.strategy.mode, pos.id,
                                      (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
                                      pos.entry_price, size, shares, fee);

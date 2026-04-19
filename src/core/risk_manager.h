@@ -39,9 +39,8 @@ public:
 
 private:
     double account_balance_;
-    double position_pct_;         // 单份 = 账户的 1-2%
-    double max_position_pct_;     // 硬性上限 10%
-    int max_concurrent_;          // 最多同时 2 个
+    double fixed_shares_;          // 固定下单量 5 shares
+    int max_concurrent_;           // 最多同时 1 个（单仓制）
     int max_consecutive_losses_;  // 连续亏损 3 次停止
     double max_daily_drawdown_;   // 日回撤 5%
 

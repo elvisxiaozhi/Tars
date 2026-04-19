@@ -5,10 +5,9 @@
 namespace polymarket {
 
 RiskManager::RiskManager(const AppConfig& cfg)
-    : account_balance_(cfg.risk.max_total_exposure)  // 用 max_total_exposure 作为账户余额
-    , position_pct_(0.02)          // 单份 2%
-    , max_position_pct_(0.10)      // 硬性上限 10%
-    , max_concurrent_(2)           // 最多 2 个同时持仓
+    : account_balance_(cfg.strategy.account_balance)
+    , fixed_shares_(5.0)           // 固定 5 shares
+    , max_concurrent_(1)           // 单仓制：最多 1 个持仓
     , max_consecutive_losses_(3)   // 连续亏损 3 次停止
     , max_daily_drawdown_(0.05)    // 日回撤 5%
 {}
@@ -44,18 +43,8 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
 }
 
 double RiskManager::compute_position_size() const {
-    // §三 单份 = 账户总资金的 1-2%
-    double size = account_balance_ * position_pct_;
-
-    // 硬性上限: 不超过 max_single_trade
-    if (size > account_balance_ * max_position_pct_) {
-        size = account_balance_ * max_position_pct_;
-    }
-
-    // 最小 $10（实测阶段）
-    if (size < 10.0) size = 10.0;
-
-    return size;
+    // §三 固定 5 shares，返回的是 shares 数量（不再是 USDC 金额）
+    return fixed_shares_;
 }
 
 void RiskManager::record_loss(double amount) {
