@@ -19,7 +19,7 @@ inline const std::string DASHBOARD_HTML = R"html(
   .mode { padding: 4px 12px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
   .mode-dry { background: #1a3a2a; color: #3fb950; }
   .mode-live { background: #3a1a1a; color: #f85149; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
   .card { background: #111827; border: 1px solid #1e2d3d; border-radius: 8px; padding: 16px; }
   .card-title { font-size: 0.75em; color: #7d8590; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
   .card-value { font-size: 1.8em; font-weight: bold; }
@@ -53,20 +53,27 @@ inline const std::string DASHBOARD_HTML = R"html(
   </div>
   <div>
     <span class="mode" id="mode-badge">--</span>
-    <span class="refresh" id="refresh-info">auto-refresh 3s</span>
+    <span class="refresh" id="refresh-info">auto-refresh 5s</span>
   </div>
 </div>
 
 <div class="grid">
   <div class="card">
-    <div class="card-title">BTC Price</div>
-    <div class="card-value neutral" id="btc-price">--</div>
+    <div class="card-title">Account Balance</div>
+    <div class="card-value neutral" id="account-balance">--</div>
     <div style="font-size:0.75em;color:#7d8590;margin-top:4px;">
-      Strike: <span id="btc-strike">--</span> | Dev: <span id="btc-dev">--</span>
+      BTC: <span id="btc-price">--</span> | Dev: <span id="btc-dev">--</span>
     </div>
   </div>
   <div class="card">
-    <div class="card-title">Total P&L</div>
+    <div class="card-title">Position Cost</div>
+    <div class="card-value neutral" id="total-cost">$0.00</div>
+    <div style="font-size:0.75em;color:#7d8590;margin-top:4px;">
+      Unrealized: <span id="unrealized-pnl">$0.00</span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Realized P&L</div>
     <div class="card-value" id="total-pnl">$0.00</div>
     <div style="font-size:0.75em;color:#7d8590;margin-top:4px;">
       Daily: <span id="daily-pnl">$0.00</span>
@@ -130,7 +137,7 @@ inline const std::string DASHBOARD_HTML = R"html(
 
 <script>
 const API_BASE = '';
-const REFRESH_MS = 3000;
+const REFRESH_MS = 5000;
 
 function formatPrice(v) { return v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '--'; }
 function formatPct(v) { return v !== undefined ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '--'; }
@@ -159,11 +166,16 @@ async function refresh() {
     badge.textContent = status.mode === 'live' ? 'LIVE' : 'DRY RUN';
     badge.className = 'mode ' + (status.mode === 'live' ? 'mode-live' : 'mode-dry');
 
+    document.getElementById('account-balance').textContent = '$' + status.account_balance.toFixed(2);
     document.getElementById('btc-price').textContent = formatPrice(status.btc_price);
-    document.getElementById('btc-strike').textContent = formatPrice(status.btc_strike);
     const devEl = document.getElementById('btc-dev');
     devEl.textContent = formatPct(status.btc_deviation_pct);
     devEl.className = status.btc_deviation_pct >= 0 ? 'positive' : 'negative';
+
+    document.getElementById('total-cost').textContent = '$' + status.total_cost.toFixed(2);
+    const upnlEl = document.getElementById('unrealized-pnl');
+    upnlEl.textContent = formatPnl(status.unrealized_pnl);
+    upnlEl.className = pnlClass(status.unrealized_pnl);
 
     document.getElementById('remaining').textContent = status.minutes_remaining + 'min';
     const volEl = document.getElementById('volatility');

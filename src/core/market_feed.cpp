@@ -98,10 +98,10 @@ static std::string build_btc_hourly_slug(int offset_hours = 0) {
 }
 
 void MarketFeed::fetch_from_gamma() {
-    // 拉取当前小时和下一个小时的市场（跳过已加载的）
+    // 只拉取当前小时的市场（跳过已加载的）
     int new_count = 0;
 
-    for (int offset = 0; offset <= 1; offset++) {
+    for (int offset = 0; offset <= 0; offset++) {
         auto slug = build_btc_hourly_slug(offset);
 
         // 检查是否已经加载过这个市场
@@ -143,10 +143,11 @@ void MarketFeed::fetch_from_gamma() {
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 
-    // 移除已关闭的市场（到期后 gamma 会标记 closed）
+    // 移除已关闭或不属于当前小时的市场
+    auto current_slug = build_btc_hourly_slug(0);
     for (auto it = markets_.begin(); it != markets_.end(); ) {
-        if (it->second.market.closed) {
-            spdlog::info("  removing closed market: {}", it->second.market.question);
+        if (it->second.market.closed || it->second.market.market_slug != current_slug) {
+            spdlog::info("  removing market: {}", it->second.market.question);
             it = markets_.erase(it);
         } else {
             ++it;

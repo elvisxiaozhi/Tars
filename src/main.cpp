@@ -132,6 +132,20 @@ int main(int argc, char* argv[]) {
         j["open_positions"] = static_cast<int>(state.positions.size());
         j["consecutive_losses"] = state.consecutive_losses;
         j["daily_pnl"] = state.daily_pnl;
+        j["account_balance"] = cfg.strategy.account_balance;
+
+        // 计算持仓汇总：买入成本、未实现盈亏
+        double total_cost = 0;
+        double total_unrealized = 0;
+        for (const auto& p : state.positions) {
+            double cost = p.shares * p.entry_price;
+            double current_value = p.shares * p.current_price * p.shares_remaining_pct;
+            double cost_remaining = p.shares * p.entry_price * p.shares_remaining_pct;
+            total_cost += cost;
+            total_unrealized += (current_value - cost_remaining);
+        }
+        j["total_cost"] = total_cost;
+        j["unrealized_pnl"] = total_unrealized;
 
         // uptime
         int64_t elapsed_sec = (now_ms() - state.start_time) / 1000;
