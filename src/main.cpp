@@ -204,6 +204,7 @@ int main(int argc, char* argv[]) {
                  poll_sec, cfg.strategy.account_balance, cfg.network.api_port);
 
     // === 策略主循环 ===
+    double last_up_ask = 0, last_down_ask = 0;
     while (g_running) {
         try {
             auto btc = binance.fetch();
@@ -234,6 +235,9 @@ int main(int argc, char* argv[]) {
 
                 auto quotes = extract_quotes(*updated);
                 if (quotes.up_ask <= 0 && quotes.down_ask <= 0) continue;
+
+                last_up_ask = quotes.up_ask;
+                last_down_ask = quotes.down_ask;
 
                 spdlog::info("Market: {} | Up: {:.3f}/{:.3f} | Down: {:.3f}/{:.3f}",
                              entry.market.question,
@@ -389,8 +393,8 @@ int main(int argc, char* argv[]) {
             spdlog::error("Strategy loop error: {}", e.what());
         }
 
-        spdlog::info("--- tick #{}, {} open positions, waiting {}s ---",
-                     state.tick_count, positions.size(), poll_sec);
+        spdlog::info("--- tick #{}, {} open positions, Up ask={:.3f}, Down ask={:.3f}, waiting {}s ---",
+                     state.tick_count, positions.size(), last_up_ask, last_down_ask, poll_sec);
         for (int i = 0; i < poll_sec && g_running; i++) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }

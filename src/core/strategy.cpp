@@ -9,12 +9,8 @@ namespace polymarket {
 Strategy::Strategy(const AppConfig& cfg) : cfg_(cfg) {}
 
 double Strategy::max_entry_price(int minutes_remaining) const {
-    // 策略规则 §一：
-    // 剩余45分钟以上：价格 < 30¢
-    // 剩余30-45分钟：价格 < 25¢
-    // 剩余30分钟以下：不入场
-    if (minutes_remaining > 45) return 0.30;
-    if (minutes_remaining > 30) return 0.25;
+    // 策略规则 §一：剩余30分钟以上，ask < 30¢
+    if (minutes_remaining > 30) return 0.30;
     return 0;  // 不入场
 }
 
@@ -43,26 +39,21 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
 
-    // §一.4 方向确认：寻找"反向偏离"
-    // 做UP: BTC暂时走弱 (price < strike)，UP合约便宜
-    // 做DOWN: BTC暂时走强 (price > strike)，DOWN合约便宜
+    // §一.4 方向选择：选择更便宜的一方买入
     Side candidate_side = Side::NONE;
     double candidate_ask = 0;
     std::string candidate_token;
 
-    if (!btc.price_above_strike && btc.deviation_pct < -0.05) {
-        // BTC 走弱 → UP 合约便宜 → 做 UP（均值回归）
+    if (up_ask > 0 && (down_ask <= 0 || up_ask <= down_ask)) {
         candidate_side = Side::UP;
         candidate_ask = up_ask;
         candidate_token = up_token_id;
-    } else if (btc.price_above_strike && btc.deviation_pct > 0.05) {
-        // BTC 走强 → DOWN 合约便宜 → 做 DOWN（均值回归）
+    } else if (down_ask > 0) {
         candidate_side = Side::DOWN;
         candidate_ask = down_ask;
         candidate_token = down_token_id;
     } else {
-        sig.reject_reason = "no_direction: dev=" +
-            std::to_string(btc.deviation_pct) + "% (need >0.05% deviation)";
+        sig.reject_reason = "no_valid_ask";
         return sig;
     }
 

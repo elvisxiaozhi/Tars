@@ -115,17 +115,24 @@ inline OrderBook parse_order_book(const json& j) {
 }
 
 // 从订单簿提取 best bid/ask
+// 注意：CLOB API 返回的 bids/asks 不一定按价格排序，需遍历找极值
 inline BestBidAsk extract_best_bid_ask(const OrderBook& ob) {
     BestBidAsk bba;
     bba.token_id = ob.asset_id;
-    if (!ob.bids.empty()) {
-        bba.best_bid = ob.bids.front().price;
-        bba.bid_size = ob.bids.front().size;
+    for (const auto& b : ob.bids) {
+        if (b.price > bba.best_bid) {
+            bba.best_bid = b.price;
+            bba.bid_size = b.size;
+        }
     }
-    if (!ob.asks.empty()) {
-        bba.best_ask = ob.asks.front().price;
-        bba.ask_size = ob.asks.front().size;
+    bba.best_ask = 1e9;
+    for (const auto& a : ob.asks) {
+        if (a.price < bba.best_ask) {
+            bba.best_ask = a.price;
+            bba.ask_size = a.size;
+        }
     }
+    if (ob.asks.empty()) bba.best_ask = 0;
     return bba;
 }
 
