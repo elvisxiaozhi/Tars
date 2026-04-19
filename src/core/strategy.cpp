@@ -35,13 +35,7 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
 
-    // §一.3 波动率条件：当前 > 24h均值
-    if (btc.current_1h_vol <= btc.avg_24h_vol) {
-        sig.reject_reason = "low_vol: " +
-            std::to_string(btc.current_1h_vol) + " <= avg " +
-            std::to_string(btc.avg_24h_vol);
-        return sig;
-    }
+    // §一.3 波动率条件：已移除（K线初期波动率天然为0，与早期入场窗口矛盾）
 
     double max_price = max_entry_price(minutes_remaining);
     if (max_price <= 0) {
