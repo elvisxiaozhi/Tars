@@ -47,6 +47,7 @@ struct WalletConfig {
 
 struct NetworkConfig {
     std::string proxy_url;  // e.g. "http://127.0.0.1:7897", empty = use env var
+    int api_port = 9090;    // 内嵌 dashboard HTTP 端口
 };
 
 struct AppConfig {

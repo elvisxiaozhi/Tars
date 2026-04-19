@@ -100,6 +100,7 @@ AppConfig load_config(const std::string& path) {
     if (root.contains("network")) {
         auto& n = root["network"];
         cfg.network.proxy_url = jstr(n, "proxy_url");
+        cfg.network.api_port = jint(n, "api_port", 9090);
     }
 
     return cfg;

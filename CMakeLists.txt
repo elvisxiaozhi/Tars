@@ -43,6 +43,7 @@ set(SOURCES
     src/core/strategy.cpp
     src/core/risk_manager.cpp
     src/core/trade_journal.cpp
+    src/net/api_server.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

@@ -1,0 +1,44 @@
+#pragma once
+
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <string>
+#include <thread>
+
+namespace polymarket::net {
+
+// API 数据回调：由 main 注册，server 调用获取最新数据
+using ApiDataCallback = std::function<std::string()>;
+
+class ApiServer {
+public:
+    explicit ApiServer(int port = 8080);
+    ~ApiServer();
+
+    ApiServer(const ApiServer&) = delete;
+    ApiServer& operator=(const ApiServer&) = delete;
+
+    // 注册数据回调
+    void on_status(ApiDataCallback cb);
+    void on_trades(ApiDataCallback cb);
+    void on_stats(ApiDataCallback cb);
+
+    // 设置前端 HTML 内容（嵌入到二进制中）
+    void set_dashboard_html(const std::string& html);
+
+    // 在独立线程中启动
+    void start();
+    void stop();
+
+    bool is_running() const { return running_; }
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    std::atomic<bool> running_{false};
+    std::thread server_thread_;
+    int port_;
+};
+
+}  // namespace polymarket::net

@@ -1,8 +1,10 @@
 #include <chrono>
 #include <csignal>
 #include <filesystem>
+#include <mutex>
 #include <thread>
 
+#include <json.hpp>
 #include <spdlog/spdlog.h>
 
 #include "core/binance_feed.h"
@@ -10,12 +12,15 @@
 #include "core/risk_manager.h"
 #include "core/strategy.h"
 #include "core/trade_journal.h"
+#include "dashboard.h"
+#include "net/api_server.h"
 #include "utils/config.h"
+
+using json = nlohmann::json;
 
 static volatile bool g_running = true;
 static void signal_handler(int) { g_running = false; }
 
-// 从可执行文件位置向上查找 config/config.json
 static std::string find_config(const char* argv0) {
     namespace fs = std::filesystem;
     if (fs::exists("config/config.json")) return "config/config.json";
@@ -29,12 +34,10 @@ static std::string find_config(const char* argv0) {
     return "config/config.json";
 }
 
-// 计算 Polymarket 手续费: shares × 0.05 × p × (1-p)
 static double calc_fee(double shares, double price) {
     return shares * 0.05 * price * (1.0 - price);
 }
 
-// 从 MarketEntry 中提取 Up/Down 的 ask 价和 token_id
 struct UpDownQuotes {
     double up_ask = 0, down_ask = 0;
     double up_bid = 0, down_bid = 0;
@@ -46,7 +49,6 @@ static UpDownQuotes extract_quotes(const polymarket::MarketEntry& entry) {
     for (const auto& token : entry.market.tokens) {
         auto it = entry.best_prices.find(token.token_id);
         if (it == entry.best_prices.end()) continue;
-        // BTC 1h: outcomes 是 "Up" / "Down"（不是 "Yes"/"No"）
         if (token.outcome == "Up" || token.outcome == "Yes") {
             q.up_ask = it->second.best_ask;
             q.up_bid = it->second.best_bid;
@@ -65,6 +67,18 @@ static int64_t now_ms() {
         std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+// === 共享状态（策略线程写，API 线程读） ===
+struct SharedState {
+    std::mutex mu;
+    std::string mode;
+    int tick_count = 0;
+    int64_t start_time = 0;
+    polymarket::BtcMarketData btc;
+    std::vector<polymarket::Position> positions;
+    int consecutive_losses = 0;
+    double daily_pnl = 0;
+};
+
 static int next_position_id = 1;
 
 int main(int argc, char* argv[]) {
@@ -82,7 +96,7 @@ int main(int argc, char* argv[]) {
     }
 
     polymarket::init_logging(cfg.logging);
-    spdlog::info("polymarket-arb v0.2.0 [{}]",
+    spdlog::info("polymarket-arb v0.3.0 [{}]",
                  cfg.strategy.mode == "live" ? "LIVE" : "DRY RUN");
 
     // 初始化模块
@@ -92,20 +106,117 @@ int main(int argc, char* argv[]) {
     polymarket::RiskManager risk(cfg);
     polymarket::TradeJournal journal("./logs/trades.jsonl");
 
+    // 共享状态
+    SharedState state;
+    state.mode = cfg.strategy.mode;
+    state.start_time = now_ms();
+
     // 持仓跟踪
     std::vector<polymarket::Position> positions;
 
+    // === API 服务器 ===
+    polymarket::net::ApiServer api(cfg.network.api_port);
+    api.set_dashboard_html(polymarket::DASHBOARD_HTML);
+
+    api.on_status([&]() -> std::string {
+        std::lock_guard<std::mutex> lock(state.mu);
+        json j;
+        j["mode"] = state.mode;
+        j["tick_count"] = state.tick_count;
+        j["btc_price"] = state.btc.current_price;
+        j["btc_strike"] = state.btc.strike_price;
+        j["btc_deviation_pct"] = state.btc.deviation_pct;
+        j["current_vol"] = state.btc.current_1h_vol;
+        j["avg_vol"] = state.btc.avg_24h_vol;
+        j["minutes_remaining"] = state.btc.minutes_remaining;
+        j["open_positions"] = static_cast<int>(state.positions.size());
+        j["consecutive_losses"] = state.consecutive_losses;
+        j["daily_pnl"] = state.daily_pnl;
+
+        // uptime
+        int64_t elapsed_sec = (now_ms() - state.start_time) / 1000;
+        int h = static_cast<int>(elapsed_sec / 3600);
+        int m = static_cast<int>((elapsed_sec % 3600) / 60);
+        int s = static_cast<int>(elapsed_sec % 60);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h, m, s);
+        j["uptime"] = buf;
+
+        // positions detail
+        json pos_arr = json::array();
+        for (const auto& p : state.positions) {
+            json pj;
+            pj["id"] = p.id;
+            pj["side"] = (p.side == polymarket::Side::UP) ? "UP" : "DOWN";
+            pj["entry_price"] = p.entry_price;
+            pj["current_price"] = p.current_price;
+            pj["shares"] = p.shares;
+            pj["remaining_pct"] = p.shares_remaining_pct;
+            pj["entry_time"] = p.entry_time;
+            pj["market"] = p.market_question;
+            pos_arr.push_back(pj);
+        }
+        j["positions"] = pos_arr;
+        return j.dump();
+    });
+
+    api.on_trades([&]() -> std::string {
+        json arr = json::array();
+        for (const auto& t : journal.records()) {
+            json j;
+            j["id"] = t.id;
+            j["market"] = t.market_question;
+            j["side"] = t.side;
+            j["entry_time"] = t.entry_time;
+            j["exit_time"] = t.exit_time;
+            j["entry_price"] = t.entry_price;
+            j["exit_price"] = t.exit_price;
+            j["shares"] = t.shares;
+            j["size_usdc"] = t.size_usdc;
+            j["exit_reason"] = t.exit_reason;
+            j["pnl"] = t.realized_pnl;
+            j["fee"] = t.fee_paid;
+            j["btc_price"] = t.btc_price_at_entry;
+            j["btc_deviation"] = t.btc_deviation_pct;
+            j["vol"] = t.entry_vol;
+            j["minutes_remaining"] = t.minutes_remaining_at_entry;
+            arr.push_back(j);
+        }
+        return arr.dump();
+    });
+
+    api.on_stats([&]() -> std::string {
+        std::lock_guard<std::mutex> lock(state.mu);
+        json j;
+        j["total_trades"] = journal.total_trades();
+        j["wins"] = journal.wins();
+        j["losses"] = journal.losses();
+        j["total_pnl"] = journal.total_pnl();
+        j["win_rate"] = journal.win_rate() * 100.0;
+        j["daily_pnl"] = state.daily_pnl;
+        return j.dump();
+    });
+
+    api.start();
+
     int poll_sec = cfg.strategy.poll_interval_sec;
-    spdlog::info("Strategy loop: poll every {}s, account=${:.0f}",
-                 poll_sec, cfg.strategy.account_balance);
+    spdlog::info("Strategy loop: poll every {}s, account=${:.0f}, dashboard at http://localhost:{}",
+                 poll_sec, cfg.strategy.account_balance, cfg.network.api_port);
 
     // === 策略主循环 ===
     while (g_running) {
         try {
-            // 1. 拉取 BTC 价格 + 波动率
             auto btc = binance.fetch();
 
-            // 2. 拉取��前 BTC 1h 市场
+            // 更新共享状态
+            {
+                std::lock_guard<std::mutex> lock(state.mu);
+                state.btc = btc;
+                state.tick_count++;
+                state.consecutive_losses = risk.consecutive_losses();
+                state.daily_pnl = risk.daily_pnl();
+            }
+
             market_feed.fetch_markets();
             if (market_feed.market_count() == 0) {
                 spdlog::info("No active BTC 1h markets, waiting...");
@@ -113,11 +224,10 @@ int main(int argc, char* argv[]) {
                 continue;
             }
 
-            // 3. 遍历市场，刷新订单簿，评估信号
+            // 遍历市场，刷新订单簿，评估信号
             for (const auto& [cid, entry] : market_feed.markets()) {
                 if (!g_running) break;
 
-                // 刷新订单簿
                 market_feed.refresh_order_book(cid);
                 auto updated = market_feed.get_market(cid);
                 if (!updated || updated->best_prices.size() < 2) continue;
@@ -130,7 +240,6 @@ int main(int argc, char* argv[]) {
                              quotes.up_bid, quotes.up_ask,
                              quotes.down_bid, quotes.down_ask);
 
-                // 评估入场
                 auto sig = strategy.evaluate_entry(
                     btc, quotes.up_ask, quotes.down_ask,
                     quotes.up_token_id, quotes.down_token_id,
@@ -140,7 +249,6 @@ int main(int argc, char* argv[]) {
                 if (sig.valid) {
                     std::string risk_reject;
                     if (risk.can_open_position(sig, risk_reject)) {
-                        // Dry run: 模拟开仓
                         double size = risk.compute_position_size();
                         double shares = size / sig.entry_price;
                         double fee = calc_fee(shares, sig.entry_price);
@@ -177,20 +285,19 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // 4. 管理���有持仓
+            // 管理现有持仓
             for (auto& pos : positions) {
                 if (pos.closed || !g_running) continue;
 
                 auto updated = market_feed.get_market(pos.condition_id);
                 if (!updated) continue;
 
-                // ��取当前合约价格
                 double current_price = 0;
                 for (const auto& token : updated->market.tokens) {
                     if (token.token_id == pos.token_id) {
                         auto it = updated->best_prices.find(token.token_id);
                         if (it != updated->best_prices.end()) {
-                            current_price = it->second.best_bid;  // 用 bid 作为可变现价
+                            current_price = it->second.best_bid;
                         }
                         break;
                     }
@@ -198,7 +305,7 @@ int main(int argc, char* argv[]) {
                 if (current_price <= 0) continue;
                 pos.current_price = current_price;
 
-                // 检查止盈档位
+                // 检查止盈
                 for (auto& tp : pos.tp_levels) {
                     if (tp.triggered) continue;
                     if (current_price >= tp.trigger_price) {
@@ -243,7 +350,6 @@ int main(int argc, char* argv[]) {
                                  (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
                                  exit_sig.reason, pnl, pos.realized_pnl);
 
-                    // 记录到 journal
                     polymarket::TradeRecord rec;
                     rec.id = pos.id;
                     rec.market_question = pos.market_question;
@@ -267,25 +373,31 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // 5. 清理已关闭的持仓
+            // 清理已关闭持仓
             positions.erase(
                 std::remove_if(positions.begin(), positions.end(),
                                [](const polymarket::Position& p) { return p.closed; }),
                 positions.end());
 
+            // 同步持仓到共享状态
+            {
+                std::lock_guard<std::mutex> lock(state.mu);
+                state.positions = positions;
+            }
+
         } catch (const std::exception& e) {
             spdlog::error("Strategy loop error: {}", e.what());
         }
 
-        // 等待下一轮
-        spdlog::info("--- tick done, {} open positions, waiting {}s ---",
-                     positions.size(), poll_sec);
+        spdlog::info("--- tick #{}, {} open positions, waiting {}s ---",
+                     state.tick_count, positions.size(), poll_sec);
         for (int i = 0; i < poll_sec && g_running; i++) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
 
     spdlog::info("Shutting down...");
+    api.stop();
     journal.print_summary();
     spdlog::info("Done.");
     return 0;
