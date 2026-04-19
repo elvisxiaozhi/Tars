@@ -39,6 +39,10 @@ set(SOURCES
     src/net/ws_client.cpp
     src/utils/config.cpp
     src/core/market_feed.cpp
+    src/core/binance_feed.cpp
+    src/core/strategy.cpp
+    src/core/risk_manager.cpp
+    src/core/trade_journal.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

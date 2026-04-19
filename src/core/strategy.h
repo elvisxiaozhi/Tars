@@ -1,0 +1,100 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "core/binance_feed.h"
+#include "utils/config.h"
+
+namespace polymarket {
+
+// 交易方向
+enum class Side { UP, DOWN, NONE };
+
+// 入场信号
+struct EntrySignal {
+    bool valid = false;
+    Side side = Side::NONE;
+    double entry_price = 0;       // 建议入场价（ask 价下方 0.5-1¢）
+    double market_ask = 0;        // 当前 ask 价
+    std::string market_question;
+    std::string token_id;
+    std::string condition_id;
+    std::string reject_reason;    // 如果 valid=false，为什么被拒
+};
+
+// 止盈档位
+struct TakeProfitLevel {
+    int tier;              // 1-4
+    double trigger_price;  // 触发价
+    double sell_pct;       // 卖出比例 (0-1)
+    bool triggered = false;
+};
+
+// 模拟持仓
+struct Position {
+    std::string id;               // 唯一ID
+    Side side = Side::NONE;
+    std::string token_id;
+    std::string condition_id;
+    std::string market_question;
+    double entry_price = 0;
+    double current_price = 0;
+    double size_usdc = 0;         // 投入金额
+    double shares = 0;            // 持有份数 = size_usdc / entry_price
+    double btc_price_at_entry = 0;
+    double btc_strike_at_entry = 0;
+    double entry_vol = 0;         // 入场时波动率
+    int64_t entry_time = 0;       // unix ms
+    int minutes_remaining_at_entry = 0;
+    std::vector<TakeProfitLevel> tp_levels;
+    double shares_remaining_pct = 1.0;  // 剩余仓位比例
+    bool closed = false;
+    std::string close_reason;     // "tp1"/"tp2"/"tp3"/"tp4"/"stop_price"/"stop_btc"/"stop_time"/"expired"
+    double realized_pnl = 0;
+};
+
+// 策略退出信号
+struct ExitSignal {
+    bool should_exit = false;
+    std::string reason;
+    double exit_price = 0;
+    bool use_market_order = false;  // true = 止损用市价单
+};
+
+class Strategy {
+public:
+    explicit Strategy(const AppConfig& cfg);
+
+    // 评估入场条件，返回信号
+    EntrySignal evaluate_entry(
+        const BtcMarketData& btc,
+        double up_ask, double down_ask,
+        const std::string& up_token_id, const std::string& down_token_id,
+        const std::string& condition_id, const std::string& question,
+        int minutes_remaining);
+
+    // 计算止盈档位
+    std::vector<TakeProfitLevel> compute_tp_levels(double entry_price);
+
+    // 评估是否应该退出
+    ExitSignal evaluate_exit(
+        const Position& pos,
+        double current_contract_price,
+        const BtcMarketData& btc,
+        int minutes_remaining);
+
+    // 最后10分钟特殊处理
+    ExitSignal evaluate_last_10min(
+        const Position& pos,
+        double current_contract_price,
+        int minutes_remaining);
+
+private:
+    // 根据剩余时间返回最大入场价
+    double max_entry_price(int minutes_remaining) const;
+
+    AppConfig cfg_;
+};
+
+}  // namespace polymarket

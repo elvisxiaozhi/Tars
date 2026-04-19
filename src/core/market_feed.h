@@ -27,6 +27,9 @@ public:
     // 为已加载的市场拉取订单簿，返回成功拉取的数量
     int fetch_order_books();
 
+    // 刷新单个市场的订单簿
+    bool refresh_order_book(const std::string& condition_id);
+
     // 获取所有已加载市场
     const std::map<std::string, MarketEntry>& markets() const { return markets_; }
 

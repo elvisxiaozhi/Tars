@@ -60,6 +60,9 @@ AppConfig load_config(const std::string& path) {
         cfg.strategy.min_volume_24h = jdbl(s, "min_volume_24h", 1000.0);
         cfg.strategy.max_markets_to_scan = jint(s, "max_markets_to_scan", 100);
         cfg.strategy.market_filter = jstr(s, "market_filter");
+        cfg.strategy.mode = jstr(s, "mode", "dry_run");
+        cfg.strategy.account_balance = jdbl(s, "account_balance", 1000.0);
+        cfg.strategy.poll_interval_sec = jint(s, "poll_interval_sec", 30);
         if (s.contains("arb_types") && s["arb_types"].is_array()) {
             for (const auto& t : s["arb_types"]) {
                 if (t.is_string()) cfg.strategy.arb_types.push_back(t.get<std::string>());

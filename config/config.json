@@ -7,6 +7,9 @@
     },
 
     "strategy": {
+        "mode": "dry_run",
+        "account_balance": 1000.0,
+        "poll_interval_sec": 30,
         "min_net_profit_pct": 0.5,
         "max_trade_size_usdc": 100.0,
         "arb_types": ["complement", "multi_outcome"],

@@ -19,7 +19,10 @@ struct StrategyConfig {
     double min_liquidity_usdc = 500.0;
     double min_volume_24h = 1000.0;
     int max_markets_to_scan = 100;
-    std::string market_filter;  // 关键词过滤，空 = 不过滤
+    std::string market_filter;       // 关键词过滤，空 = 不过滤
+    std::string mode = "dry_run";    // "dry_run" or "live"
+    double account_balance = 1000.0;
+    int poll_interval_sec = 30;      // 策略循环间隔
 };
 
 struct RiskConfig {

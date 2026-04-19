@@ -19,16 +19,15 @@ MarketFeed::MarketFeed(const AppConfig& cfg)
     : cfg_(cfg), http_(10, cfg.network.proxy_url) {}
 
 void MarketFeed::fetch_markets() {
-    markets_.clear();
-
     if (!cfg_.strategy.market_filter.empty()) {
+        // gamma 路径：增量拉取，不清空
         fetch_from_gamma();
     } else {
+        // CLOB 全量路径：每次清空重拉
+        markets_.clear();
         fetch_from_clob();
+        scan_prices();
     }
-
-    // 用 token 自带的 price 做初步套利扫描
-    scan_prices();
 }
 
 void MarketFeed::fetch_from_clob() {
@@ -99,14 +98,24 @@ static std::string build_btc_hourly_slug(int offset_hours = 0) {
 }
 
 void MarketFeed::fetch_from_gamma() {
-    spdlog::info("Fetching BTC 1h Up/Down markets from Gamma API...");
+    // 拉取当前小时和下一个小时的市场（跳过已加载的）
+    int new_count = 0;
 
-    // 拉取当前小时和下一个小时的市场
     for (int offset = 0; offset <= 1; offset++) {
         auto slug = build_btc_hourly_slug(offset);
-        std::string url = cfg_.polymarket.gamma_api_url + "/events?slug=" + slug;
 
-        spdlog::info("Querying: {}", slug);
+        // 检查是否已经加载过这个市场
+        bool already_loaded = false;
+        for (const auto& [cid, entry] : markets_) {
+            if (entry.market.market_slug == slug) {
+                already_loaded = true;
+                break;
+            }
+        }
+        if (already_loaded) continue;
+
+        std::string url = cfg_.polymarket.gamma_api_url + "/events?slug=" + slug;
+        spdlog::info("Querying gamma: {}", slug);
         auto resp = http_.get(url);
         if (resp.status_code != 200) {
             spdlog::warn("Gamma fetch status={} for {}", resp.status_code, slug);
@@ -114,12 +123,8 @@ void MarketFeed::fetch_from_gamma() {
         }
 
         auto j = json::parse(resp.body);
-        if (!j.is_array() || j.empty()) {
-            spdlog::info("  not found");
-            continue;
-        }
+        if (!j.is_array() || j.empty()) continue;
 
-        // events 返回的 markets 是嵌套在 event 里的
         for (const auto& event : j) {
             if (!event.contains("markets") || !event["markets"].is_array()) continue;
             for (const auto& mj : event["markets"]) {
@@ -127,19 +132,30 @@ void MarketFeed::fetch_from_gamma() {
                 if (!m.active || m.closed) continue;
                 if (m.tokens.size() < 2) continue;
 
-                spdlog::info("  found: {} (outcomes: Up/Down, tokens: {})",
-                             m.question, m.tokens.size());
-
+                spdlog::info("  new market: {} (tokens: {})", m.question, m.tokens.size());
                 MarketEntry entry;
                 entry.market = std::move(m);
                 markets_[entry.market.condition_id] = std::move(entry);
+                new_count++;
             }
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 
-    spdlog::info("Markets loaded: {} BTC 1h markets", markets_.size());
+    // 移除已关闭的市场（到期后 gamma 会标记 closed）
+    for (auto it = markets_.begin(); it != markets_.end(); ) {
+        if (it->second.market.closed) {
+            spdlog::info("  removing closed market: {}", it->second.market.question);
+            it = markets_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (new_count > 0) {
+        spdlog::info("Markets: {} new, {} total", new_count, markets_.size());
+    }
 }
 
 void MarketFeed::scan_prices() {
@@ -283,6 +299,33 @@ int MarketFeed::fetch_order_books() {
                  success, failed, elapsed.count());
 
     return success;
+}
+
+bool MarketFeed::refresh_order_book(const std::string& condition_id) {
+    auto it = markets_.find(condition_id);
+    if (it == markets_.end()) return false;
+    auto& entry = it->second;
+
+    int success = 0;
+    for (const auto& token : entry.market.tokens) {
+        try {
+            std::string url = cfg_.polymarket.clob_rest_url +
+                              "/book?token_id=" + token.token_id;
+            auto resp = http_.get(url);
+            if (resp.status_code == 200) {
+                auto j = json::parse(resp.body);
+                auto ob = jh::parse_order_book(j);
+                auto bba = jh::extract_best_bid_ask(ob);
+                entry.order_books[token.token_id] = std::move(ob);
+                entry.best_prices[token.token_id] = bba;
+                success++;
+            }
+        } catch (const std::exception& e) {
+            spdlog::debug("Order book refresh error: {}", e.what());
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+    return success == static_cast<int>(entry.market.tokens.size());
 }
 
 const MarketEntry* MarketFeed::get_market(const std::string& condition_id) const {
