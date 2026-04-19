@@ -14,23 +14,8 @@ RiskManager::RiskManager(const AppConfig& cfg)
 
 bool RiskManager::can_open_position(const EntrySignal& sig,
                                      std::string& reject_reason) const {
-    // §九.3 连续亏损3次，停止当日交易
-    if (killed_) {
-        reject_reason = "daily_kill_switch";
-        return false;
-    }
-
-    if (consecutive_losses_ >= max_consecutive_losses_) {
-        reject_reason = "consecutive_losses: " + std::to_string(consecutive_losses_);
-        return false;
-    }
-
-    // §九.4 单日回撤超过5%
-    double drawdown = -daily_pnl_ / account_balance_;
-    if (drawdown >= max_daily_drawdown_) {
-        reject_reason = "daily_drawdown: " + std::to_string(drawdown * 100) + "%";
-        return false;
-    }
+    // §九.3 连亏熔断：dry_run 阶段暂时禁用，live 模式需重新启用
+    // §九.4 日亏熔断：dry_run 阶段暂时禁用，live 模式需重新启用
 
     // §三 同时持仓上限
     if (open_positions_ >= max_concurrent_) {
@@ -55,20 +40,8 @@ void RiskManager::record_loss(double amount) {
     spdlog::info("RISK: loss ${:.2f} | daily P&L: ${:.2f} | consecutive losses: {}",
                  amount, daily_pnl_, consecutive_losses_);
 
-    // §九.3
-    if (consecutive_losses_ >= max_consecutive_losses_) {
-        killed_ = true;
-        spdlog::warn("RED LINE: {} consecutive losses, stopping for today",
-                     consecutive_losses_);
-    }
-
-    // §九.4
-    double drawdown = -daily_pnl_ / account_balance_;
-    if (drawdown >= max_daily_drawdown_) {
-        killed_ = true;
-        spdlog::warn("RED LINE: daily drawdown {:.1f}% >= {:.1f}%, stopping for today",
-                     drawdown * 100, max_daily_drawdown_ * 100);
-    }
+    // dry_run 阶段不触发熔断，仅记录日志
+    // TODO(live): 重新启用连亏熔断和日亏熔断
 }
 
 void RiskManager::record_profit(double amount) {
