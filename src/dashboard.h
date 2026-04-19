@@ -120,17 +120,20 @@ inline const std::string DASHBOARD_HTML = R"html(
     <thead>
       <tr>
         <th>Time</th>
-        <th>Market</th>
+        <th>ID</th>
         <th>Side</th>
         <th>Entry</th>
         <th>Exit</th>
         <th>Shares</th>
+        <th>Cost</th>
+        <th>Revenue</th>
+        <th>Fee</th>
         <th>Reason</th>
         <th>P&L</th>
       </tr>
     </thead>
     <tbody id="trades-body">
-      <tr><td colspan="8" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
+      <tr><td colspan="11" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
     </tbody>
   </table>
 </div>
@@ -223,13 +226,18 @@ async function refresh() {
     const tbody = document.getElementById('trades-body');
     let html = '';
     for (const t of trades.slice().reverse()) {
+      const cost = t.shares * t.entry_price;
+      const revenue = t.shares * t.exit_price;
       html += '<tr>';
-      html += '<td>' + formatTime(t.entry_time) + '</td>';
-      html += '<td>' + (t.market.length > 40 ? t.market.substr(0,37)+'...' : t.market) + '</td>';
+      html += '<td>' + formatTime(t.exit_time || t.entry_time) + '</td>';
+      html += '<td>' + t.id + '</td>';
       html += '<td class="side-' + t.side.toLowerCase() + '">' + t.side + '</td>';
       html += '<td>' + t.entry_price.toFixed(3) + '</td>';
       html += '<td>' + t.exit_price.toFixed(3) + '</td>';
-      html += '<td>' + t.shares.toFixed(0) + '</td>';
+      html += '<td>' + t.shares.toFixed(1) + '</td>';
+      html += '<td>$' + cost.toFixed(3) + '</td>';
+      html += '<td>$' + revenue.toFixed(3) + '</td>';
+      html += '<td>$' + (t.fee || 0).toFixed(4) + '</td>';
       html += '<td>' + t.exit_reason + '</td>';
       html += '<td class="' + pnlClass(t.pnl) + '">' + formatPnl(t.pnl) + '</td>';
       html += '</tr>';

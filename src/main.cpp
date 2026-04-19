@@ -219,6 +219,7 @@ int main(int argc, char* argv[]) {
 
     // === 策略主循环 ===
     double last_up_ask = 0, last_down_ask = 0;
+    std::string last_market_slug;  // 跟踪市场切换，检测新 K线
     while (g_running) {
         try {
             auto btc = binance.fetch();
@@ -237,6 +238,18 @@ int main(int argc, char* argv[]) {
                 spdlog::info("No active BTC 1h markets, waiting...");
                 std::this_thread::sleep_for(std::chrono::seconds(poll_sec));
                 continue;
+            }
+
+            // 检测 K线 切换（市场 slug 变了 = 新一小时）
+            for (const auto& [cid, entry] : market_feed.markets()) {
+                if (last_market_slug != entry.market.market_slug) {
+                    if (!last_market_slug.empty()) {
+                        risk.reset_candle();
+                        spdlog::info("New candle: {} → reset stop flag", entry.market.market_slug);
+                    }
+                    last_market_slug = entry.market.market_slug;
+                }
+                break;  // 只看第一个市场
             }
 
             // 遍历市场，刷新订单簿，评估信号
@@ -337,12 +350,34 @@ int main(int argc, char* argv[]) {
                         pos.shares_remaining_pct -= tp.sell_pct * pos.shares_remaining_pct;
                         pos.realized_pnl += pnl;
 
-                        spdlog::info("TP{} [{}]: sell {:.0f} shares @ {:.3f} | pnl=${:+.2f} | remaining={:.0f}%",
+                        spdlog::info("TP{} [{}]: sell {:.1f} shares @ {:.3f} | pnl=${:+.4f} | remaining={:.0f}% | total_rpnl=${:+.4f}",
                                      tp.tier, pos.id, sell_shares, current_price,
-                                     pnl, pos.shares_remaining_pct * 100);
+                                     pnl, pos.shares_remaining_pct * 100, pos.realized_pnl);
 
                         if (pnl > 0) risk.record_profit(pnl);
                         else risk.record_loss(-pnl);
+
+                        // 记录每次 TP 卖出到日志
+                        polymarket::TradeRecord tp_rec;
+                        tp_rec.id = pos.id + "-TP" + std::to_string(tp.tier);
+                        tp_rec.market_question = pos.market_question;
+                        tp_rec.side = (pos.side == polymarket::Side::UP) ? "UP" : "DOWN";
+                        tp_rec.entry_time = pos.entry_time;
+                        tp_rec.exit_time = now_ms();
+                        tp_rec.minutes_remaining_at_entry = pos.minutes_remaining_at_entry;
+                        tp_rec.entry_price = pos.entry_price;
+                        tp_rec.exit_price = current_price;
+                        tp_rec.size_usdc = sell_shares * pos.entry_price;
+                        tp_rec.shares = sell_shares;
+                        tp_rec.btc_price_at_entry = pos.btc_price_at_entry;
+                        tp_rec.btc_strike = pos.btc_strike_at_entry;
+                        tp_rec.btc_deviation_pct = (pos.btc_price_at_entry - pos.btc_strike_at_entry) /
+                                                     pos.btc_strike_at_entry * 100.0;
+                        tp_rec.entry_vol = pos.entry_vol;
+                        tp_rec.exit_reason = "tp" + std::to_string(tp.tier);
+                        tp_rec.realized_pnl = pnl;
+                        tp_rec.fee_paid = fee;
+                        journal.record(tp_rec);
                     }
                 }
 
@@ -354,11 +389,20 @@ int main(int argc, char* argv[]) {
                     double cost_basis = remaining_shares * pos.entry_price;
                     double fee = calc_fee(remaining_shares, exit_sig.exit_price);
                     double pnl = sell_value - cost_basis - fee;
+                    spdlog::info("EXIT CALC [{}]: remaining={:.1f} shares, sell_val={:.4f}, cost={:.4f}, fee={:.4f}, pnl={:+.4f}, prev_rpnl={:+.4f}",
+                                 pos.id, remaining_shares, sell_value, cost_basis, fee, pnl, pos.realized_pnl);
 
                     pos.realized_pnl += pnl;
                     pos.closed = true;
                     pos.close_reason = exit_sig.reason;
                     risk.remove_position();
+
+                    // §三 止损后本场不再交易
+                    if (exit_sig.reason == "stop_price" || exit_sig.reason == "stop_time") {
+                        risk.set_candle_stopped();
+                        spdlog::warn("Candle stopped: {} triggered, no more trades this candle",
+                                     exit_sig.reason);
+                    }
 
                     if (pnl > 0) risk.record_profit(pnl);
                     else risk.record_loss(-pnl);

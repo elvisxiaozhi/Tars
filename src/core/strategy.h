@@ -25,9 +25,9 @@ struct EntrySignal {
 
 // 止盈档位
 struct TakeProfitLevel {
-    int tier;              // 1-4
+    int tier;              // 1-6
     double trigger_price;  // 触发价
-    double sell_pct;       // 卖出比例 (0-1)
+    double sell_pct;       // 卖出比例 (0-1)，基于剩余仓位
     bool triggered = false;
 };
 

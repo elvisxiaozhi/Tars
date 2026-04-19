@@ -9,9 +9,26 @@ namespace polymarket {
 Strategy::Strategy(const AppConfig& cfg) : cfg_(cfg) {}
 
 double Strategy::max_entry_price(int minutes_remaining) const {
-    // 策略规则 §一：剩余30分钟以上，ask < 30¢
+    // §一：剩余30分钟以上，ask < 30¢
     if (minutes_remaining > 30) return 0.30;
     return 0;  // 不入场
+}
+
+// 计算费后回本价：在 sell_price 卖出时，扣除买卖双向手续费后刚好不亏
+// 手续费公式：shares × 0.05 × p × (1-p)
+// 买入成本/share = entry_price + 0.05 × entry_price × (1 - entry_price)
+// 卖出收入/share = sell_price - 0.05 × sell_price × (1 - sell_price)
+// 回本条件：卖出收入 = 买入成本
+// 即：P - 0.05P(1-P) = E + 0.05E(1-E)
+// 0.05P² + 0.95P = E(1.05 - 0.05E)
+// 解二次方程
+static double breakeven_price(double entry_price) {
+    double rhs = entry_price * (1.05 - 0.05 * entry_price);
+    // 0.05P² + 0.95P - rhs = 0
+    double a = 0.05, b = 0.95, c = -rhs;
+    double disc = b * b - 4 * a * c;
+    if (disc < 0) return entry_price * 1.05;  // fallback
+    return (-b + std::sqrt(disc)) / (2 * a);
 }
 
 EntrySignal Strategy::evaluate_entry(
@@ -31,15 +48,13 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
 
-    // §一.3 波动率条件：已移除（K线初期波动率天然为0，与早期入场窗口矛盾）
-
     double max_price = max_entry_price(minutes_remaining);
     if (max_price <= 0) {
         sig.reject_reason = "no_entry_window";
         return sig;
     }
 
-    // §一.4 方向选择：选择更便宜的一方买入
+    // 方向选择：选择更便宜的一方买入
     Side candidate_side = Side::NONE;
     double candidate_ask = 0;
     std::string candidate_token;
@@ -57,7 +72,7 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
 
-    // §一.2 价格条件
+    // 价格条件
     if (candidate_ask <= 0 || candidate_ask >= 1.0) {
         sig.reject_reason = "invalid_ask: " + std::to_string(candidate_ask);
         return sig;
@@ -79,34 +94,48 @@ EntrySignal Strategy::evaluate_entry(
     sig.valid = true;
     sig.side = candidate_side;
     sig.market_ask = candidate_ask;
-    // §二：在当前价下方0.5-1¢挂限价买单
+    // §二：在当前价下方1¢挂限价买单
     sig.entry_price = candidate_ask - 0.01;
     if (sig.entry_price < 0.01) sig.entry_price = 0.01;
     sig.token_id = candidate_token;
 
-    spdlog::info("SIGNAL: {} {} @ {:.3f} (ask={:.3f}, max={:.3f}, BTC dev={:+.2f}%, vol={:.4f})",
+    spdlog::info("SIGNAL: {} {} @ {:.3f} (ask={:.3f}, max={:.3f}, BTC dev={:+.2f}%)",
                  (sig.side == Side::UP ? "UP" : "DOWN"),
                  question, sig.entry_price, candidate_ask, max_price,
-                 btc.deviation_pct, btc.current_1h_vol);
+                 btc.deviation_pct);
 
     return sig;
 }
 
 std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price) {
-    // §四 止盈规则（分档减仓，让利润充分奔跑）
+    // §四 止盈规则（6档，基于费后回本价逐级上浮）
     std::vector<TakeProfitLevel> levels;
 
-    // 第一档：1.5 × P₀ → 卖出30%（让利润跑一会再锁定）
-    levels.push_back({1, entry_price * 1.5, 0.30, false});
+    // TP1：费后回本价 → 卖出50%
+    double tp1 = breakeven_price(entry_price);
 
-    // 第二档：价格翻倍 2 × P₀ → 卖出30%
-    levels.push_back({2, entry_price * 2.0, 0.30, false});
+    // TP2：TP1 基础上涨10%，再算上该价位的手续费
+    double tp2 = breakeven_price(tp1 * 1.10);
 
-    // 第三档：75¢ → 卖出20%
-    levels.push_back({3, 0.75, 0.20, false});
+    // TP3：TP2 基础上涨20%
+    double tp3 = breakeven_price(tp2 * 1.20);
 
-    // 第四档：85¢ → 持有到期（剩余20%博 $1 结算）
-    levels.push_back({4, 0.85, 0.20, false});
+    // TP4：TP3 基础上涨20%
+    double tp4 = breakeven_price(tp3 * 1.20);
+
+    levels.push_back({1, tp1, 0.50, false});
+    levels.push_back({2, tp2, 0.25, false});
+    levels.push_back({3, tp3, 0.25, false});
+    levels.push_back({4, tp4, 0.25, false});
+
+    // TP5：80¢ → 卖出50%
+    levels.push_back({5, 0.80, 0.50, false});
+
+    // TP6：90¢ → 全部卖出
+    levels.push_back({6, 0.90, 1.00, false});
+
+    spdlog::info("TP levels for entry={:.3f}: TP1={:.3f} TP2={:.3f} TP3={:.3f} TP4={:.3f} TP5=0.800 TP6=0.900",
+                 entry_price, tp1, tp2, tp3, tp4);
 
     return levels;
 }
@@ -124,50 +153,20 @@ ExitSignal Strategy::evaluate_exit(
         return evaluate_last_10min(pos, current_contract_price, minutes_remaining);
     }
 
-    // §五.1 价格止损：从入场价下跌 ≥ 35%
+    // §五.1 价格止损：从入场价下跌 ≥ 50%
     double loss_pct = (pos.entry_price - current_contract_price) / pos.entry_price;
-    if (loss_pct >= 0.35) {
+    if (loss_pct >= 0.50) {
         exit.should_exit = true;
         exit.reason = "stop_price";
         exit.exit_price = current_contract_price;
-        exit.use_market_order = true;  // 止损用市价单
+        exit.use_market_order = true;
         spdlog::warn("STOP LOSS (price): {} loss={:.1f}% entry={:.3f} now={:.3f}",
                      pos.market_question, loss_pct * 100,
                      pos.entry_price, current_contract_price);
         return exit;
     }
 
-    // §五.2 BTC价格止损
-    // 做UP: BTC跌破入场时的 strike → 趋势反转
-    // 做DOWN: BTC突破入场时的 strike → 趋势反转
-    if (pos.side == Side::UP) {
-        // 入场时 BTC 走弱（低于 strike），如果继续走弱（跌幅扩大到 > 0.5%），止损
-        double btc_loss_from_strike = (pos.btc_strike_at_entry - btc.current_price) /
-                                       pos.btc_strike_at_entry * 100.0;
-        if (btc_loss_from_strike > 0.5) {
-            exit.should_exit = true;
-            exit.reason = "stop_btc";
-            exit.exit_price = current_contract_price;
-            exit.use_market_order = true;
-            spdlog::warn("STOP LOSS (BTC): UP position, BTC fell {:.2f}% below strike",
-                         btc_loss_from_strike);
-            return exit;
-        }
-    } else if (pos.side == Side::DOWN) {
-        double btc_gain_over_strike = (btc.current_price - pos.btc_strike_at_entry) /
-                                       pos.btc_strike_at_entry * 100.0;
-        if (btc_gain_over_strike > 0.5) {
-            exit.should_exit = true;
-            exit.reason = "stop_btc";
-            exit.exit_price = current_contract_price;
-            exit.use_market_order = true;
-            spdlog::warn("STOP LOSS (BTC): DOWN position, BTC rose {:.2f}% above strike",
-                         btc_gain_over_strike);
-            return exit;
-        }
-    }
-
-    // §五.3 时间止损：剩余 ≤ 10分钟 → 在 evaluate_last_10min 处理
+    // §五.2 时间止损：剩余 ≤ 10分钟 → 在 evaluate_last_10min 处理
 
     return exit;  // should_exit = false
 }
@@ -189,16 +188,11 @@ ExitSignal Strategy::evaluate_last_10min(
         spdlog::warn("TIME STOP: price={:.3f} < 20¢ with {}min left",
                      current_contract_price, minutes_remaining);
     } else if (current_contract_price >= 0.80) {
-        // 80¢以上：持有到期，取消卖出挂单
+        // 80¢以上：持有到期博 $1 结算
         spdlog::info("HOLD TO EXPIRY: price={:.3f} >= 80¢, {}min left",
                      current_contract_price, minutes_remaining);
-        // 不退出，让到期结算
-    } else if (current_contract_price >= 0.50) {
-        // 50-80¢：继续按止盈规则走（不做特殊处理）
-    } else {
-        // 20-50¢：按止盈规则执行，但取消第三、第四档
-        // （这里不强制退出，由 tp_levels 控制）
     }
+    // 20-80¢：继续按止盈规则走
 
     return exit;
 }
