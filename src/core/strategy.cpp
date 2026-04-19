@@ -93,20 +93,20 @@ EntrySignal Strategy::evaluate_entry(
 }
 
 std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price) {
-    // §四 止盈规则（分档减仓）
+    // §四 止盈规则（分档减仓，让利润充分奔跑）
     std::vector<TakeProfitLevel> levels;
 
-    // 第一档：真实回本价 P₀ × 1.02（含费后）→ 卖出50%
-    levels.push_back({1, entry_price * 1.02, 0.50, false});
+    // 第一档：1.5 × P₀ → 卖出30%（让利润跑一会再锁定）
+    levels.push_back({1, entry_price * 1.5, 0.30, false});
 
-    // 第二档：价格翻倍 2 × P₀ → 卖出25%
-    levels.push_back({2, entry_price * 2.0, 0.25, false});
+    // 第二档：价格翻倍 2 × P₀ → 卖出30%
+    levels.push_back({2, entry_price * 2.0, 0.30, false});
 
-    // 第三档：75¢ → 卖出15%
-    levels.push_back({3, 0.75, 0.15, false});
+    // 第三档：75¢ → 卖出20%
+    levels.push_back({3, 0.75, 0.20, false});
 
-    // 第四档：85¢ → 视情况（剩余10%）
-    levels.push_back({4, 0.85, 0.10, false});
+    // 第四档：85¢ → 持有到期（剩余20%博 $1 结算）
+    levels.push_back({4, 0.85, 0.20, false});
 
     return levels;
 }
@@ -141,10 +141,10 @@ ExitSignal Strategy::evaluate_exit(
     // 做UP: BTC跌破入场时的 strike → 趋势反转
     // 做DOWN: BTC突破入场时的 strike → 趋势反转
     if (pos.side == Side::UP) {
-        // 入场时 BTC 走弱（低于 strike），如果继续走弱（跌幅扩大到 > 0.3%），止损
+        // 入场时 BTC 走弱（低于 strike），如果继续走弱（跌幅扩大到 > 0.5%），止损
         double btc_loss_from_strike = (pos.btc_strike_at_entry - btc.current_price) /
                                        pos.btc_strike_at_entry * 100.0;
-        if (btc_loss_from_strike > 0.3) {
+        if (btc_loss_from_strike > 0.5) {
             exit.should_exit = true;
             exit.reason = "stop_btc";
             exit.exit_price = current_contract_price;
@@ -156,7 +156,7 @@ ExitSignal Strategy::evaluate_exit(
     } else if (pos.side == Side::DOWN) {
         double btc_gain_over_strike = (btc.current_price - pos.btc_strike_at_entry) /
                                        pos.btc_strike_at_entry * 100.0;
-        if (btc_gain_over_strike > 0.3) {
+        if (btc_gain_over_strike > 0.5) {
             exit.should_exit = true;
             exit.reason = "stop_btc";
             exit.exit_price = current_contract_price;
