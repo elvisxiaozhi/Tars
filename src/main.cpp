@@ -321,7 +321,52 @@ int main(int argc, char* argv[]) {
                 if (pos.closed || !g_running) continue;
 
                 auto updated = market_feed.get_market(pos.condition_id);
-                if (!updated) continue;
+                if (!updated) {
+                    // 市场已到期/被清理，强制平仓（模拟到期结算）
+                    // 到期时合约要么值 $1（赢）要么值 $0（输）
+                    // dry_run 无法知道最终结果，按最后已知价格结算
+                    double last_price = pos.current_price;
+                    double remaining_shares = pos.shares * pos.shares_remaining_pct;
+                    double sell_value = remaining_shares * last_price;
+                    double cost_basis = remaining_shares * pos.entry_price;
+                    double fee = calc_fee(remaining_shares, last_price);
+                    double pnl = sell_value - cost_basis - fee;
+
+                    pos.realized_pnl += pnl;
+                    pos.closed = true;
+                    pos.close_reason = "expired";
+                    risk.remove_position();
+
+                    if (pnl > 0) risk.record_profit(pnl);
+                    else risk.record_loss(-pnl);
+
+                    spdlog::warn("EXPIRED [{}] {} market gone, settle @ last_price={:.3f} | pnl=${:+.2f} | total=${:+.2f}",
+                                 pos.id,
+                                 (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
+                                 last_price, pnl, pos.realized_pnl);
+
+                    polymarket::TradeRecord rec;
+                    rec.id = pos.id;
+                    rec.market_question = pos.market_question;
+                    rec.side = (pos.side == polymarket::Side::UP) ? "UP" : "DOWN";
+                    rec.entry_time = pos.entry_time;
+                    rec.exit_time = now_ms();
+                    rec.minutes_remaining_at_entry = pos.minutes_remaining_at_entry;
+                    rec.entry_price = pos.entry_price;
+                    rec.exit_price = last_price;
+                    rec.size_usdc = pos.size_usdc;
+                    rec.shares = pos.shares;
+                    rec.btc_price_at_entry = pos.btc_price_at_entry;
+                    rec.btc_strike = pos.btc_strike_at_entry;
+                    rec.btc_deviation_pct = (pos.btc_price_at_entry - pos.btc_strike_at_entry) /
+                                             pos.btc_strike_at_entry * 100.0;
+                    rec.entry_vol = pos.entry_vol;
+                    rec.exit_reason = "expired";
+                    rec.realized_pnl = pos.realized_pnl;
+                    rec.fee_paid = fee;
+                    journal.record(rec);
+                    continue;
+                }
 
                 double current_price = 0;
                 for (const auto& token : updated->market.tokens) {
