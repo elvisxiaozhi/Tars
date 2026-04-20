@@ -108,34 +108,18 @@ EntrySignal Strategy::evaluate_entry(
 }
 
 std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price) {
-    // §四 止盈规则（6档，基于费后回本价逐级上浮）
+    // §四 止盈规则（持有到期，高位减仓）
+    // 赢时合约趋向 $1，盈亏比 6:1，不过早卖出
     std::vector<TakeProfitLevel> levels;
 
-    // TP1：费后回本价 → 卖出50%
-    double tp1 = breakeven_price(entry_price);
+    // TP1：80¢ → 卖出50%
+    levels.push_back({1, 0.80, 0.50, false});
 
-    // TP2：TP1 基础上涨10%，再算上该价位的手续费
-    double tp2 = breakeven_price(tp1 * 1.10);
+    // TP2：90¢ → 全部卖出
+    levels.push_back({2, 0.90, 1.00, false});
 
-    // TP3：TP2 基础上涨20%
-    double tp3 = breakeven_price(tp2 * 1.20);
-
-    // TP4：TP3 基础上涨20%
-    double tp4 = breakeven_price(tp3 * 1.20);
-
-    levels.push_back({1, tp1, 0.50, false});
-    levels.push_back({2, tp2, 0.25, false});
-    levels.push_back({3, tp3, 0.25, false});
-    levels.push_back({4, tp4, 0.25, false});
-
-    // TP5：80¢ → 卖出50%
-    levels.push_back({5, 0.80, 0.50, false});
-
-    // TP6：90¢ → 全部卖出
-    levels.push_back({6, 0.90, 1.00, false});
-
-    spdlog::info("TP levels for entry={:.3f}: TP1={:.3f} TP2={:.3f} TP3={:.3f} TP4={:.3f} TP5=0.800 TP6=0.900",
-                 entry_price, tp1, tp2, tp3, tp4);
+    spdlog::info("TP levels for entry={:.3f}: TP1=0.800(50%) TP2=0.900(100%)",
+                 entry_price);
 
     return levels;
 }
