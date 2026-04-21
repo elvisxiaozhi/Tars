@@ -132,7 +132,7 @@ int main(int argc, char* argv[]) {
         j["open_positions"] = static_cast<int>(state.positions.size());
         j["consecutive_losses"] = state.consecutive_losses;
         j["daily_pnl"] = state.daily_pnl;
-        j["account_balance"] = cfg.strategy.account_balance;
+        j["account_balance"] = risk.account_balance();
 
         // 计算持仓汇总：买入成本、未实现盈亏
         double total_cost = 0;
@@ -202,11 +202,11 @@ int main(int argc, char* argv[]) {
     api.on_stats([&]() -> std::string {
         std::lock_guard<std::mutex> lock(state.mu);
         json j;
-        j["total_trades"] = journal.total_trades();
-        j["wins"] = journal.wins();
-        j["losses"] = journal.losses();
+        j["total_trades"] = journal.candle_count();
+        j["wins"] = journal.candle_wins();
+        j["losses"] = journal.candle_losses();
         j["total_pnl"] = journal.total_pnl();
-        j["win_rate"] = journal.win_rate() * 100.0;
+        j["win_rate"] = journal.candle_win_rate() * 100.0;
         j["daily_pnl"] = state.daily_pnl;
         return j.dump();
     });
@@ -297,17 +297,20 @@ int main(int argc, char* argv[]) {
                         pos.btc_price_at_entry = btc.current_price;
                         pos.btc_strike_at_entry = btc.strike_price;
                         pos.entry_vol = btc.current_1h_vol;
+                        pos.avg_vol = btc.avg_24h_vol;
+                        pos.entry_fee = fee;
                         pos.entry_time = now_ms();
                         pos.minutes_remaining_at_entry = btc.minutes_remaining;
                         pos.tp_levels = strategy.compute_tp_levels(sig.entry_price);
 
                         positions.push_back(pos);
                         risk.add_position();
+                        risk.deduct_balance(size + fee);  // 动态余额：扣除成本+买入手续费
 
-                        spdlog::info("OPEN [{}] {} {} @ {:.3f} | ${:.2f} ({} shares) | fee=${:.2f}",
+                        spdlog::info("OPEN [{}] {} {} @ {:.3f} | ${:.2f} ({} shares) | fee=${:.2f} | balance=${:.2f}",
                                      cfg.strategy.mode, pos.id,
                                      (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
-                                     pos.entry_price, size, shares, fee);
+                                     pos.entry_price, size, shares, fee, risk.account_balance());
                     } else {
                         spdlog::info("Signal blocked by risk: {}", risk_reject);
                     }
@@ -323,27 +326,27 @@ int main(int argc, char* argv[]) {
                 auto updated = market_feed.get_market(pos.condition_id);
                 if (!updated) {
                     // 市场已到期/被清理，强制平仓（模拟到期结算）
-                    // 到期时合约要么值 $1（赢）要么值 $0（输）
-                    // dry_run 无法知道最终结果，按最后已知价格结算
                     double last_price = pos.current_price;
                     double remaining_shares = pos.shares * pos.shares_remaining_pct;
                     double sell_value = remaining_shares * last_price;
                     double cost_basis = remaining_shares * pos.entry_price;
-                    double fee = calc_fee(remaining_shares, last_price);
-                    double pnl = sell_value - cost_basis - fee;
+                    double exit_fee = calc_fee(remaining_shares, last_price);
+                    double entry_fee_portion = calc_fee(remaining_shares, pos.entry_price);
+                    double pnl = sell_value - cost_basis - exit_fee - entry_fee_portion;
 
                     pos.realized_pnl += pnl;
                     pos.closed = true;
                     pos.close_reason = "expired";
                     risk.remove_position();
+                    risk.add_balance(sell_value - exit_fee);  // 动态余额：回收卖出收入
 
                     if (pnl > 0) risk.record_profit(pnl);
                     else risk.record_loss(-pnl);
 
-                    spdlog::warn("EXPIRED [{}] {} market gone, settle @ last_price={:.3f} | pnl=${:+.2f} | total=${:+.2f}",
+                    spdlog::warn("EXPIRED [{}] {} market gone, settle @ last_price={:.3f} | pnl=${:+.2f} | balance=${:.2f}",
                                  pos.id,
                                  (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
-                                 last_price, pnl, pos.realized_pnl);
+                                 last_price, pnl, risk.account_balance());
 
                     polymarket::TradeRecord rec;
                     rec.id = pos.id;
@@ -354,16 +357,17 @@ int main(int argc, char* argv[]) {
                     rec.minutes_remaining_at_entry = pos.minutes_remaining_at_entry;
                     rec.entry_price = pos.entry_price;
                     rec.exit_price = last_price;
-                    rec.size_usdc = pos.size_usdc;
-                    rec.shares = pos.shares;
+                    rec.size_usdc = remaining_shares * pos.entry_price;
+                    rec.shares = remaining_shares;
                     rec.btc_price_at_entry = pos.btc_price_at_entry;
                     rec.btc_strike = pos.btc_strike_at_entry;
                     rec.btc_deviation_pct = (pos.btc_price_at_entry - pos.btc_strike_at_entry) /
                                              pos.btc_strike_at_entry * 100.0;
                     rec.entry_vol = pos.entry_vol;
+                    rec.avg_vol = pos.avg_vol;
                     rec.exit_reason = "expired";
-                    rec.realized_pnl = pos.realized_pnl;
-                    rec.fee_paid = fee;
+                    rec.realized_pnl = pnl;  // 只记本次卖出的 P&L，不是累积
+                    rec.fee_paid = exit_fee + entry_fee_portion;
                     journal.record(rec);
                     continue;
                 }
@@ -389,15 +393,17 @@ int main(int argc, char* argv[]) {
                         double sell_shares = pos.shares * tp.sell_pct * pos.shares_remaining_pct;
                         double sell_value = sell_shares * current_price;
                         double cost_basis = sell_shares * pos.entry_price;
-                        double fee = calc_fee(sell_shares, current_price);
-                        double pnl = sell_value - cost_basis - fee;
+                        double exit_fee = calc_fee(sell_shares, current_price);
+                        double entry_fee_portion = calc_fee(sell_shares, pos.entry_price);
+                        double pnl = sell_value - cost_basis - exit_fee - entry_fee_portion;
 
                         pos.shares_remaining_pct -= tp.sell_pct * pos.shares_remaining_pct;
                         pos.realized_pnl += pnl;
+                        risk.add_balance(sell_value - exit_fee);  // 动态余额：回收卖出收入
 
-                        spdlog::info("TP{} [{}]: sell {:.1f} shares @ {:.3f} | pnl=${:+.4f} | remaining={:.0f}% | total_rpnl=${:+.4f}",
+                        spdlog::info("TP{} [{}]: sell {:.1f} shares @ {:.3f} | pnl=${:+.4f} | remaining={:.0f}% | balance=${:.2f}",
                                      tp.tier, pos.id, sell_shares, current_price,
-                                     pnl, pos.shares_remaining_pct * 100, pos.realized_pnl);
+                                     pnl, pos.shares_remaining_pct * 100, risk.account_balance());
 
                         if (pnl > 0) risk.record_profit(pnl);
                         else risk.record_loss(-pnl);
@@ -419,11 +425,23 @@ int main(int argc, char* argv[]) {
                         tp_rec.btc_deviation_pct = (pos.btc_price_at_entry - pos.btc_strike_at_entry) /
                                                      pos.btc_strike_at_entry * 100.0;
                         tp_rec.entry_vol = pos.entry_vol;
+                        tp_rec.avg_vol = pos.avg_vol;
                         tp_rec.exit_reason = "tp" + std::to_string(tp.tier);
                         tp_rec.realized_pnl = pnl;
-                        tp_rec.fee_paid = fee;
+                        tp_rec.fee_paid = exit_fee + entry_fee_portion;
                         journal.record(tp_rec);
                     }
+                }
+
+                // TP 卖光后自���关闭仓位（TP 子记录已完整记录所有卖出，无需额外 journal 记录）
+                if (pos.shares_remaining_pct < 0.01 && !pos.closed) {
+                    pos.closed = true;
+                    pos.close_reason = "tp_filled";
+                    risk.remove_position();
+
+                    spdlog::info("ALL TP FILLED [{}]: total_rpnl=${:+.2f} | balance=${:.2f}",
+                                 pos.id, pos.realized_pnl, risk.account_balance());
+                    continue;
                 }
 
                 // 检查止损
@@ -432,15 +450,15 @@ int main(int argc, char* argv[]) {
                     double remaining_shares = pos.shares * pos.shares_remaining_pct;
                     double sell_value = remaining_shares * exit_sig.exit_price;
                     double cost_basis = remaining_shares * pos.entry_price;
-                    double fee = calc_fee(remaining_shares, exit_sig.exit_price);
-                    double pnl = sell_value - cost_basis - fee;
-                    spdlog::info("EXIT CALC [{}]: remaining={:.1f} shares, sell_val={:.4f}, cost={:.4f}, fee={:.4f}, pnl={:+.4f}, prev_rpnl={:+.4f}",
-                                 pos.id, remaining_shares, sell_value, cost_basis, fee, pnl, pos.realized_pnl);
+                    double exit_fee = calc_fee(remaining_shares, exit_sig.exit_price);
+                    double entry_fee_portion = calc_fee(remaining_shares, pos.entry_price);
+                    double pnl = sell_value - cost_basis - exit_fee - entry_fee_portion;
 
                     pos.realized_pnl += pnl;
                     pos.closed = true;
                     pos.close_reason = exit_sig.reason;
                     risk.remove_position();
+                    risk.add_balance(sell_value - exit_fee);  // 动态余额：回收卖出收入
 
                     // §三 止损后本场不再交易
                     if (exit_sig.reason == "stop_price" || exit_sig.reason == "stop_time") {
@@ -452,10 +470,10 @@ int main(int argc, char* argv[]) {
                     if (pnl > 0) risk.record_profit(pnl);
                     else risk.record_loss(-pnl);
 
-                    spdlog::info("CLOSE [{}] {} reason={} | pnl=${:+.2f} | total=${:+.2f}",
+                    spdlog::info("CLOSE [{}] {} reason={} | pnl=${:+.2f} | balance=${:.2f}",
                                  pos.id,
                                  (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
-                                 exit_sig.reason, pnl, pos.realized_pnl);
+                                 exit_sig.reason, pnl, risk.account_balance());
 
                     polymarket::TradeRecord rec;
                     rec.id = pos.id;
@@ -466,16 +484,17 @@ int main(int argc, char* argv[]) {
                     rec.minutes_remaining_at_entry = pos.minutes_remaining_at_entry;
                     rec.entry_price = pos.entry_price;
                     rec.exit_price = exit_sig.exit_price;
-                    rec.size_usdc = pos.size_usdc;
-                    rec.shares = pos.shares;
+                    rec.size_usdc = remaining_shares * pos.entry_price;
+                    rec.shares = remaining_shares;
                     rec.btc_price_at_entry = pos.btc_price_at_entry;
                     rec.btc_strike = pos.btc_strike_at_entry;
                     rec.btc_deviation_pct = (pos.btc_price_at_entry - pos.btc_strike_at_entry) /
                                              pos.btc_strike_at_entry * 100.0;
                     rec.entry_vol = pos.entry_vol;
+                    rec.avg_vol = pos.avg_vol;
                     rec.exit_reason = exit_sig.reason;
-                    rec.realized_pnl = pos.realized_pnl;
-                    rec.fee_paid = calc_fee(pos.shares, pos.entry_price);
+                    rec.realized_pnl = pnl;  // 只记本次卖出的 P&L，不是累积
+                    rec.fee_paid = exit_fee + entry_fee_portion;
                     journal.record(rec);
                 }
             }

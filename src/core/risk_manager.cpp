@@ -6,7 +6,7 @@ namespace polymarket {
 
 RiskManager::RiskManager(const AppConfig& cfg)
     : account_balance_(cfg.strategy.account_balance)
-    , fixed_shares_(5.0)           // 固定 5 shares
+    , fixed_shares_(10.0)          // 固定 10 shares
     , max_concurrent_(1)           // 单仓制：最多 1 个持仓
 {}
 
@@ -22,6 +22,14 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
     if (open_positions_ >= max_concurrent_) {
         reject_reason = "max_concurrent: " + std::to_string(open_positions_) +
                         "/" + std::to_string(max_concurrent_);
+        return false;
+    }
+
+    // 余额检查
+    double cost = fixed_shares_ * sig.entry_price;
+    if (cost > account_balance_) {
+        reject_reason = "insufficient_balance: need $" + std::to_string(cost) +
+                        " but have $" + std::to_string(account_balance_);
         return false;
     }
 

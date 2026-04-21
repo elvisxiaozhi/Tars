@@ -1,6 +1,7 @@
 #include "core/trade_journal.h"
 
 #include <filesystem>
+#include <map>
 
 #include <json.hpp>
 #include <spdlog/spdlog.h>
@@ -8,6 +9,12 @@
 namespace polymarket {
 
 using json = nlohmann::json;
+
+// 从交易 ID 中提取仓位基础 ID（去掉 "-TP1"/"-TP2" 后缀）
+static std::string base_position_id(const std::string& id) {
+    auto pos = id.find("-TP");
+    return pos != std::string::npos ? id.substr(0, pos) : id;
+}
 
 TradeJournal::TradeJournal(const std::string& path) : path_(path) {
     // 确保目录存在
@@ -55,7 +62,7 @@ void TradeJournal::print_summary() const {
     }
 
     spdlog::info("");
-    spdlog::info("=== Trade Summary ({} trades) ===", records_.size());
+    spdlog::info("=== Trade Summary ({} candles, {} records) ===", candle_count(), records_.size());
     spdlog::info("{:<45} {:>5} {:>8} {:>8} {:>8} {:>10}",
                  "Market", "Side", "Entry", "Exit", "Reason", "P&L");
     spdlog::info("{}", std::string(90, '-'));
@@ -70,34 +77,48 @@ void TradeJournal::print_summary() const {
 
     spdlog::info("{}", std::string(90, '-'));
     spdlog::info("Total P&L: ${:+.2f} | Win rate: {:.1f}% ({}/{})",
-                 total_pnl(), win_rate() * 100, wins(), total_trades());
+                 total_pnl(), candle_win_rate() * 100, candle_wins(), candle_count());
 }
 
-int TradeJournal::wins() const {
+// 按仓位 ID 分组，汇总每个仓位的总 P&L
+static std::map<std::string, double> group_pnl_by_position(const std::vector<TradeRecord>& records) {
+    std::map<std::string, double> grouped;
+    for (const auto& t : records) {
+        grouped[base_position_id(t.id)] += t.realized_pnl;
+    }
+    return grouped;
+}
+
+int TradeJournal::candle_count() const {
+    return static_cast<int>(group_pnl_by_position(records_).size());
+}
+
+int TradeJournal::candle_wins() const {
     int w = 0;
-    for (const auto& t : records_) {
-        if (t.realized_pnl > 0) w++;
+    for (const auto& [id, pnl] : group_pnl_by_position(records_)) {
+        if (pnl > 0) w++;
     }
     return w;
 }
 
-int TradeJournal::losses() const {
+int TradeJournal::candle_losses() const {
     int l = 0;
-    for (const auto& t : records_) {
-        if (t.realized_pnl <= 0) l++;
+    for (const auto& [id, pnl] : group_pnl_by_position(records_)) {
+        if (pnl <= 0) l++;
     }
     return l;
+}
+
+double TradeJournal::candle_win_rate() const {
+    int count = candle_count();
+    if (count == 0) return 0;
+    return static_cast<double>(candle_wins()) / count;
 }
 
 double TradeJournal::total_pnl() const {
     double sum = 0;
     for (const auto& t : records_) sum += t.realized_pnl;
     return sum;
-}
-
-double TradeJournal::win_rate() const {
-    if (records_.empty()) return 0;
-    return static_cast<double>(wins()) / records_.size();
 }
 
 }  // namespace polymarket

@@ -45,6 +45,8 @@ struct Position {
     double btc_price_at_entry = 0;
     double btc_strike_at_entry = 0;
     double entry_vol = 0;         // 入场时波动率
+    double avg_vol = 0;           // 入场时24h平均波动率
+    double entry_fee = 0;         // 买入手续费（用于 P&L 计算）
     int64_t entry_time = 0;       // unix ms
     int minutes_remaining_at_entry = 0;
     std::vector<TakeProfitLevel> tp_levels;

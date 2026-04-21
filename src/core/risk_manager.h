@@ -34,6 +34,11 @@ public:
     // 重置每日统计
     void reset_daily();
 
+    // 账户余额
+    double account_balance() const { return account_balance_; }
+    void deduct_balance(double amount) { account_balance_ -= amount; }
+    void add_balance(double amount) { account_balance_ += amount; }
+
     // Getters
     int consecutive_losses() const { return consecutive_losses_; }
     double daily_pnl() const { return daily_pnl_; }

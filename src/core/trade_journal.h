@@ -43,11 +43,16 @@ public:
     // 获取所有记录
     const std::vector<TradeRecord>& records() const { return records_; }
 
-    int total_trades() const { return static_cast<int>(records_.size()); }
-    int wins() const;
-    int losses() const;
+    int total_records() const { return static_cast<int>(records_.size()); }
+
+    // K 线级统计（按仓位分组，同一仓位的 TP 子记录 + 平仓记录汇总判断盈亏）
+    int candle_count() const;
+    int candle_wins() const;
+    int candle_losses() const;
+    double candle_win_rate() const;
+
+    // 总 P&L（每条记录各自的 pnl 之和，无重复计算）
     double total_pnl() const;
-    double win_rate() const;
 
 private:
     std::string path_;

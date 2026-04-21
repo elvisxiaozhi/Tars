@@ -8,7 +8,7 @@
 
     "strategy": {
         "mode": "dry_run",
-        "account_balance": 10.0,
+        "account_balance": 20.0,
         "poll_interval_sec": 5,
         "min_net_profit_pct": 0.5,
         "max_trade_size_usdc": 100.0,

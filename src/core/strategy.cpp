@@ -132,12 +132,7 @@ ExitSignal Strategy::evaluate_exit(
 
     ExitSignal exit;
 
-    // §六 最后10分钟特殊处理
-    if (minutes_remaining <= 10) {
-        return evaluate_last_10min(pos, current_contract_price, minutes_remaining);
-    }
-
-    // §五.1 价格止损：从入场价下跌 ≥ 50%
+    // §五.1 价格止损：从入场价下跌 ≥ 50%（优先于时间止损，防止跳空超额亏损）
     double loss_pct = (pos.entry_price - current_contract_price) / pos.entry_price;
     if (loss_pct >= 0.50) {
         exit.should_exit = true;
@@ -150,7 +145,10 @@ ExitSignal Strategy::evaluate_exit(
         return exit;
     }
 
-    // §五.2 时间止损：剩余 ≤ 10分钟 → 在 evaluate_last_10min 处理
+    // §六 最后10分钟特殊处理（价格止损未触发才走这里）
+    if (minutes_remaining <= 10) {
+        return evaluate_last_10min(pos, current_contract_price, minutes_remaining);
+    }
 
     return exit;  // should_exit = false
 }
