@@ -6,3 +6,12 @@ build-xcode/
 logs/
 keystore.enc
 .env
+
+# Local Claude Code settings (per-developer permissions)
+.claude/settings.local.json
+
+# Real config (may contain proxy/wallet/API keys) — use config.example.json as template
+config/config.json
+
+# Trading analysis docs with real P&L data
+docs/analysis-*.md
