@@ -1,6 +1,8 @@
 #include <chrono>
 #include <csignal>
+#include <ctime>
 #include <filesystem>
+#include <map>
 #include <mutex>
 #include <thread>
 
@@ -65,6 +67,46 @@ static UpDownQuotes extract_quotes(const polymarket::MarketEntry& entry) {
 static int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+// 获取当前 ET 小时和星期（简化版：UTC-5）
+static void get_et_time(int& hour_et, int& day_of_week) {
+    auto now_t = std::chrono::system_clock::now();
+    std::time_t tt = std::chrono::system_clock::to_time_t(now_t);
+    std::tm tm_utc;
+    gmtime_r(&tt, &tm_utc);
+    // ET ≈ UTC-5（DST 时 UTC-4，差 1h 对分析够用）
+    int total_hours = tm_utc.tm_hour - 5;
+    if (total_hours < 0) {
+        total_hours += 24;
+        // 跨天：星期减一
+        day_of_week = (tm_utc.tm_wday + 6) % 7;  // 前一天
+    } else {
+        day_of_week = tm_utc.tm_wday;
+    }
+    hour_et = total_hours;
+}
+
+// 将 analytics 字段从 Position 填充到 TradeRecord
+static void fill_analytics(polymarket::TradeRecord& rec,
+                           const polymarket::Position& pos,
+                           const polymarket::BtcMarketData& btc) {
+    rec.max_price = pos.max_price;
+    rec.min_price = (pos.min_price > 1e8) ? pos.entry_price : pos.min_price;
+    rec.btc_price_at_exit = btc.current_price;
+    rec.btc_deviation_at_exit = (btc.current_price - pos.btc_strike_at_entry)
+                                 / pos.btc_strike_at_entry * 100.0;
+    rec.spread_at_entry = pos.spread_at_entry;
+    rec.ask_depth_at_entry = pos.ask_depth_at_entry;
+    rec.hour_et = pos.hour_et;
+    rec.day_of_week = pos.day_of_week;
+    rec.consec_wins_before = pos.consec_wins_before;
+    rec.consec_losses_before = pos.consec_losses_before;
+    rec.balance_before = pos.balance_before;
+    rec.hold_duration_sec = static_cast<int>((now_ms() - pos.entry_time) / 1000);
+    double mfe_range = pos.max_price - pos.entry_price;
+    rec.mfe_capture_rate = (mfe_range > 0.001)
+        ? (rec.exit_price - pos.entry_price) / mfe_range : 0;
 }
 
 // === 共享状态（策略线程写，API 线程读） ===
@@ -168,6 +210,10 @@ int main(int argc, char* argv[]) {
             pj["remaining_pct"] = p.shares_remaining_pct;
             pj["entry_time"] = p.entry_time;
             pj["market"] = p.market_question;
+            pj["max_price"] = p.max_price;
+            pj["min_price"] = (p.min_price > 1e8) ? p.entry_price : p.min_price;
+            pj["mfe"] = p.max_price - p.entry_price;
+            pj["mae"] = p.entry_price - ((p.min_price > 1e8) ? p.entry_price : p.min_price);
             pos_arr.push_back(pj);
         }
         j["positions"] = pos_arr;
@@ -194,6 +240,20 @@ int main(int argc, char* argv[]) {
             j["btc_deviation"] = t.btc_deviation_pct;
             j["vol"] = t.entry_vol;
             j["minutes_remaining"] = t.minutes_remaining_at_entry;
+            // Analytics
+            j["max_price"] = t.max_price;
+            j["min_price"] = t.min_price;
+            j["btc_price_at_exit"] = t.btc_price_at_exit;
+            j["btc_deviation_at_exit"] = t.btc_deviation_at_exit;
+            j["spread_at_entry"] = t.spread_at_entry;
+            j["ask_depth_at_entry"] = t.ask_depth_at_entry;
+            j["hour_et"] = t.hour_et;
+            j["day_of_week"] = t.day_of_week;
+            j["consec_wins_before"] = t.consec_wins_before;
+            j["consec_losses_before"] = t.consec_losses_before;
+            j["balance_before"] = t.balance_before;
+            j["hold_duration_sec"] = t.hold_duration_sec;
+            j["mfe_capture_rate"] = t.mfe_capture_rate;
             arr.push_back(j);
         }
         return arr.dump();
@@ -208,6 +268,304 @@ int main(int argc, char* argv[]) {
         j["total_pnl"] = journal.total_pnl();
         j["win_rate"] = journal.candle_win_rate() * 100.0;
         j["daily_pnl"] = state.daily_pnl;
+        return j.dump();
+    });
+
+    api.on_analytics([&]() -> std::string {
+        const auto& recs = journal.records();
+        json j;
+
+        if (recs.empty()) {
+            j["has_data"] = false;
+            return j.dump();
+        }
+        j["has_data"] = true;
+
+        // MFE/MAE 统计
+        double sum_mfe = 0, sum_mae = 0, max_mfe = 0;
+        int mfe_count = 0;
+        // 持仓时长
+        int sum_dur = 0, min_dur = 999999, max_dur = 0;
+        // 出场原因分布
+        std::map<std::string, int> exit_reasons;
+        // 小时热力图
+        std::map<int, std::pair<int, double>> hour_stats;  // hour -> {count, sum_pnl}
+        // 星期统计
+        std::map<int, std::pair<int, double>> day_stats;
+        // Spread: win vs lose
+        double spread_win_sum = 0, spread_lose_sum = 0;
+        int spread_win_n = 0, spread_lose_n = 0;
+        // 连亏后表现
+        double consec_loss_pnl_sum = 0;
+        int consec_loss_n = 0;
+        double consec_ok_pnl_sum = 0;
+        int consec_ok_n = 0;
+        // MFE 捕获率
+        double capture_sum = 0, capture_win_sum = 0, capture_lose_sum = 0;
+        int capture_n = 0, capture_win_n = 0, capture_lose_n = 0;
+        // 利润因子
+        double gross_profit = 0, gross_loss = 0;
+        // TP + 出场计数
+        int tp0_hits = 0, tp1_hits = 0, tp2_hits = 0, trailing_hits = 0;
+        double trailing_pnl_sum = 0, stop_price_pnl_sum = 0;
+        int stop_price_count = 0;
+        // 蜡烛级聚合
+        struct CandleAgg { std::string side; double pnl=0; double entry_price=0;
+                           double btc_dev=0; int duration=0; };
+        std::map<std::string, CandleAgg> candle_agg;
+        // 资金曲线
+        json equity_arr = json::array();
+
+        for (const auto& t : recs) {
+            double mfe = t.max_price - t.entry_price;
+            double mae = t.entry_price - t.min_price;
+            sum_mfe += mfe;
+            sum_mae += mae;
+            if (mfe > max_mfe) max_mfe = mfe;
+            mfe_count++;
+
+            int dur = t.hold_duration_sec;
+            sum_dur += dur;
+            if (dur < min_dur) min_dur = dur;
+            if (dur > max_dur) max_dur = dur;
+
+            exit_reasons[t.exit_reason]++;
+
+            if (t.hour_et >= 0) {
+                hour_stats[t.hour_et].first++;
+                hour_stats[t.hour_et].second += t.realized_pnl;
+            }
+            if (t.day_of_week >= 0) {
+                day_stats[t.day_of_week].first++;
+                day_stats[t.day_of_week].second += t.realized_pnl;
+            }
+
+            if (t.realized_pnl > 0) {
+                spread_win_sum += t.spread_at_entry;
+                spread_win_n++;
+            } else {
+                spread_lose_sum += t.spread_at_entry;
+                spread_lose_n++;
+            }
+
+            if (t.consec_losses_before >= 2) {
+                consec_loss_pnl_sum += t.realized_pnl;
+                consec_loss_n++;
+            } else {
+                consec_ok_pnl_sum += t.realized_pnl;
+                consec_ok_n++;
+            }
+
+            // MFE 捕获率
+            double mfe_range = t.max_price - t.entry_price;
+            double cap_rate = (mfe_range > 0.001) ? (t.exit_price - t.entry_price) / mfe_range : 0;
+            capture_sum += cap_rate; capture_n++;
+            if (t.realized_pnl > 0) { capture_win_sum += cap_rate; capture_win_n++; }
+            else { capture_lose_sum += cap_rate; capture_lose_n++; }
+
+            // 利润因子
+            if (t.realized_pnl > 0) gross_profit += t.realized_pnl;
+            else gross_loss += std::abs(t.realized_pnl);
+
+            // TP / 出场类型计数
+            if (t.exit_reason == "tp0") tp0_hits++;
+            else if (t.exit_reason == "tp1") tp1_hits++;
+            else if (t.exit_reason == "tp2") tp2_hits++;
+            else if (t.exit_reason == "trailing_stop") { trailing_hits++; trailing_pnl_sum += t.realized_pnl; }
+            else if (t.exit_reason == "stop_price") { stop_price_pnl_sum += t.realized_pnl; stop_price_count++; }
+
+            // 蜡烛级聚合
+            {
+                std::string base_id = t.id;
+                auto tp_pos = base_id.find("-TP");
+                if (tp_pos != std::string::npos) base_id = base_id.substr(0, tp_pos);
+                auto& ca = candle_agg[base_id];
+                ca.pnl += t.realized_pnl;
+                if (ca.side.empty()) { ca.side = t.side; ca.entry_price = t.entry_price; ca.btc_dev = t.btc_deviation_pct; }
+                if (t.hold_duration_sec > ca.duration) ca.duration = t.hold_duration_sec;
+            }
+
+            // 资金曲线点
+            json eq;
+            eq["time"] = t.exit_time;
+            eq["balance"] = t.balance_before + t.realized_pnl;
+            equity_arr.push_back(eq);
+        }
+
+        // MFE/MAE
+        json mfe_mae;
+        mfe_mae["avg_mfe"] = mfe_count > 0 ? sum_mfe / mfe_count : 0;
+        mfe_mae["avg_mae"] = mfe_count > 0 ? sum_mae / mfe_count : 0;
+        mfe_mae["max_mfe"] = max_mfe;
+        mfe_mae["ratio"] = (sum_mae > 0) ? sum_mfe / sum_mae : 0;
+        j["mfe_mae"] = mfe_mae;
+
+        // 持仓时长
+        json duration;
+        duration["avg"] = mfe_count > 0 ? sum_dur / mfe_count : 0;
+        duration["min"] = min_dur < 999999 ? min_dur : 0;
+        duration["max"] = max_dur;
+        j["duration"] = duration;
+
+        // 出场原因
+        json reasons = json::object();
+        for (const auto& [reason, count] : exit_reasons) {
+            reasons[reason] = count;
+        }
+        j["exit_reasons"] = reasons;
+
+        // 小时热力图
+        json hours = json::object();
+        for (int h = 0; h < 24; h++) {
+            auto it = hour_stats.find(h);
+            json hj;
+            hj["count"] = it != hour_stats.end() ? it->second.first : 0;
+            hj["total_pnl"] = it != hour_stats.end() ? it->second.second : 0;
+            hj["avg_pnl"] = (it != hour_stats.end() && it->second.first > 0)
+                             ? it->second.second / it->second.first : 0;
+            hours[std::to_string(h)] = hj;
+        }
+        j["hours"] = hours;
+
+        // 星期统计
+        const char* day_names[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+        json days = json::object();
+        for (int d = 0; d < 7; d++) {
+            auto it = day_stats.find(d);
+            json dj;
+            dj["count"] = it != day_stats.end() ? it->second.first : 0;
+            dj["total_pnl"] = it != day_stats.end() ? it->second.second : 0;
+            dj["avg_pnl"] = (it != day_stats.end() && it->second.first > 0)
+                             ? it->second.second / it->second.first : 0;
+            days[day_names[d]] = dj;
+        }
+        j["days"] = days;
+
+        // Spread 分析
+        json spread;
+        spread["avg_spread_winners"] = spread_win_n > 0 ? spread_win_sum / spread_win_n : 0;
+        spread["avg_spread_losers"] = spread_lose_n > 0 ? spread_lose_sum / spread_lose_n : 0;
+        j["spread"] = spread;
+
+        // 连亏后表现
+        json streak;
+        streak["after_2loss_avg_pnl"] = consec_loss_n > 0 ? consec_loss_pnl_sum / consec_loss_n : 0;
+        streak["after_2loss_count"] = consec_loss_n;
+        streak["normal_avg_pnl"] = consec_ok_n > 0 ? consec_ok_pnl_sum / consec_ok_n : 0;
+        streak["normal_count"] = consec_ok_n;
+        j["streak"] = streak;
+
+        // 资金曲线
+        j["equity_curve"] = equity_arr;
+
+        // === 蜡烛级分析 ===
+        int up_n=0, up_w=0, dn_n=0, dn_w=0;
+        double up_pnl=0, dn_pnl=0;
+        struct Bkt { int count=0; int wins=0; double sum_pnl=0; };
+        Bkt ep_bkt[4], btc_bkt[4], dur_bkt[4];
+        double sum_win_c=0, sum_loss_c=0;
+        int n_win_c=0, n_loss_c=0;
+
+        for (const auto& [id, ca] : candle_agg) {
+            bool w = ca.pnl > 0;
+            if (ca.side == "UP") { up_n++; if(w) up_w++; up_pnl += ca.pnl; }
+            else { dn_n++; if(w) dn_w++; dn_pnl += ca.pnl; }
+            if (w) { sum_win_c += ca.pnl; n_win_c++; }
+            else { sum_loss_c += ca.pnl; n_loss_c++; }
+
+            int epi = (ca.entry_price < 0.15) ? 0 : (ca.entry_price < 0.20) ? 1 : (ca.entry_price < 0.25) ? 2 : 3;
+            ep_bkt[epi].count++; if(w) ep_bkt[epi].wins++; ep_bkt[epi].sum_pnl += ca.pnl;
+
+            int bi = (ca.btc_dev < -0.3) ? 0 : (ca.btc_dev < 0) ? 1 : (ca.btc_dev < 0.3) ? 2 : 3;
+            btc_bkt[bi].count++; if(w) btc_bkt[bi].wins++; btc_bkt[bi].sum_pnl += ca.pnl;
+
+            int dm = ca.duration / 60;
+            int di = (dm < 15) ? 0 : (dm < 30) ? 1 : (dm < 45) ? 2 : 3;
+            dur_bkt[di].count++; if(w) dur_bkt[di].wins++; dur_bkt[di].sum_pnl += ca.pnl;
+        }
+
+        // Max drawdown
+        double peak_bal = 0, max_dd = 0;
+        for (const auto& eqp : equity_arr) {
+            double bal = eqp["balance"].get<double>();
+            if (bal > peak_bal) peak_bal = bal;
+            double dd = peak_bal - bal;
+            if (dd > max_dd) max_dd = dd;
+        }
+
+        int candle_total = static_cast<int>(candle_agg.size());
+        double avg_win = n_win_c > 0 ? sum_win_c / n_win_c : 0;
+        double avg_loss = n_loss_c > 0 ? sum_loss_c / n_loss_c : 0;
+
+        // 方向统计
+        json dir;
+        dir["UP"] = {{"count",up_n},{"wins",up_w},{"win_rate",up_n>0?up_w*100.0/up_n:0},
+                     {"avg_pnl",up_n>0?up_pnl/up_n:0},{"total_pnl",up_pnl}};
+        dir["DOWN"] = {{"count",dn_n},{"wins",dn_w},{"win_rate",dn_n>0?dn_w*100.0/dn_n:0},
+                       {"avg_pnl",dn_n>0?dn_pnl/dn_n:0},{"total_pnl",dn_pnl}};
+        j["direction"] = dir;
+
+        // MFE 捕获率
+        json mfe_cap;
+        mfe_cap["avg"] = capture_n > 0 ? capture_sum / capture_n : 0;
+        mfe_cap["avg_winners"] = capture_win_n > 0 ? capture_win_sum / capture_win_n : 0;
+        mfe_cap["avg_losers"] = capture_lose_n > 0 ? capture_lose_sum / capture_lose_n : 0;
+        j["mfe_capture"] = mfe_cap;
+
+        // TP 触发率（基于蜡烛数）
+        json tp;
+        tp["tp0"] = {{"count",tp0_hits},{"pct",candle_total>0?tp0_hits*100.0/candle_total:0}};
+        tp["tp1"] = {{"count",tp1_hits},{"pct",candle_total>0?tp1_hits*100.0/candle_total:0}};
+        tp["tp2"] = {{"count",tp2_hits},{"pct",candle_total>0?tp2_hits*100.0/candle_total:0}};
+        tp["trailing_stop"] = {{"count",trailing_hits},{"pct",candle_total>0?trailing_hits*100.0/candle_total:0}};
+        j["tp_hit_rates"] = tp;
+
+        // 核心指标
+        j["profit_factor"] = gross_loss > 0 ? gross_profit / gross_loss : 0;
+        j["max_drawdown"] = max_dd;
+        j["max_drawdown_pct"] = peak_bal > 0 ? max_dd / peak_bal * 100 : 0;
+        j["ev_per_trade"] = candle_total > 0 ? journal.total_pnl() / candle_total : 0;
+        j["avg_win"] = avg_win;
+        j["avg_loss"] = avg_loss;
+        j["win_loss_ratio"] = avg_loss != 0 ? std::abs(avg_win / avg_loss) : 0;
+
+        // Trailing stop 效果
+        json ts;
+        ts["count"] = trailing_hits;
+        ts["avg_pnl"] = trailing_hits > 0 ? trailing_pnl_sum / trailing_hits : 0;
+        ts["stop_price_avg_pnl"] = stop_price_count > 0 ? stop_price_pnl_sum / stop_price_count : 0;
+        j["trailing_stop_stats"] = ts;
+
+        // 入场价分桶
+        const char* ep_labels[] = {"0-15c","15-20c","20-25c","25-30c"};
+        json ep_j = json::object();
+        for (int i = 0; i < 4; i++) {
+            ep_j[ep_labels[i]] = {{"count",ep_bkt[i].count},{"wins",ep_bkt[i].wins},
+                {"win_rate",ep_bkt[i].count>0?ep_bkt[i].wins*100.0/ep_bkt[i].count:0},
+                {"avg_pnl",ep_bkt[i].count>0?ep_bkt[i].sum_pnl/ep_bkt[i].count:0}};
+        }
+        j["entry_price_buckets"] = ep_j;
+
+        // BTC 偏移分桶
+        const char* btc_labels[] = {"<-0.3%","-0.3~0%","0~+0.3%",">+0.3%"};
+        json btc_j = json::object();
+        for (int i = 0; i < 4; i++) {
+            btc_j[btc_labels[i]] = {{"count",btc_bkt[i].count},{"wins",btc_bkt[i].wins},
+                {"win_rate",btc_bkt[i].count>0?btc_bkt[i].wins*100.0/btc_bkt[i].count:0},
+                {"avg_pnl",btc_bkt[i].count>0?btc_bkt[i].sum_pnl/btc_bkt[i].count:0}};
+        }
+        j["btc_deviation_buckets"] = btc_j;
+
+        // 持仓时长分桶
+        const char* dur_labels[] = {"0-15m","15-30m","30-45m","45-60m"};
+        json dur_j = json::object();
+        for (int i = 0; i < 4; i++) {
+            dur_j[dur_labels[i]] = {{"count",dur_bkt[i].count},{"wins",dur_bkt[i].wins},
+                {"win_rate",dur_bkt[i].count>0?dur_bkt[i].wins*100.0/dur_bkt[i].count:0},
+                {"avg_pnl",dur_bkt[i].count>0?dur_bkt[i].sum_pnl/dur_bkt[i].count:0}};
+        }
+        j["duration_buckets"] = dur_j;
+
         return j.dump();
     });
 
@@ -303,6 +661,31 @@ int main(int argc, char* argv[]) {
                         pos.minutes_remaining_at_entry = btc.minutes_remaining;
                         pos.tp_levels = strategy.compute_tp_levels(sig.entry_price);
 
+                        // Analytics: MFE/MAE 初始化
+                        pos.max_price = sig.entry_price;
+                        pos.min_price = sig.entry_price;
+
+                        // Analytics: 入场 spread + ask 深度
+                        if (sig.side == polymarket::Side::UP) {
+                            pos.spread_at_entry = quotes.up_ask - quotes.up_bid;
+                        } else {
+                            pos.spread_at_entry = quotes.down_ask - quotes.down_bid;
+                        }
+                        // ask 侧总挂单量
+                        auto ob_it = updated->order_books.find(sig.token_id);
+                        if (ob_it != updated->order_books.end()) {
+                            for (const auto& lvl : ob_it->second.asks)
+                                pos.ask_depth_at_entry += lvl.size;
+                        }
+
+                        // Analytics: 时间标签
+                        get_et_time(pos.hour_et, pos.day_of_week);
+
+                        // Analytics: 风控上下文
+                        pos.consec_wins_before = risk.consecutive_wins();
+                        pos.consec_losses_before = risk.consecutive_losses();
+                        pos.balance_before = risk.account_balance();
+
                         positions.push_back(pos);
                         risk.add_position();
                         risk.deduct_balance(size + fee);  // 动态余额：扣除成本+买入手续费
@@ -368,6 +751,7 @@ int main(int argc, char* argv[]) {
                     rec.exit_reason = "expired";
                     rec.realized_pnl = pnl;  // 只记本次卖出的 P&L，不是累积
                     rec.fee_paid = exit_fee + entry_fee_portion;
+                    fill_analytics(rec, pos, btc);
                     journal.record(rec);
                     continue;
                 }
@@ -384,6 +768,10 @@ int main(int argc, char* argv[]) {
                 }
                 if (current_price <= 0) continue;
                 pos.current_price = current_price;
+
+                // MFE/MAE 追踪
+                if (current_price > pos.max_price) pos.max_price = current_price;
+                if (current_price < pos.min_price) pos.min_price = current_price;
 
                 // 检查止盈
                 for (auto& tp : pos.tp_levels) {
@@ -429,6 +817,7 @@ int main(int argc, char* argv[]) {
                         tp_rec.exit_reason = "tp" + std::to_string(tp.tier);
                         tp_rec.realized_pnl = pnl;
                         tp_rec.fee_paid = exit_fee + entry_fee_portion;
+                        fill_analytics(tp_rec, pos, btc);
                         journal.record(tp_rec);
                     }
                 }
@@ -460,8 +849,9 @@ int main(int argc, char* argv[]) {
                     risk.remove_position();
                     risk.add_balance(sell_value - exit_fee);  // 动态余额：回收卖出收入
 
-                    // §三 止损后本场不再交易
-                    if (exit_sig.reason == "stop_price" || exit_sig.reason == "stop_time") {
+                    // §三 止损后本场不再交易（价格止损 / 时间止损 / 移动止盈回撤都算止损出场）
+                    if (exit_sig.reason == "stop_price" || exit_sig.reason == "stop_time" ||
+                        exit_sig.reason == "trailing_stop") {
                         risk.set_candle_stopped();
                         spdlog::warn("Candle stopped: {} triggered, no more trades this candle",
                                      exit_sig.reason);
@@ -495,6 +885,7 @@ int main(int argc, char* argv[]) {
                     rec.exit_reason = exit_sig.reason;
                     rec.realized_pnl = pnl;  // 只记本次卖出的 P&L，不是累积
                     rec.fee_paid = exit_fee + entry_fee_portion;
+                    fill_analytics(rec, pos, btc);
                     journal.record(rec);
                 }
             }

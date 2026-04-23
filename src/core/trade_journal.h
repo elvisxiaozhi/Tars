@@ -25,9 +25,24 @@ struct TradeRecord {
     double btc_deviation_pct = 0;
     double entry_vol = 0;
     double avg_vol = 0;
-    std::string exit_reason;     // "tp1"/"tp2"/"stop_price"/"stop_btc"/"stop_time"/"expired"
+    std::string exit_reason;     // "tp0"/"tp1"/"tp2"/"trailing_stop"/"stop_price"/"stop_time"/"expired"
     double realized_pnl = 0;
     double fee_paid = 0;
+
+    // Analytics
+    double max_price = 0;              // MFE: 持仓期间最高价
+    double min_price = 0;              // MAE: 持仓期间最低价
+    double btc_price_at_exit = 0;
+    double btc_deviation_at_exit = 0;  // (btc_exit - strike) / strike * 100
+    double spread_at_entry = 0;
+    double ask_depth_at_entry = 0;
+    int hour_et = -1;
+    int day_of_week = -1;
+    int consec_wins_before = 0;
+    int consec_losses_before = 0;
+    double balance_before = 0;
+    int hold_duration_sec = 0;
+    double mfe_capture_rate = 0;   // (exit-entry)/(max-entry)，出场效率
 };
 
 class TradeJournal {

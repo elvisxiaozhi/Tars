@@ -108,17 +108,19 @@ EntrySignal Strategy::evaluate_entry(
 }
 
 std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price) {
-    // §四 止盈规则（持有到期，高位减仓）
-    // 赢时合约趋向 $1，盈亏比 6:1，不过早卖出
+    // §四 止盈规则（三档减仓，中间档锁住 MFE 浮盈）
     std::vector<TakeProfitLevel> levels;
 
-    // TP1：80¢ → 卖出50%
-    levels.push_back({1, 0.80, 0.50, false});
+    // TP0：45¢ → 卖出30%（锁住中间浮盈，防止涨后全回吐）
+    levels.push_back({0, 0.45, 0.30, false});
+
+    // TP1：70¢ → 卖出剩余的 ~43%（即原始的 30%）
+    levels.push_back({1, 0.70, 3.0 / 7.0, false});
 
     // TP2：90¢ → 全部卖出
     levels.push_back({2, 0.90, 1.00, false});
 
-    spdlog::info("TP levels for entry={:.3f}: TP1=0.800(50%) TP2=0.900(100%)",
+    spdlog::info("TP levels for entry={:.3f}: TP0=0.450(30%) TP1=0.700(30%) TP2=0.900(rest)",
                  entry_price);
 
     return levels;
@@ -145,7 +147,36 @@ ExitSignal Strategy::evaluate_exit(
         return exit;
     }
 
-    // §六 最后10分钟特殊处理（价格止损未触发才走这里）
+    // §五.2 移动止盈（Trailing Stop）：基于 MFE 动态提升止损线
+    double mfe = pos.max_price - pos.entry_price;
+    if (mfe >= 0.25) {
+        // MFE ≥ +25¢：锁定 +10¢ 利润
+        double trailing_stop = pos.entry_price + 0.10;
+        if (current_contract_price <= trailing_stop) {
+            exit.should_exit = true;
+            exit.reason = "trailing_stop";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("TRAILING STOP (lock +10c): {} entry={:.3f} peak={:.3f} now={:.3f} stop={:.3f}",
+                         pos.market_question, pos.entry_price, pos.max_price,
+                         current_contract_price, trailing_stop);
+            return exit;
+        }
+    } else if (mfe >= 0.15) {
+        // MFE ≥ +15¢：保本止损
+        if (current_contract_price <= pos.entry_price) {
+            exit.should_exit = true;
+            exit.reason = "trailing_stop";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("TRAILING STOP (breakeven): {} entry={:.3f} peak={:.3f} now={:.3f}",
+                         pos.market_question, pos.entry_price, pos.max_price,
+                         current_contract_price);
+            return exit;
+        }
+    }
+
+    // §六 最后10分钟特殊处理（价格止损、移动止盈未触发才走这里）
     if (minutes_remaining <= 10) {
         return evaluate_last_10min(pos, current_contract_price, minutes_remaining);
     }

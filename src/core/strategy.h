@@ -51,8 +51,20 @@ struct Position {
     int minutes_remaining_at_entry = 0;
     std::vector<TakeProfitLevel> tp_levels;
     double shares_remaining_pct = 1.0;  // 剩余仓位比例
+
+    // --- Analytics fields ---
+    double max_price = 0;              // 持仓期间合约最高 bid
+    double min_price = 1e9;            // 持仓期间合约最低 bid
+    double spread_at_entry = 0;        // 入场时买卖价差
+    double ask_depth_at_entry = 0;     // 入场时 ask 侧总挂单量
+    int hour_et = -1;                  // 入场小时 (ET, 0-23)
+    int day_of_week = -1;             // 入场星期 (0=Sun..6=Sat)
+    int consec_wins_before = 0;        // 入场前连赢次数
+    int consec_losses_before = 0;      // 入场前连亏次数
+    double balance_before = 0;         // 入场前账户余额
+
     bool closed = false;
-    std::string close_reason;     // "tp1"/"tp2"/"tp3"/"tp4"/"stop_price"/"stop_btc"/"stop_time"/"expired"
+    std::string close_reason;     // "tp0"/"tp1"/"tp2"/"stop_price"/"trailing_stop"/"stop_btc"/"stop_time"/"expired"
     double realized_pnl = 0;
 };
 

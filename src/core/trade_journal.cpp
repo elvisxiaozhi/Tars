@@ -49,6 +49,21 @@ void TradeJournal::record(const TradeRecord& trade) {
     j["pnl"] = trade.realized_pnl;
     j["fee"] = trade.fee_paid;
 
+    // Analytics
+    j["max_price"] = trade.max_price;
+    j["min_price"] = trade.min_price;
+    j["btc_price_at_exit"] = trade.btc_price_at_exit;
+    j["btc_deviation_at_exit"] = trade.btc_deviation_at_exit;
+    j["spread_at_entry"] = trade.spread_at_entry;
+    j["ask_depth_at_entry"] = trade.ask_depth_at_entry;
+    j["hour_et"] = trade.hour_et;
+    j["day_of_week"] = trade.day_of_week;
+    j["consec_wins_before"] = trade.consec_wins_before;
+    j["consec_losses_before"] = trade.consec_losses_before;
+    j["balance_before"] = trade.balance_before;
+    j["hold_duration_sec"] = trade.hold_duration_sec;
+    j["mfe_capture_rate"] = trade.mfe_capture_rate;
+
     std::ofstream f(path_, std::ios::app);
     if (f.is_open()) {
         f << j.dump() << "\n";

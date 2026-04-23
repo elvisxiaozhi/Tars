@@ -17,6 +17,7 @@ struct ApiServer::Impl {
     ApiDataCallback status_cb;
     ApiDataCallback trades_cb;
     ApiDataCallback stats_cb;
+    ApiDataCallback analytics_cb;
     std::string dashboard_html;
 
     http::response<http::string_body>
@@ -35,6 +36,9 @@ struct ApiServer::Impl {
         }
         if (target == "/api/stats" && stats_cb) {
             return make_response(http::status::ok, stats_cb(), "application/json");
+        }
+        if (target == "/api/analytics" && analytics_cb) {
+            return make_response(http::status::ok, analytics_cb(), "application/json");
         }
 
         return make_response(http::status::not_found, R"({"error":"not found"})", "application/json");
@@ -75,6 +79,7 @@ ApiServer::~ApiServer() { stop(); }
 void ApiServer::on_status(ApiDataCallback cb) { impl_->status_cb = std::move(cb); }
 void ApiServer::on_trades(ApiDataCallback cb) { impl_->trades_cb = std::move(cb); }
 void ApiServer::on_stats(ApiDataCallback cb) { impl_->stats_cb = std::move(cb); }
+void ApiServer::on_analytics(ApiDataCallback cb) { impl_->analytics_cb = std::move(cb); }
 void ApiServer::set_dashboard_html(const std::string& html) { impl_->dashboard_html = html; }
 
 void ApiServer::start() {

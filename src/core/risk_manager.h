@@ -41,6 +41,7 @@ public:
 
     // Getters
     int consecutive_losses() const { return consecutive_losses_; }
+    int consecutive_wins() const { return consecutive_wins_; }
     double daily_pnl() const { return daily_pnl_; }
     int open_position_count() const { return open_positions_; }
 
@@ -55,6 +56,7 @@ private:
 
     int open_positions_ = 0;
     int consecutive_losses_ = 0;
+    int consecutive_wins_ = 0;
     int daily_trades_ = 0;
     double daily_pnl_ = 0;
     bool candle_stopped_ = false;  // 本场 K线 已止损，禁止再交易
