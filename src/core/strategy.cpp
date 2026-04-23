@@ -120,8 +120,8 @@ std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price) {
     // TP2：90¢ → 全部卖出
     levels.push_back({2, 0.90, 1.00, false});
 
-    spdlog::info("TP levels for entry={:.3f}: TP0=0.450(30%) TP1=0.700(30%) TP2=0.900(rest)",
-                 entry_price);
+    spdlog::debug("TP levels for entry={:.3f}: TP0=0.450(30%) TP1=0.700(30%) TP2=0.900(rest)",
+                  entry_price);
 
     return levels;
 }
@@ -202,8 +202,8 @@ ExitSignal Strategy::evaluate_last_10min(
                      current_contract_price, minutes_remaining);
     } else if (current_contract_price >= 0.80) {
         // 80¢以上：持有到期博 $1 结算
-        spdlog::info("HOLD TO EXPIRY: price={:.3f} >= 80¢, {}min left",
-                     current_contract_price, minutes_remaining);
+        spdlog::debug("HOLD TO EXPIRY: price={:.3f} >= 80¢, {}min left",
+                      current_contract_price, minutes_remaining);
     }
     // 20-80¢：继续按止盈规则走
 

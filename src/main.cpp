@@ -593,8 +593,9 @@ int main(int argc, char* argv[]) {
 
             market_feed.fetch_markets();
             if (market_feed.market_count() == 0) {
-                spdlog::info("No active BTC 1h markets, waiting...");
-                std::this_thread::sleep_for(std::chrono::seconds(poll_sec));
+                spdlog::info("#{} | No active markets, waiting 30s...", state.tick_count);
+                for (int i = 0; i < 30 && g_running; i++)
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
                 continue;
             }
 
@@ -624,10 +625,10 @@ int main(int argc, char* argv[]) {
                 last_up_ask = quotes.up_ask;
                 last_down_ask = quotes.down_ask;
 
-                spdlog::info("Market: {} | Up: {:.3f}/{:.3f} | Down: {:.3f}/{:.3f}",
-                             entry.market.question,
-                             quotes.up_bid, quotes.up_ask,
-                             quotes.down_bid, quotes.down_ask);
+                spdlog::debug("Market: {} | Up: {:.3f}/{:.3f} | Down: {:.3f}/{:.3f}",
+                              entry.market.question,
+                              quotes.up_bid, quotes.up_ask,
+                              quotes.down_bid, quotes.down_ask);
 
                 auto sig = strategy.evaluate_entry(
                     btc, quotes.up_ask, quotes.down_ask,
@@ -695,7 +696,7 @@ int main(int argc, char* argv[]) {
                                      (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
                                      pos.entry_price, size, shares, fee, risk.account_balance());
                     } else {
-                        spdlog::info("Signal blocked by risk: {}", risk_reject);
+                        spdlog::debug("Signal blocked: {}", risk_reject);
                     }
                 } else if (!sig.reject_reason.empty()) {
                     spdlog::debug("No signal: {}", sig.reject_reason);
@@ -906,9 +907,41 @@ int main(int argc, char* argv[]) {
             spdlog::error("Strategy loop error: {}", e.what());
         }
 
-        spdlog::info("--- tick #{}, {} open positions, Up ask={:.3f}, Down ask={:.3f}, waiting {}s ---",
-                     state.tick_count, positions.size(), last_up_ask, last_down_ask, poll_sec);
-        for (int i = 0; i < poll_sec && g_running; i++) {
+        // 动态轮询间隔：最后10分钟 5s，有持仓 10s，空闲 15s
+        int sleep_sec;
+        {
+            std::lock_guard<std::mutex> lock(state.mu);
+            int mins = state.btc.minutes_remaining;
+            if (mins <= 10) {
+                sleep_sec = 5;
+            } else if (!positions.empty()) {
+                sleep_sec = 10;
+            } else {
+                sleep_sec = 15;
+            }
+
+            // 紧凑状态行
+            if (positions.empty()) {
+                spdlog::info("#{} | {}min | BTC ${:.0f} {:+.2f}% | Up {:.2f} Dn {:.2f} | idle | ${:.2f} | {}s",
+                             state.tick_count, mins,
+                             state.btc.current_price, state.btc.deviation_pct,
+                             last_up_ask, last_down_ask,
+                             risk.account_balance(), sleep_sec);
+            } else {
+                for (const auto& p : positions) {
+                    double chg_pct = p.entry_price > 0 ? (p.current_price - p.entry_price) / p.entry_price * 100 : 0;
+                    spdlog::info("#{} | {}min | BTC ${:.0f} {:+.2f}% | {} {} {:.2f}->{:.2f} {:+.0f}% MFE:{:.2f} rem:{:.0f}% | ${:.2f} | {}s",
+                                 state.tick_count, mins,
+                                 state.btc.current_price, state.btc.deviation_pct,
+                                 p.id, (p.side == polymarket::Side::UP ? "UP" : "DN"),
+                                 p.entry_price, p.current_price, chg_pct,
+                                 p.max_price, p.shares_remaining_pct * 100,
+                                 risk.account_balance(), sleep_sec);
+                }
+            }
+        }
+
+        for (int i = 0; i < sleep_sec && g_running; i++) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }

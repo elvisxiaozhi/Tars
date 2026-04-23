@@ -47,8 +47,8 @@ void RiskManager::record_loss(double amount) {
     consecutive_wins_ = 0;
     daily_trades_++;
 
-    spdlog::info("RISK: loss ${:.2f} | daily P&L: ${:.2f} | consecutive losses: {}",
-                 amount, daily_pnl_, consecutive_losses_);
+    spdlog::debug("RISK: loss ${:.2f} | daily_pnl=${:.2f} | consec_loss={}",
+                  amount, daily_pnl_, consecutive_losses_);
 }
 
 void RiskManager::record_profit(double amount) {
@@ -57,8 +57,8 @@ void RiskManager::record_profit(double amount) {
     consecutive_wins_++;
     daily_trades_++;
 
-    spdlog::info("RISK: profit ${:.2f} | daily P&L: ${:.2f} | streak reset",
-                 amount, daily_pnl_);
+    spdlog::debug("RISK: profit ${:.2f} | daily_pnl=${:.2f}",
+                  amount, daily_pnl_);
 }
 
 void RiskManager::reset_daily() {
