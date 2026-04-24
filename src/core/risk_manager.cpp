@@ -6,7 +6,7 @@ namespace polymarket {
 
 RiskManager::RiskManager(const AppConfig& cfg)
     : account_balance_(cfg.strategy.account_balance)
-    , fixed_shares_(10.0)          // 固定 10 shares
+    , fixed_shares_(17.0)          // 固定 17 shares（每档 TP 最少 5 shares，免手续费）
     , max_concurrent_(1)           // 单仓制：最多 1 个持仓
 {}
 
@@ -37,7 +37,7 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
 }
 
 double RiskManager::compute_position_size() const {
-    // §三 固定 5 shares
+    // §三 固定 17 shares
     return fixed_shares_;
 }
 
