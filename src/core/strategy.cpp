@@ -150,14 +150,15 @@ ExitSignal Strategy::evaluate_exit(
     // §五.2 移动止盈（Trailing Stop）：基于 MFE 动态提升止损线
     double mfe = pos.max_price - pos.entry_price;
     if (mfe >= 0.25) {
-        // MFE ≥ +25¢：锁定 +10¢ 利润
-        double trailing_stop = pos.entry_price + 0.10;
+        // MFE ≥ +25¢：peak-based 止损 = max(peak - 15¢, entry + 10¢)
+        // 回吐超过峰值 15¢ 即离场；同时保底至少 +10¢ 利润
+        double trailing_stop = std::max(pos.max_price - 0.15, pos.entry_price + 0.10);
         if (current_contract_price <= trailing_stop) {
             exit.should_exit = true;
             exit.reason = "trailing_stop";
             exit.exit_price = current_contract_price;
             exit.use_market_order = true;
-            spdlog::warn("TRAILING STOP (lock +10c): {} entry={:.3f} peak={:.3f} now={:.3f} stop={:.3f}",
+            spdlog::warn("TRAILING STOP (peak-15c): {} entry={:.3f} peak={:.3f} now={:.3f} stop={:.3f}",
                          pos.market_question, pos.entry_price, pos.max_price,
                          current_contract_price, trailing_stop);
             return exit;
