@@ -69,18 +69,44 @@ static int64_t now_ms() {
         std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-// 获取当前 ET 小时和星期（简化版：UTC-5）
+// 判断给定 UTC 日期是否处于美国夏令时（3月第2周日 02:00 EST ~ 11月第1周日 02:00 EDT）
+static bool is_us_dst(int year, int month, int day, int utc_hour) {
+    if (month < 3 || month > 11) return false;
+    if (month > 3 && month < 11) return true;
+    // 计算给定月份第 1 天是星期几
+    std::tm t = {};
+    t.tm_year = year - 1900;
+    t.tm_mon = month - 1;
+    t.tm_mday = 1;
+    t.tm_hour = 12;
+    std::mktime(&t);
+    int first_sunday = 1 + (7 - t.tm_wday) % 7;
+    if (month == 3) {
+        int dst_start = first_sunday + 7;  // 第2个周日
+        if (day > dst_start) return true;
+        if (day < dst_start) return false;
+        return utc_hour >= 7;  // 02:00 EST = 07:00 UTC
+    } else {  // November
+        int dst_end = first_sunday;  // 第1个周日
+        if (day < dst_end) return true;
+        if (day > dst_end) return false;
+        return utc_hour < 6;  // 02:00 EDT = 06:00 UTC
+    }
+}
+
+// 获取当前 ET 小时和星期（自动判断 DST：EDT=UTC-4 / EST=UTC-5）
 static void get_et_time(int& hour_et, int& day_of_week) {
     auto now_t = std::chrono::system_clock::now();
     std::time_t tt = std::chrono::system_clock::to_time_t(now_t);
     std::tm tm_utc;
     gmtime_r(&tt, &tm_utc);
-    // ET ≈ UTC-5（DST 时 UTC-4，差 1h 对分析够用）
-    int total_hours = tm_utc.tm_hour - 5;
+    bool dst = is_us_dst(tm_utc.tm_year + 1900, tm_utc.tm_mon + 1,
+                         tm_utc.tm_mday, tm_utc.tm_hour);
+    int offset = dst ? 4 : 5;
+    int total_hours = tm_utc.tm_hour - offset;
     if (total_hours < 0) {
         total_hours += 24;
-        // 跨天：星期减一
-        day_of_week = (tm_utc.tm_wday + 6) % 7;  // 前一天
+        day_of_week = (tm_utc.tm_wday + 6) % 7;  // 跨天：星期减一
     } else {
         day_of_week = tm_utc.tm_wday;
     }
@@ -311,7 +337,8 @@ int main(int argc, char* argv[]) {
         int stop_price_count = 0;
         // 蜡烛级聚合
         struct CandleAgg { std::string side; double pnl=0; double entry_price=0;
-                           double btc_dev=0; int duration=0; };
+                           double btc_dev=0; int duration=0;
+                           int hour_et=-1; int day_of_week=-1; };
         std::map<std::string, CandleAgg> candle_agg;
         // 资金曲线
         json equity_arr = json::array();
@@ -330,15 +357,6 @@ int main(int argc, char* argv[]) {
             if (dur > max_dur) max_dur = dur;
 
             exit_reasons[t.exit_reason]++;
-
-            if (t.hour_et >= 0) {
-                hour_stats[t.hour_et].first++;
-                hour_stats[t.hour_et].second += t.realized_pnl;
-            }
-            if (t.day_of_week >= 0) {
-                day_stats[t.day_of_week].first++;
-                day_stats[t.day_of_week].second += t.realized_pnl;
-            }
 
             if (t.realized_pnl > 0) {
                 spread_win_sum += t.spread_at_entry;
@@ -383,6 +401,8 @@ int main(int argc, char* argv[]) {
                 ca.pnl += t.realized_pnl;
                 if (ca.side.empty()) { ca.side = t.side; ca.entry_price = t.entry_price; ca.btc_dev = t.btc_deviation_pct; }
                 if (t.hold_duration_sec > ca.duration) ca.duration = t.hold_duration_sec;
+                if (ca.hour_et < 0 && t.hour_et >= 0) { ca.hour_et = t.hour_et; }
+                if (ca.day_of_week < 0 && t.day_of_week >= 0) { ca.day_of_week = t.day_of_week; }
             }
 
             // 资金曲线点
@@ -390,6 +410,18 @@ int main(int argc, char* argv[]) {
             eq["time"] = t.exit_time;
             eq["balance"] = t.balance_before + t.realized_pnl;
             equity_arr.push_back(eq);
+        }
+
+        // 按蜡烛聚合 hour/day 统计（避免 TP0+TP1+TP2 被重复计数）
+        for (const auto& [id, ca] : candle_agg) {
+            if (ca.hour_et >= 0) {
+                hour_stats[ca.hour_et].first++;
+                hour_stats[ca.hour_et].second += ca.pnl;
+            }
+            if (ca.day_of_week >= 0) {
+                day_stats[ca.day_of_week].first++;
+                day_stats[ca.day_of_week].second += ca.pnl;
+            }
         }
 
         // MFE/MAE
