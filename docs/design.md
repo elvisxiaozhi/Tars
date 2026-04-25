@@ -379,10 +379,11 @@ net_profit = gross_spread
            - gas_fee (Polygon 链上操作，极低 ~$0.01)
 ```
 
-Polymarket 当前费用结构：
-- Maker: 0%
-- Taker: ~2%（按月成交量阶梯递减）
-- Polygon gas: 通常 < $0.01
+Polymarket 当前费用结构（截至 2026-04，按 category 区分）：
+- Maker: **0%**（永不收费）
+- Taker: 按 category — Crypto **7.2%**、Sports 3%、Politics/Tech 1%、Geopolitics 0% 等
+- 公式：`fee = shares × rate × p × (1 - p)`（仅 taker 收）
+- Polygon gas: 通常 < $0.01/笔
 
 **套利可行性阈值：**
 
@@ -545,7 +546,7 @@ logging:
 ## 10. 风险与注意事项
 
 1. **套利窗口极短** — Polymarket 流动性集中，套利机会可能在毫秒内消失，需要接受大量"发现但未执行成功"的情况
-2. **Taker 费率侵蚀利润** — 2% 的 taker fee 意味着 gross spread < 4% 的互补套利不可行（两腿都吃 taker）
+2. **Taker 费率侵蚀利润** — Crypto category taker fee 为 7.2% × p × (1-p)（最高 1.8%/股 @ p=0.50），互补套利两腿都吃 taker 时门槛非常高；BTC 1h UP/DOWN 策略只入场用 maker 免费
 3. **API 限流** — CLOB API 有速率限制，需要合理控制请求频率
 4. **市场结算风险** — 持仓直到市场结算的时间成本（资金锁定）
 5. **私钥安全** — 本地管理私钥务必做好加密和权限控制
