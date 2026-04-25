@@ -613,6 +613,30 @@ int main(int argc, char* argv[]) {
     spdlog::info("Strategy loop: poll every {}s, account=${:.0f}, dashboard at http://localhost:{}",
                  poll_sec, cfg.strategy.account_balance, cfg.network.api_port);
 
+    // 拒绝原因聚合器：避免每个 tick 都打 reject 日志，每 10 次或 5 分钟汇总输出一行
+    struct RejectAggregator {
+        std::map<std::string, int> counts;
+        double dev_sum = 0;
+        int dev_n = 0;
+        int64_t last_flush_ms = 0;
+        int total() const {
+            int t = 0; for (auto& [k, v] : counts) t += v; return t;
+        }
+        void add(const std::string& reason, double dev_pct) {
+            std::string key = reason.substr(0, reason.find(':'));
+            counts[key]++;
+            if (key.rfind("btc_dev", 0) == 0) { dev_sum += dev_pct; dev_n++; }
+        }
+        bool should_flush(int64_t now_ms_) const {
+            if (counts.empty()) return false;
+            return total() >= 10 || (now_ms_ - last_flush_ms) >= 300000;
+        }
+        void reset(int64_t now_ms_) {
+            counts.clear(); dev_sum = 0; dev_n = 0; last_flush_ms = now_ms_;
+        }
+    } reject_agg;
+    reject_agg.last_flush_ms = now_ms();
+
     // === 策略主循环 ===
     double last_up_ask = 0, last_down_ask = 0;
     std::string last_market_slug;  // 跟踪市场切换，检测新 K线
@@ -741,7 +765,7 @@ int main(int argc, char* argv[]) {
                         spdlog::debug("Signal blocked: {}", risk_reject);
                     }
                 } else if (!sig.reject_reason.empty()) {
-                    spdlog::debug("No signal: {}", sig.reject_reason);
+                    reject_agg.add(sig.reject_reason, btc.deviation_pct);
                 }
             }
 
@@ -960,17 +984,37 @@ int main(int argc, char* argv[]) {
             spdlog::error("Strategy loop error: {}", e.what());
         }
 
-        // 动态轮询间隔：最后10分钟 5s，有持仓 10s，空闲 15s
+        // 动态轮询间隔：末10min 5s / 有仓 10s / 浅空闲 15s（dev 接近甜区）/ 深空闲 45s（dev 远离甜区）
         int sleep_sec;
         {
             std::lock_guard<std::mutex> lock(state.mu);
             int mins = state.btc.minutes_remaining;
+            double abs_dev = std::abs(state.btc.deviation_pct);
             if (mins <= 10) {
                 sleep_sec = 5;
             } else if (!positions.empty()) {
                 sleep_sec = 10;
+            } else if (abs_dev < 0.10) {
+                sleep_sec = 45;  // dev 远离 0.15% 阈值，节流
             } else {
-                sleep_sec = 15;
+                sleep_sec = 15;  // dev 在 [0.10, 0.15)，可能很快进甜区
+            }
+
+            // 拒绝聚合器周期性 flush
+            int64_t now = now_ms();
+            if (reject_agg.should_flush(now)) {
+                std::string s;
+                for (auto& [k, v] : reject_agg.counts) {
+                    if (!s.empty()) s += " ";
+                    s += k + "×" + std::to_string(v);
+                }
+                if (reject_agg.dev_n > 0) {
+                    spdlog::info("rejects ×{}: {} (avg dev={:+.3f}%)",
+                                 reject_agg.total(), s, reject_agg.dev_sum / reject_agg.dev_n);
+                } else {
+                    spdlog::info("rejects ×{}: {}", reject_agg.total(), s);
+                }
+                reject_agg.reset(now);
             }
 
             // 紧凑状态行
