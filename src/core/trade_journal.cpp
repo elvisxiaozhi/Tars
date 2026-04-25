@@ -63,6 +63,9 @@ void TradeJournal::record(const TradeRecord& trade) {
     j["balance_before"] = trade.balance_before;
     j["hold_duration_sec"] = trade.hold_duration_sec;
     j["mfe_capture_rate"] = trade.mfe_capture_rate;
+    j["mfe_at_5min"] = trade.mfe_at_5min;
+    j["mfe_at_10min"] = trade.mfe_at_10min;
+    j["mfe_at_15min"] = trade.mfe_at_15min;
 
     std::ofstream f(path_, std::ios::app);
     if (f.is_open()) {

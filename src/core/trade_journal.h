@@ -43,6 +43,10 @@ struct TradeRecord {
     double balance_before = 0;
     int hold_duration_sec = 0;
     double mfe_capture_rate = 0;   // (exit-entry)/(max-entry)，出场效率
+    // 入场后 N 分钟时间窗口内的最高价（观测字段，用于死水早退规则评估）
+    double mfe_at_5min = 0;
+    double mfe_at_10min = 0;
+    double mfe_at_15min = 0;
 };
 
 class TradeJournal {

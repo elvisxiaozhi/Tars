@@ -55,6 +55,10 @@ struct Position {
     // --- Analytics fields ---
     double max_price = 0;              // 持仓期间合约最高 bid
     double min_price = 1e9;            // 持仓期间合约最低 bid
+    // 入场后 N 分钟时间窗口内的最高价快照（用于死水早退规则的离线评估）
+    double mfe_at_5min = 0;
+    double mfe_at_10min = 0;
+    double mfe_at_15min = 0;
     double spread_at_entry = 0;        // 入场时买卖价差
     double ask_depth_at_entry = 0;     // 入场时 ask 侧总挂单量
     int hour_et = -1;                  // 入场小时 (ET, 0-23)

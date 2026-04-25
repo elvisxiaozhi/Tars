@@ -133,6 +133,9 @@ static void fill_analytics(polymarket::TradeRecord& rec,
     double mfe_range = pos.max_price - pos.entry_price;
     rec.mfe_capture_rate = (mfe_range > 0.001)
         ? (rec.exit_price - pos.entry_price) / mfe_range : 0;
+    rec.mfe_at_5min = pos.mfe_at_5min;
+    rec.mfe_at_10min = pos.mfe_at_10min;
+    rec.mfe_at_15min = pos.mfe_at_15min;
 }
 
 // === 共享状态（策略线程写，API 线程读） ===
@@ -697,6 +700,9 @@ int main(int argc, char* argv[]) {
                         // Analytics: MFE/MAE 初始化
                         pos.max_price = sig.entry_price;
                         pos.min_price = sig.entry_price;
+                        pos.mfe_at_5min = sig.entry_price;
+                        pos.mfe_at_10min = sig.entry_price;
+                        pos.mfe_at_15min = sig.entry_price;
 
                         // Analytics: 入场 spread + ask 深度
                         if (sig.side == polymarket::Side::UP) {
@@ -805,6 +811,15 @@ int main(int argc, char* argv[]) {
                 // MFE/MAE 追踪
                 if (current_price > pos.max_price) pos.max_price = current_price;
                 if (current_price < pos.min_price) pos.min_price = current_price;
+
+                // 时间窗口快照：入场后 ≤N 分钟时持续刷新，超过则冻结
+                int64_t elapsed_sec = (now_ms() - pos.entry_time) / 1000;
+                if (elapsed_sec <= 300 && current_price > pos.mfe_at_5min)
+                    pos.mfe_at_5min = current_price;
+                if (elapsed_sec <= 600 && current_price > pos.mfe_at_10min)
+                    pos.mfe_at_10min = current_price;
+                if (elapsed_sec <= 900 && current_price > pos.mfe_at_15min)
+                    pos.mfe_at_15min = current_price;
 
                 // 检查止盈
                 for (auto& tp : pos.tp_levels) {
