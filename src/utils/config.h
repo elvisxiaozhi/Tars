@@ -50,6 +50,14 @@ struct NetworkConfig {
     int api_port = 9090;    // 内嵌 dashboard HTTP 端口
 };
 
+// Polymarket 实际费率（截至 2026-04 docs.polymarket.com）：
+// maker 0%；Crypto category taker 7.2%；公式 fee = shares × rate × p × (1-p)
+struct FeeConfig {
+    double maker_fee_rate = 0.0;
+    double taker_fee_rate = 0.072;
+    double gas_per_tx_usdc = 0.0;
+};
+
 struct AppConfig {
     PolymarketConfig polymarket;
     StrategyConfig strategy;
@@ -57,6 +65,7 @@ struct AppConfig {
     LoggingConfig logging;
     WalletConfig wallet;
     NetworkConfig network;
+    FeeConfig fees;
 };
 
 // 从 JSON 文件加载配置

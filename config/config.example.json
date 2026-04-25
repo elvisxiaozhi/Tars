@@ -42,5 +42,11 @@
     "wallet": {
         "keystore_path": "./keystore.enc",
         "address": ""
+    },
+
+    "fees": {
+        "maker_fee_rate": 0.0,
+        "taker_fee_rate": 0.072,
+        "gas_per_tx_usdc": 0.0
     }
 }

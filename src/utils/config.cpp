@@ -103,6 +103,14 @@ AppConfig load_config(const std::string& path) {
         cfg.network.api_port = jint(n, "api_port", 9090);
     }
 
+    // fees
+    if (root.contains("fees")) {
+        auto& fe = root["fees"];
+        cfg.fees.maker_fee_rate = jdbl(fe, "maker_fee_rate", 0.0);
+        cfg.fees.taker_fee_rate = jdbl(fe, "taker_fee_rate", 0.072);
+        cfg.fees.gas_per_tx_usdc = jdbl(fe, "gas_per_tx_usdc", 0.0);
+    }
+
     return cfg;
 }
 

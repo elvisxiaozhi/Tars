@@ -36,8 +36,11 @@ static std::string find_config(const char* argv0) {
     return "config/config.json";
 }
 
-static double calc_fee(double shares, double price) {
-    return shares * 0.05 * price * (1.0 - price);
+// Polymarket 真实费率模型：maker 0%；Crypto taker 7.2% × p × (1-p)；额外 gas/tx
+static double calc_fee(double shares, double price, bool is_taker,
+                       const polymarket::FeeConfig& fees) {
+    double rate = is_taker ? fees.taker_fee_rate : fees.maker_fee_rate;
+    return shares * rate * price * (1.0 - price) + fees.gas_per_tx_usdc;
 }
 
 struct UpDownQuotes {
@@ -676,7 +679,8 @@ int main(int argc, char* argv[]) {
                     if (risk.can_open_position(sig, risk_reject)) {
                         double shares = risk.compute_position_size();  // 固定 5 shares
                         double size = shares * sig.entry_price;
-                        double fee = calc_fee(shares, sig.entry_price);
+                        // 入场是限价 ask-1¢ 挂单，maker 角色，免 trading fee
+                        double fee = calc_fee(shares, sig.entry_price, /*is_taker=*/false, cfg.fees);
 
                         polymarket::Position pos;
                         pos.id = "P" + std::to_string(next_position_id++);
@@ -747,13 +751,13 @@ int main(int argc, char* argv[]) {
 
                 auto updated = market_feed.get_market(pos.condition_id);
                 if (!updated) {
-                    // 市场已到期/被清理，强制平仓（模拟到期结算）
+                    // 市场已到期/被清理，强制平仓（模拟到期结算）：到期自动结算，无 taker 动作
                     double last_price = pos.current_price;
                     double remaining_shares = pos.shares * pos.shares_remaining_pct;
                     double sell_value = remaining_shares * last_price;
                     double cost_basis = remaining_shares * pos.entry_price;
-                    double exit_fee = calc_fee(remaining_shares, last_price);
-                    double entry_fee_portion = calc_fee(remaining_shares, pos.entry_price);
+                    double exit_fee = calc_fee(remaining_shares, last_price, /*is_taker=*/false, cfg.fees);
+                    double entry_fee_portion = calc_fee(remaining_shares, pos.entry_price, /*is_taker=*/false, cfg.fees);
                     double pnl = sell_value - cost_basis - exit_fee - entry_fee_portion;
 
                     pos.realized_pnl += pnl;
@@ -829,8 +833,9 @@ int main(int argc, char* argv[]) {
                         double sell_shares = pos.shares * tp.sell_pct * pos.shares_remaining_pct;
                         double sell_value = sell_shares * current_price;
                         double cost_basis = sell_shares * pos.entry_price;
-                        double exit_fee = calc_fee(sell_shares, current_price);
-                        double entry_fee_portion = calc_fee(sell_shares, pos.entry_price);
+                        // TP 卖单在 best_bid 价吃单，taker 角色；入场是 maker，按 0 费摊销
+                        double exit_fee = calc_fee(sell_shares, current_price, /*is_taker=*/true, cfg.fees);
+                        double entry_fee_portion = calc_fee(sell_shares, pos.entry_price, /*is_taker=*/false, cfg.fees);
                         double pnl = sell_value - cost_basis - exit_fee - entry_fee_portion;
 
                         pos.shares_remaining_pct -= tp.sell_pct * pos.shares_remaining_pct;
@@ -887,8 +892,9 @@ int main(int argc, char* argv[]) {
                     double remaining_shares = pos.shares * pos.shares_remaining_pct;
                     double sell_value = remaining_shares * exit_sig.exit_price;
                     double cost_basis = remaining_shares * pos.entry_price;
-                    double exit_fee = calc_fee(remaining_shares, exit_sig.exit_price);
-                    double entry_fee_portion = calc_fee(remaining_shares, pos.entry_price);
+                    // 止损/拖尾/时间止损都是吃 best_bid，taker；入场 maker
+                    double exit_fee = calc_fee(remaining_shares, exit_sig.exit_price, /*is_taker=*/true, cfg.fees);
+                    double entry_fee_portion = calc_fee(remaining_shares, pos.entry_price, /*is_taker=*/false, cfg.fees);
                     double pnl = sell_value - cost_basis - exit_fee - entry_fee_portion;
 
                     pos.realized_pnl += pnl;
