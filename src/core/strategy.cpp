@@ -42,8 +42,10 @@ EntrySignal Strategy::evaluate_entry(
     sig.condition_id = condition_id;
     sig.market_question = question;
 
-    // §一.1 时间窗口：剩余时间 > 30分钟
-    if (minutes_remaining <= 30) {
+    // §一.1 时间窗口：剩余时间 > 20 分钟
+    // 从 30→20 的依据：4-26 早间数据显示 BTC 波动集中在蜡烛末段，30 阈值屏蔽了 100% 的甜区机会
+    // 20 min 仍能承接 TP0（contract +20¢ 在 BTC 走方向时 5-10min 可达），但 TP1/TP2 命中率会降
+    if (minutes_remaining <= 20) {
         sig.reject_reason = "time_too_short: " + std::to_string(minutes_remaining) + "min left";
         return sig;
     }
