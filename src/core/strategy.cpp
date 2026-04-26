@@ -180,9 +180,10 @@ ExitSignal Strategy::evaluate_exit(
     }
 
     // §五.2 移动止盈（Trailing Stop）：基于 MFE 动态提升止损线
+    // Step 2.20：阈值从 +25/+15 降到 +15/+10，捕获低入场价（$0.10-$0.20）的相对涨幅
     double mfe = pos.max_price - pos.entry_price;
-    if (mfe >= 0.25) {
-        // MFE ≥ +25¢：peak-based 止损 = max(peak - 15¢, entry + 10¢)
+    if (mfe >= 0.15) {
+        // MFE ≥ +15¢：peak-based 止损 = max(peak - 15¢, entry + 10¢)
         // 回吐超过峰值 15¢ 即离场；同时保底至少 +10¢ 利润
         double trailing_stop = std::max(pos.max_price - 0.15, pos.entry_price + 0.10);
         if (current_contract_price <= trailing_stop) {
@@ -195,8 +196,8 @@ ExitSignal Strategy::evaluate_exit(
                          current_contract_price, trailing_stop);
             return exit;
         }
-    } else if (mfe >= 0.15) {
-        // MFE ≥ +15¢：保本止损
+    } else if (mfe >= 0.10) {
+        // MFE ≥ +10¢：保本止损
         if (current_contract_price <= pos.entry_price) {
             exit.should_exit = true;
             exit.reason = "trailing_stop";
