@@ -927,9 +927,9 @@ int main(int argc, char* argv[]) {
                     risk.remove_position();
                     risk.add_balance(sell_value - exit_fee);  // 动态余额：回收卖出收入
 
-                    // §三 止损后本场不再交易（价格止损 / 时间止损 / 移动止盈回撤都算止损出场）
+                    // §三 止损后本场不再交易（价格止损 / 时间止损 / 移动止盈回撤 / 死水早退都算止损出场）
                     if (exit_sig.reason == "stop_price" || exit_sig.reason == "stop_time" ||
-                        exit_sig.reason == "trailing_stop") {
+                        exit_sig.reason == "trailing_stop" || exit_sig.reason == "dead_water_exit") {
                         risk.set_candle_stopped();
                         spdlog::warn("Candle stopped: {} triggered, no more trades this candle",
                                      exit_sig.reason);

@@ -1,5 +1,6 @@
 #include "core/strategy.h"
 
+#include <chrono>
 #include <cmath>
 
 #include <spdlog/spdlog.h>
@@ -156,6 +157,24 @@ ExitSignal Strategy::evaluate_exit(
         exit.use_market_order = true;
         spdlog::warn("STOP LOSS (price): {} loss={:.1f}% entry={:.3f} now={:.3f}",
                      pos.market_question, loss_pct * 100,
+                     pos.entry_price, current_contract_price);
+        return exit;
+    }
+
+    // §五.1b 死水早退：入场 5 分钟后若 MFE 未达 +5¢，立即平仓
+    // 依据：4-26 P1 trip mfe5/10/15 全部 0.13（entry 0.10），最终亏 -$0.53；
+    // 实测显示 MFE 在 5 分钟后仍未启动的 trip 几乎不会反转，提前出场可减损
+    auto now_chrono = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    int64_t elapsed_sec = (now_chrono - pos.entry_time) / 1000;
+    double mfe_gain = pos.max_price - pos.entry_price;
+    if (elapsed_sec >= 300 && mfe_gain < 0.05) {
+        exit.should_exit = true;
+        exit.reason = "dead_water_exit";
+        exit.exit_price = current_contract_price;
+        exit.use_market_order = true;
+        spdlog::warn("DEAD WATER EXIT: {} elapsed={}s mfe_gain={:+.3f} entry={:.3f} now={:.3f}",
+                     pos.market_question, elapsed_sec, mfe_gain,
                      pos.entry_price, current_contract_price);
         return exit;
     }
