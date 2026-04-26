@@ -47,6 +47,10 @@ struct TradeRecord {
     double mfe_at_5min = 0;
     double mfe_at_10min = 0;
     double mfe_at_15min = 0;
+    // 各时间点 MFE_gain 占 entry 的比例（用于评估「死水阈值是否该按比例化」）
+    double mfe5_gain_pct = 0;   // (mfe_at_5min - entry) / entry
+    double mfe10_gain_pct = 0;
+    double mfe15_gain_pct = 0;
 };
 
 class TradeJournal {

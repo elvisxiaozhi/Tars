@@ -139,6 +139,11 @@ static void fill_analytics(polymarket::TradeRecord& rec,
     rec.mfe_at_5min = pos.mfe_at_5min;
     rec.mfe_at_10min = pos.mfe_at_10min;
     rec.mfe_at_15min = pos.mfe_at_15min;
+    if (pos.entry_price > 0) {
+        rec.mfe5_gain_pct  = (pos.mfe_at_5min  - pos.entry_price) / pos.entry_price;
+        rec.mfe10_gain_pct = (pos.mfe_at_10min - pos.entry_price) / pos.entry_price;
+        rec.mfe15_gain_pct = (pos.mfe_at_15min - pos.entry_price) / pos.entry_price;
+    }
 }
 
 // === 共享状态（策略线程写，API 线程读） ===

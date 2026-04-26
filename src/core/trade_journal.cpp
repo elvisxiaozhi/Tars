@@ -66,6 +66,9 @@ void TradeJournal::record(const TradeRecord& trade) {
     j["mfe_at_5min"] = trade.mfe_at_5min;
     j["mfe_at_10min"] = trade.mfe_at_10min;
     j["mfe_at_15min"] = trade.mfe_at_15min;
+    j["mfe5_gain_pct"] = trade.mfe5_gain_pct;
+    j["mfe10_gain_pct"] = trade.mfe10_gain_pct;
+    j["mfe15_gain_pct"] = trade.mfe15_gain_pct;
 
     std::ofstream f(path_, std::ios::app);
     if (f.is_open()) {
