@@ -51,17 +51,6 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
 
-    // §一.2 BTC 偏差过滤：基于 38 笔历史回测，|dev| < 0.15% 为亏损区，> 0.50% 为强趋势区
-    double abs_dev = std::abs(btc.deviation_pct);
-    if (abs_dev < 0.15) {
-        sig.reject_reason = "btc_dev_too_small: " + std::to_string(btc.deviation_pct) + "%";
-        return sig;
-    }
-    if (abs_dev > 0.50) {
-        sig.reject_reason = "btc_dev_too_large: " + std::to_string(btc.deviation_pct) + "%";
-        return sig;
-    }
-
     double max_price = max_entry_price(minutes_remaining);
     if (max_price <= 0) {
         sig.reject_reason = "no_entry_window";

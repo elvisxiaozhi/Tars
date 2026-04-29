@@ -989,20 +989,18 @@ int main(int argc, char* argv[]) {
             spdlog::error("Strategy loop error: {}", e.what());
         }
 
-        // 动态轮询间隔：末10min 5s / 有仓 10s / 浅空闲 15s（dev 接近甜区）/ 深空闲 45s（dev 远离甜区）
+        // 动态轮询间隔：末10min 5s / 有仓 10s / 空闲 15s
+        // 注：移除了甜区过滤，因此低 dev 也是有效信号区，不再做深空闲节流
         int sleep_sec;
         {
             std::lock_guard<std::mutex> lock(state.mu);
             int mins = state.btc.minutes_remaining;
-            double abs_dev = std::abs(state.btc.deviation_pct);
             if (mins <= 10) {
                 sleep_sec = 5;
             } else if (!positions.empty()) {
                 sleep_sec = 10;
-            } else if (abs_dev < 0.10) {
-                sleep_sec = 45;  // dev 远离 0.15% 阈值，节流
             } else {
-                sleep_sec = 15;  // dev 在 [0.10, 0.15)，可能很快进甜区
+                sleep_sec = 15;
             }
 
             // 拒绝聚合器周期性 flush
