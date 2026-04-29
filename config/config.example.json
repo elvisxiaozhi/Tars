@@ -48,5 +48,13 @@
         "maker_fee_rate": 0.0,
         "taker_fee_rate": 0.072,
         "gas_per_tx_usdc": 0.0
+    },
+
+    "polygon": {
+        "rpc_url": "https://polygon-rpc.com",
+        "chain_id": 137,
+        "usdc_address": "",
+        "ctf_address": "",
+        "exchange_address": ""
     }
 }

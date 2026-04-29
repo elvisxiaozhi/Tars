@@ -111,6 +111,16 @@ AppConfig load_config(const std::string& path) {
         cfg.fees.gas_per_tx_usdc = jdbl(fe, "gas_per_tx_usdc", 0.0);
     }
 
+    // polygon (live 模式必填，dry_run 可以全空)
+    if (root.contains("polygon")) {
+        auto& p = root["polygon"];
+        cfg.polygon.rpc_url = jstr(p, "rpc_url");
+        cfg.polygon.chain_id = jint(p, "chain_id", 137);
+        cfg.polygon.usdc_address = jstr(p, "usdc_address");
+        cfg.polygon.ctf_address = jstr(p, "ctf_address");
+        cfg.polygon.exchange_address = jstr(p, "exchange_address");
+    }
+
     return cfg;
 }
 

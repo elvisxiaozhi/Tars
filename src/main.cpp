@@ -178,6 +178,21 @@ int main(int argc, char* argv[]) {
     spdlog::info("polymarket-arb v0.3.0 [{}]",
                  cfg.strategy.mode == "live" ? "LIVE" : "DRY RUN");
 
+    // === Live 模式启动守卫（R1 阶段：拒启动） ===
+    // 实盘下单链路尚未实现（R2~R8 待开发）。在此之前，live 模式必须 fail-fast，
+    // 防止主循环跑到下单点时才崩溃、留下半开仓位。每完成一阶段，本守卫会逐步放宽。
+    if (cfg.strategy.mode == "live") {
+        spdlog::error("================================================================");
+        spdlog::error("LIVE MODE 暂未就绪（当前进度：R1 骨架）");
+        spdlog::error("");
+        spdlog::error("待完成：R2 钱包 / R3 链上读 / R4 EIP-712 / R5 CLOB 鉴权 /");
+        spdlog::error("        R6 approvals / R7 入场 / R8 出场 / R9 对账+应急平仓");
+        spdlog::error("");
+        spdlog::error("请将 config 中 strategy.mode 改回 \"dry_run\" 后再启动。");
+        spdlog::error("================================================================");
+        return 1;
+    }
+
     // 初始化模块
     polymarket::BinanceFeed binance(cfg.network.proxy_url);
     polymarket::MarketFeed market_feed(cfg);

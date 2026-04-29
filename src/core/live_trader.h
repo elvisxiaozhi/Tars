@@ -1,0 +1,84 @@
+#pragma once
+
+// LiveTrader：实盘下单/对账门面类
+//
+// 设计目标：把所有「真金白银」的副作用集中在一个类里，让 main.cpp 的策略主循环
+// 在 mode=="live" 时统一委托给本类，dry_run 路径完全不受影响。
+//
+// 实现进度（按 step 拆分）：
+//   R1 [当前]：骨架；所有方法 throw std::runtime_error("... not implemented (Rx pending)")
+//   R2：init_wallet / wallet_address —— keystore.enc 解密 + secp256k1 派生地址
+//   R3：read_chain_state —— Polygon eth_call 读 USDC/CTF/allowance
+//   R4：（无新方法，但 EIP-712 模块到位后 R5/R7/R8 才能实现）
+//   R5：ensure_clob_authenticated —— 用 EIP-712 签名调 CLOB /auth/api-key
+//   R6：check_approvals_sufficient —— 启动期校验 allowance 已到位
+//   R7：place_entry_order —— 入场限价单（maker, ask-1¢）
+//   R8：place_exit_order  —— 出场（partial TP 用 limit/market，止损用 market）
+//   R9：reconcile_on_startup / emergency_close_all —— 对账 + SIGINT 应急平仓
+
+#include <cstdint>
+#include <map>
+#include <string>
+#include <vector>
+
+#include "core/strategy.h"   // EntrySignal, Position
+#include "utils/config.h"
+
+namespace polymarket {
+
+// 单笔订单执行结果
+struct OrderResult {
+    bool success = false;
+    std::string order_id;          // CLOB 返回的订单 ID
+    double filled_shares = 0;      // 实际成交数量（可能 < 请求量）
+    double filled_avg_price = 0;   // 实际加权成交价
+    double fee_paid = 0;           // 实际收取的费用（USDC）
+    int64_t fill_time_ms = 0;
+    std::string error;             // 失败原因（success=false 时填）
+};
+
+// 链上状态快照（一次 read_chain_state 同步拿全套）
+struct ChainBalance {
+    double usdc = 0;
+    std::map<std::string, double> ctf_balances;  // token_id → shares
+    double allowance_usdc = 0;                   // USDC → CTFExchange 的授权额度
+    int64_t snapshot_ms = 0;
+};
+
+class LiveTrader {
+public:
+    explicit LiveTrader(const AppConfig& cfg);
+    ~LiveTrader();
+
+    // ===== 钱包（R2）=====
+    void init_wallet();
+    std::string wallet_address() const;
+
+    // ===== 链上读（R3）=====
+    ChainBalance read_chain_state(
+        const std::vector<std::string>& ctf_token_ids = {});
+
+    // ===== CLOB 鉴权（R5）=====
+    void ensure_clob_authenticated();
+    bool is_authenticated() const;
+
+    // ===== Approval 校验（R6）=====
+    bool check_approvals_sufficient(double min_usdc_allowance);
+
+    // ===== 下单（R7 / R8）=====
+    OrderResult place_entry_order(const EntrySignal& sig, double shares);
+    OrderResult place_exit_order(const Position& pos, double shares,
+                                 bool is_taker, const std::string& reason);
+
+    // ===== 启动对账 + 应急平仓（R9）=====
+    void reconcile_on_startup();
+    void emergency_close_all(const std::vector<Position>& positions);
+
+private:
+    const AppConfig& cfg_;
+    bool wallet_initialized_ = false;
+    bool clob_authenticated_ = false;
+    std::string address_;
+};
+
+}  // namespace polymarket

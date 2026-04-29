@@ -50,6 +50,16 @@ struct NetworkConfig {
     int api_port = 9090;    // 内嵌 dashboard HTTP 端口
 };
 
+// Live 交易所需的链上参数（mode=="live" 时强制要求；dry_run 不读）
+// 合约地址需用户从 docs.polymarket.com → "Contract Addresses" 填入
+struct PolygonConfig {
+    std::string rpc_url;            // e.g. "https://polygon-rpc.com"
+    int chain_id = 137;             // 137 = Polygon mainnet, 80002 = Amoy testnet
+    std::string usdc_address;       // USDC.e (Polymarket 计价币)
+    std::string ctf_address;        // ConditionalTokens (ERC-1155)
+    std::string exchange_address;   // CTFExchange（订单结算合约）
+};
+
 // Polymarket 实际费率（截至 2026-04 docs.polymarket.com）：
 // maker 0%；Crypto category taker 7.2%；公式 fee = shares × rate × p × (1-p)
 struct FeeConfig {
@@ -66,6 +76,7 @@ struct AppConfig {
     WalletConfig wallet;
     NetworkConfig network;
     FeeConfig fees;
+    PolygonConfig polygon;
 };
 
 // 从 JSON 文件加载配置
