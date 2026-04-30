@@ -183,6 +183,15 @@ void test_base64url() {
     uint8_t bytes_high[3] = {0xfb, 0xff, 0xbf};  // 标准 b64 = "-_-_"... 实测 "+/+/" 替换
     ASSERT_EQ(base64url_encode(bytes_high, 3), "-_-_", "edge bytes 0xfb/ff/bf → -_-_");
 
+    // padded=true 与 Python urlsafe_b64encode 行为一致（保留 '='）
+    auto enc_pad = [](const std::string& s) {
+        return base64url_encode(reinterpret_cast<const uint8_t*>(s.data()), s.size(), /*padded=*/true);
+    };
+    ASSERT_EQ(enc_pad("f"),      "Zg==",     "padded: f → Zg==");
+    ASSERT_EQ(enc_pad("fo"),     "Zm8=",     "padded: fo → Zm8=");
+    ASSERT_EQ(enc_pad("foo"),    "Zm9v",     "padded: foo → Zm9v (no pad needed)");
+    ASSERT_EQ(enc_pad("foobar"), "Zm9vYmFy", "padded: foobar → Zm9vYmFy");
+
     // 解码 round-trip
     ASSERT_EQ(b64u_dec_str("Zm9vYmFy"), "foobar", "decode foobar");
     ASSERT_EQ(b64u_dec_str("Zg"),       "f",      "decode 1-byte unpadded");
@@ -231,7 +240,8 @@ void test_build_hmac_l2() {
     auto expected_h = hmac_sha256(
         reinterpret_cast<const uint8_t*>("secret-key"), 10,
         reinterpret_cast<const uint8_t*>(msg.data()), msg.size());
-    std::string expected = base64url_encode(expected_h.data(), expected_h.size());
+    // build_hmac_l2 输出带 padding（与 py-clob-client 一致），KAT 期望也带
+    std::string expected = base64url_encode(expected_h.data(), expected_h.size(), /*padded=*/true);
 
     std::string got = build_hmac_l2(secret_b64, "1714478400", "GET", "/balance-allowance");
     ASSERT_EQ(got, expected, "L2 sig matches base64url(HMAC-SHA256(raw_secret, ts||method||path))");

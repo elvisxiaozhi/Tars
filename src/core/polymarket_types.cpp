@@ -76,7 +76,8 @@ std::string build_hmac_l2(const std::string& api_secret_b64,
     auto sig = hmac_sha256(key.data(), key.size(),
                            reinterpret_cast<const uint8_t*>(message.data()),
                            message.size());
-    return base64url_encode(sig.data(), sig.size());
+    // padded=true：与 py-clob-client 的 urlsafe_b64encode 行为对齐（保留 '=' padding）
+    return base64url_encode(sig.data(), sig.size(), /*padded=*/true);
 }
 
 Signature sign_clob_auth(const PrivateKey& key, const ClobAuthData& auth, uint64_t chain_id) {

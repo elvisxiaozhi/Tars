@@ -210,13 +210,19 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        // R6: Approval 校验（allowance proxy → CTFExchange 需 ≥ max_single_trade）
+        // R-V2.3: Polymarket cash balance（V2 vault ledger）
+        // V2 升级后用户资金不在链上 proxy 钱包里，必须经 /balance-allowance 读 pUSD 余额
         try {
-            trader.check_approvals_sufficient(cfg.risk.max_single_trade);
+            trader.read_polymarket_balance();
         } catch (const std::exception& e) {
-            spdlog::error("LIVE MODE: approval insufficient: {}", e.what());
+            spdlog::error("LIVE MODE: polymarket balance read failed: {}", e.what());
             return 1;
         }
+
+        // R6 (V1) 已废：V2 vault 模式没有 approve CTFExchange 的概念；
+        // R-V2.3 已读到 cash 余额；下一步 R-V2.5 改为 cash >= max_single_trade 的检查。
+        spdlog::warn("R6 (V1 approval check) skipped — V2 vault 模式无此概念，待 R-V2.5 替换");
+        return 1;  // 暂停在此，R7+ 实盘下单尚未做 V2 改造
 
         // R7-R9 尚未就绪
         spdlog::error("================================================================");

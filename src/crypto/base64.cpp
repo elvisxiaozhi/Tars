@@ -16,7 +16,7 @@ static int decode_char(char c) {
     return -1;
 }
 
-std::string base64url_encode(const uint8_t* data, size_t len) {
+std::string base64url_encode(const uint8_t* data, size_t len, bool padded) {
     std::string out;
     out.reserve((len + 2) / 3 * 4);
     size_t i = 0;
@@ -35,17 +35,19 @@ std::string base64url_encode(const uint8_t* data, size_t len) {
         uint32_t v = uint32_t(data[i]) << 16;
         out += URL_ALPHABET[(v >> 18) & 63];
         out += URL_ALPHABET[(v >> 12) & 63];
+        if (padded) out += "==";
     } else if (rem == 2) {
         uint32_t v = (uint32_t(data[i]) << 16) | (uint32_t(data[i + 1]) << 8);
         out += URL_ALPHABET[(v >> 18) & 63];
         out += URL_ALPHABET[(v >> 12) & 63];
         out += URL_ALPHABET[(v >>  6) & 63];
+        if (padded) out += "=";
     }
     return out;
 }
 
-std::string base64url_encode(const std::vector<uint8_t>& data) {
-    return base64url_encode(data.data(), data.size());
+std::string base64url_encode(const std::vector<uint8_t>& data, bool padded) {
+    return base64url_encode(data.data(), data.size(), padded);
 }
 
 std::vector<uint8_t> base64url_decode(const std::string& s) {

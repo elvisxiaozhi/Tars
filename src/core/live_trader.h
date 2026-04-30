@@ -46,6 +46,14 @@ struct ChainBalance {
     int64_t snapshot_ms = 0;
 };
 
+// V2 vault ledger 余额（GET /balance-allowance）。
+// V2 升级后用户的可用资金不在 proxy 钱包里，而是 ledger 数额，必须经此 API 读取。
+struct PolymarketBalance {
+    double  cash_pusd     = 0;  // pUSD 余额（USD 等价，6 decimals）
+    double  allowance     = 0;  // ledger 已授权给 exchange 的份额
+    int64_t snapshot_ms   = 0;
+};
+
 class LiveTrader {
 public:
     explicit LiveTrader(const AppConfig& cfg);
@@ -62,6 +70,10 @@ public:
     // ===== CLOB 鉴权（R5）=====
     void ensure_clob_authenticated();
     bool is_authenticated() const;
+
+    // ===== Polymarket V2 cash balance（R-V2.3）=====
+    // GET /balance-allowance（L2 HMAC）→ pUSD ledger 数额；V2 升级后必须经此读余额。
+    PolymarketBalance read_polymarket_balance();
 
     // ===== Approval 校验（R6）=====
     bool check_approvals_sufficient(double min_usdc_allowance);

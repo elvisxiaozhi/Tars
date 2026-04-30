@@ -230,6 +230,78 @@ bool LiveTrader::is_authenticated() const {
     return clob_authenticated_;
 }
 
+// ===== Polymarket V2 cash balance（R-V2.3）=====
+//
+// 流程：
+//   1. 用 R5 拿到的 api_secret 算 L2 HMAC 签名
+//   2. GET /balance-allowance?asset_type=COLLATERAL
+//   3. 解析 JSON {balance, allowance}（pUSD 6 decimals 字符串）
+//
+// 备注：V2 升级（2026-04-28）后用户资金不在链上 proxy 钱包，而是 vault ledger 数额，
+// 这是唯一能拿到 cash 余额的接口。R3 的 read_chain_state 仅作链上诊断。
+PolymarketBalance LiveTrader::read_polymarket_balance() {
+    if (!clob_authenticated_)
+        throw std::runtime_error("read_polymarket_balance: ensure_clob_authenticated first");
+
+    uint64_t ts        = static_cast<uint64_t>(std::time(nullptr));
+    std::string ts_str = std::to_string(ts);
+    std::string method = "GET";
+
+    // 关键：HMAC 签的 path **不带 query string**（py-clob-client-v2 行为）；
+    // query 走 URL 单独拼接，不参与签名
+    std::string path_for_sig = "/balance-allowance";
+    std::string query        = "?asset_type=COLLATERAL&signature_type=1";  // POLY_PROXY
+
+    std::string sig = build_hmac_l2(clob_secret_, ts_str, method, path_for_sig);
+
+    net::Headers headers = {
+        {"POLY_ADDRESS",    address_},
+        {"POLY_SIGNATURE",  sig},
+        {"POLY_TIMESTAMP",  ts_str},
+        {"POLY_API_KEY",    clob_api_key_},
+        {"POLY_PASSPHRASE", clob_passphrase_},
+    };
+
+    net::HttpClient http(15, cfg_.network.proxy_url);
+    std::string url = cfg_.polymarket.clob_rest_url + path_for_sig + query;
+    auto resp = http.get(url, headers);
+
+    if (resp.status_code != 200) {
+        throw std::runtime_error(
+            "read_polymarket_balance: HTTP " +
+            std::to_string(resp.status_code) + " body=" + resp.body);
+    }
+
+    spdlog::debug("POLY balance raw: {}", resp.body);
+
+    auto j = nlohmann::json::parse(resp.body);
+
+    // 字段名容错：V1/V2 可能是 string 也可能是 number；6 decimals 单位
+    auto parse_amount = [&](const char* key) -> double {
+        if (!j.contains(key)) return 0.0;
+        const auto& v = j.at(key);
+        if (v.is_string()) {
+            const auto& s = v.get_ref<const std::string&>();
+            if (s.empty()) return 0.0;
+            // 大整数字符串，6 decimals → double
+            return std::stod(s) / 1e6;
+        }
+        if (v.is_number()) return v.get<double>() / 1e6;
+        return 0.0;
+    };
+
+    PolymarketBalance bal;
+    bal.cash_pusd  = parse_amount("balance");
+    bal.allowance  = parse_amount("allowance");
+    bal.snapshot_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    spdlog::info("POLY: cash=${:.4f} pUSD  allowance=${:.4f}  (V2 vault ledger)",
+                 bal.cash_pusd, bal.allowance);
+
+    return bal;
+}
+
 // ===== Approval 校验（R6）=====
 //
 // 读链上最新 allowance（proxy → CTFExchange），与 min_usdc_allowance 比较。
