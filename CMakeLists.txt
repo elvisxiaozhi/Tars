@@ -32,11 +32,13 @@ add_subdirectory(third_party/spdlog)
 add_library(nlohmann_json INTERFACE)
 target_include_directories(nlohmann_json INTERFACE ${CMAKE_SOURCE_DIR}/third_party)
 
-# --- crypto 静态库（Keccak-256 + Web3 keystore + 后续 EIP-712） ---
+# --- crypto 静态库（Keccak-256 + Web3 keystore + EIP-712 + L2 HMAC 基建） ---
 add_library(polymarket_crypto STATIC
     src/crypto/keccak256.cpp
     src/crypto/wallet.cpp
     src/crypto/eip712.cpp
+    src/crypto/base64.cpp
+    src/crypto/hmac_sha256.cpp
 )
 target_include_directories(polymarket_crypto PUBLIC
     ${CMAKE_SOURCE_DIR}/src
@@ -85,7 +87,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 # --- 测试可执行文件 ---
-add_executable(test_crypto tests/test_crypto.cpp)
+add_executable(test_crypto
+    tests/test_crypto.cpp
+    src/core/polymarket_types.cpp  # build_hmac_l2 实现（base64+HMAC 集成测试）
+)
+target_include_directories(test_crypto PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_crypto PRIVATE polymarket_crypto)
 
 # test_chain: 验证 ChainClient + 真实 Polygon RPC（R3）

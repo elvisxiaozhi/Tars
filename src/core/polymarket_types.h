@@ -43,14 +43,33 @@ struct ClobAuthData {
 static const char* CLOB_AUTH_MESSAGE =
     "This message attests that I control the given wallet";
 
+// ── L2 HMAC API credentials ───────────────────────────────────────────────────
+// R5 拿到的三件套；read balance / place order 等 L2 端点都用它们。
+
+struct ApiCreds {
+    std::string api_key;         // GUID 风格
+    std::string api_secret;      // url-safe base64 编码的 HMAC key
+    std::string api_passphrase;  // 任意字符串
+};
+
 // ── Signing helpers ───────────────────────────────────────────────────────────
 
-// Sign a Polymarket limit order on CTFExchange (Polygon mainnet, chain 137).
+// Sign a Polymarket limit order on CTFExchange V2 (Polygon mainnet, chain 137).
 Signature sign_poly_order(const PrivateKey& key, const PolyOrder& order,
                           uint64_t chain_id = 137);
 
 // Sign CLOB API authentication on ClobAuthDomain.
 Signature sign_clob_auth(const PrivateKey& key, const ClobAuthData& auth,
                          uint64_t chain_id = 137);
+
+// Build POLY_SIGNATURE for L2 HMAC auth.
+// message = timestamp + method + request_path [+ body 单引号→双引号标准化]
+// secret 是 url-safe base64 字符串（HMAC key 的编码形式）
+// 返回 url-safe base64 的 HMAC-SHA256 签名（无 padding）
+std::string build_hmac_l2(const std::string& api_secret_b64,
+                          const std::string& timestamp,
+                          const std::string& method,
+                          const std::string& request_path,
+                          const std::string& body = "");
 
 }  // namespace polymarket

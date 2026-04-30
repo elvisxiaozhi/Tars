@@ -9,6 +9,9 @@
 #include <iostream>
 #include <string>
 
+#include "core/polymarket_types.h"
+#include "crypto/base64.h"
+#include "crypto/hmac_sha256.h"
 #include "crypto/keccak256.h"
 #include "crypto/wallet.h"
 
@@ -155,6 +158,92 @@ void test_hex_helpers() {
     ASSERT_TRUE(threw, "decode odd-length throws");
 }
 
+// ── Base64 URL-safe (RFC 4648 §5) ───────────────────────────────────────────
+static std::string b64u_str(const std::string& s) {
+    return base64url_encode(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+}
+static std::string b64u_dec_str(const std::string& s) {
+    auto b = base64url_decode(s);
+    return std::string(b.begin(), b.end());
+}
+
+void test_base64url() {
+    std::cout << "\n[test_base64url]\n";
+
+    // RFC 4648 test vectors（字母表替换 +/ → -_，无 padding）
+    ASSERT_EQ(b64u_str(""),       "",        "empty");
+    ASSERT_EQ(b64u_str("f"),      "Zg",      "f");
+    ASSERT_EQ(b64u_str("fo"),     "Zm8",     "fo");
+    ASSERT_EQ(b64u_str("foo"),    "Zm9v",    "foo");
+    ASSERT_EQ(b64u_str("foob"),   "Zm9vYg",  "foob");
+    ASSERT_EQ(b64u_str("fooba"),  "Zm9vYmE", "fooba");
+    ASSERT_EQ(b64u_str("foobar"), "Zm9vYmFy", "foobar");
+
+    // url-safe 字符（标准 base64 中的 + / 在此处分别为 - _）
+    uint8_t bytes_high[3] = {0xfb, 0xff, 0xbf};  // 标准 b64 = "-_-_"... 实测 "+/+/" 替换
+    ASSERT_EQ(base64url_encode(bytes_high, 3), "-_-_", "edge bytes 0xfb/ff/bf → -_-_");
+
+    // 解码 round-trip
+    ASSERT_EQ(b64u_dec_str("Zm9vYmFy"), "foobar", "decode foobar");
+    ASSERT_EQ(b64u_dec_str("Zg"),       "f",      "decode 1-byte unpadded");
+    ASSERT_EQ(b64u_dec_str("Zg=="),     "f",      "decode 1-byte with padding (tolerated)");
+}
+
+// ── HMAC-SHA256 (RFC 4231) ──────────────────────────────────────────────────
+static std::string hmac_hex(const std::string& key, const std::string& msg) {
+    auto h = hmac_sha256(reinterpret_cast<const uint8_t*>(key.data()), key.size(),
+                         reinterpret_cast<const uint8_t*>(msg.data()), msg.size());
+    return hex_encode(h);
+}
+
+void test_hmac_sha256() {
+    std::cout << "\n[test_hmac_sha256]\n";
+
+    // RFC 4231 Test Case 1
+    std::string key1(20, '\x0b');
+    ASSERT_EQ(hmac_hex(key1, "Hi There"),
+              "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7",
+              "RFC 4231 #1");
+
+    // RFC 4231 Test Case 2
+    ASSERT_EQ(hmac_hex("Jefe", "what do ya want for nothing?"),
+              "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
+              "RFC 4231 #2");
+
+    // RFC 4231 Test Case 4 (key & data > 20 bytes)
+    std::string key4;
+    for (int i = 1; i <= 25; ++i) key4 += static_cast<char>(i);
+    std::string data4(50, '\xcd');
+    ASSERT_EQ(hmac_hex(key4, data4),
+              "82558a389a443c0ea4cc819899f2083a85f0faa3e578f8077a2e3ff46729665b",
+              "RFC 4231 #4");
+}
+
+// ── L2 build_hmac_l2 集成 ────────────────────────────────────────────────────
+void test_build_hmac_l2() {
+    std::cout << "\n[test_build_hmac_l2]\n";
+
+    // 已知组合：secret 是 url-safe base64("secret-key")，期望签名 = base64url(HMAC-SHA256(raw_key, "1714478400GET/balance-allowance"))
+    std::string secret_b64 = b64u_str("secret-key");
+
+    // 直接对照算预期值
+    std::string msg = std::string("1714478400") + "GET" + "/balance-allowance";
+    auto expected_h = hmac_sha256(
+        reinterpret_cast<const uint8_t*>("secret-key"), 10,
+        reinterpret_cast<const uint8_t*>(msg.data()), msg.size());
+    std::string expected = base64url_encode(expected_h.data(), expected_h.size());
+
+    std::string got = build_hmac_l2(secret_b64, "1714478400", "GET", "/balance-allowance");
+    ASSERT_EQ(got, expected, "L2 sig matches base64url(HMAC-SHA256(raw_secret, ts||method||path))");
+
+    // body 中单引号要标准化为双引号（py-clob-client 怪癖）
+    std::string with_body = build_hmac_l2(
+        secret_b64, "1", "POST", "/order", "{'foo': 'bar'}");
+    std::string no_quote_body = build_hmac_l2(
+        secret_b64, "1", "POST", "/order", "{\"foo\": \"bar\"}");
+    ASSERT_EQ(with_body, no_quote_body, "body single→double quote normalized");
+}
+
 int main() {
     std::cout << "===== crypto unit tests =====\n\n";
 
@@ -162,6 +251,9 @@ int main() {
     test_keccak256();
     test_address_derivation();
     test_keystore_roundtrip();
+    test_base64url();
+    test_hmac_sha256();
+    test_build_hmac_l2();
 
     std::cout << "\n===== "
               << g_passed << " passed, " << g_failed << " failed =====\n";

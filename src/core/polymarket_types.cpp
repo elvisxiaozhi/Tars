@@ -2,7 +2,9 @@
 
 #include <vector>
 
+#include "crypto/base64.h"
 #include "crypto/eip712.h"
+#include "crypto/hmac_sha256.h"
 #include "crypto/wallet.h"
 
 namespace polymarket {
@@ -47,6 +49,34 @@ Signature sign_poly_order(const PrivateKey& key, const PolyOrder& order, uint64_
     auto ds     = eip712_domain_separator(domain);
     auto digest = eip712_encode(ds, sh);
     return eip712_sign(key, digest);
+}
+
+// L2 HMAC 签名 — 与 py-clob-client/signing/hmac.py 行为对齐：
+//   1. base64url-decode api_secret  → HMAC key
+//   2. message = ts || method || path  (+ body, body 中单引号 → 双引号)
+//   3. HMAC-SHA256(key, message)  → base64url-encode(no pad) = POLY_SIGNATURE
+std::string build_hmac_l2(const std::string& api_secret_b64,
+                          const std::string& timestamp,
+                          const std::string& method,
+                          const std::string& request_path,
+                          const std::string& body) {
+    auto key = base64url_decode(api_secret_b64);
+
+    std::string message;
+    message.reserve(timestamp.size() + method.size() + request_path.size() + body.size());
+    message.append(timestamp);
+    message.append(method);
+    message.append(request_path);
+    if (!body.empty()) {
+        std::string b = body;
+        for (auto& c : b) if (c == '\'') c = '"';
+        message.append(b);
+    }
+
+    auto sig = hmac_sha256(key.data(), key.size(),
+                           reinterpret_cast<const uint8_t*>(message.data()),
+                           message.size());
+    return base64url_encode(sig.data(), sig.size());
 }
 
 Signature sign_clob_auth(const PrivateKey& key, const ClobAuthData& auth, uint64_t chain_id) {
