@@ -3,14 +3,19 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 
+#include <json.hpp>
 #include <spdlog/spdlog.h>
 
+#include "core/polymarket_types.h"
+#include "crypto/eip712.h"
 #include "crypto/wallet.h"
 #include "net/chain_client.h"
+#include "net/http_client.h"
 
 namespace polymarket {
 
@@ -91,6 +96,7 @@ void LiveTrader::init_wallet() {
     }
 
     address_ = derived;
+    key_ = std::move(key);   // keep for R5/R7/R8 signing
     wallet_initialized_ = true;
     spdlog::info("init_wallet: OK, address={}", address_);
 }
@@ -161,8 +167,61 @@ ChainBalance LiveTrader::read_chain_state(const std::vector<std::string>& ctf_to
 }
 
 // ===== CLOB 鉴权（R5）=====
+//
+// 流程：
+//   1. 用当前时间戳 + nonce=0 构造 ClobAuthData，EIP-712 签名
+//   2. GET /auth/api-key（derive 已有 key）；404 时 POST（create new key）
+//   3. 解析 apiKey / secret / passphrase，存成员变量供 R7/R8 使用
+//
+// 幂等：已鉴权则直接返回（每次启动只调一次）
 void LiveTrader::ensure_clob_authenticated() {
-    throw std::runtime_error("LiveTrader::ensure_clob_authenticated not implemented (R5 pending)");
+    if (clob_authenticated_) return;
+    if (!wallet_initialized_)
+        throw std::runtime_error("ensure_clob_authenticated: call init_wallet first");
+
+    uint64_t ts = static_cast<uint64_t>(std::time(nullptr));
+
+    ClobAuthData auth;
+    auth.address   = address_;
+    auth.timestamp = ts;
+    auth.nonce     = 0;
+    auth.message   = CLOB_AUTH_MESSAGE;
+
+    Signature sig = sign_clob_auth(key_, auth,
+                                   static_cast<uint64_t>(cfg_.polymarket.chain_id));
+
+    net::Headers headers = {
+        {"POLY_ADDRESS",   address_},
+        {"POLY_SIGNATURE", sig.to_hex()},
+        {"POLY_TIMESTAMP", std::to_string(ts)},
+        {"POLY_NONCE",     "0"},
+    };
+
+    net::HttpClient http(15, cfg_.network.proxy_url);
+    std::string url = cfg_.polymarket.clob_rest_url + "/auth/api-key";
+
+    // GET = derive existing key（幂等，推荐）
+    auto resp = http.get(url, headers);
+
+    // 404 / 401 → key 不存在，改用 POST 创建
+    if (resp.status_code == 404 || resp.status_code == 401) {
+        spdlog::info("CLOB: no existing key (HTTP {}), creating new one", resp.status_code);
+        resp = http.post(url, "", headers);
+    }
+
+    if (resp.status_code != 200) {
+        throw std::runtime_error(
+            "ensure_clob_authenticated: CLOB HTTP " +
+            std::to_string(resp.status_code) + " body=" + resp.body);
+    }
+
+    auto j = nlohmann::json::parse(resp.body);
+    clob_api_key_    = j.at("apiKey").get<std::string>();
+    clob_secret_     = j.at("secret").get<std::string>();
+    clob_passphrase_ = j.at("passphrase").get<std::string>();
+
+    clob_authenticated_ = true;
+    spdlog::info("CLOB: authenticated, api_key={}...", clob_api_key_.substr(0, 8));
 }
 
 bool LiveTrader::is_authenticated() const {

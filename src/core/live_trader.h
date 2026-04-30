@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "core/strategy.h"   // EntrySignal, Position
+#include "crypto/wallet.h"   // PrivateKey
 #include "utils/config.h"
 
 namespace polymarket {
@@ -76,9 +77,17 @@ public:
 
 private:
     const AppConfig& cfg_;
-    bool wallet_initialized_ = false;
-    bool clob_authenticated_ = false;
-    std::string address_;
+
+    // R2: wallet
+    bool       wallet_initialized_ = false;
+    PrivateKey key_;            // stays alive after init_wallet for signing (R5/R7/R8)
+    std::string address_;       // EOA "0x…"
+
+    // R5: CLOB API credentials
+    bool        clob_authenticated_ = false;
+    std::string clob_api_key_;
+    std::string clob_secret_;
+    std::string clob_passphrase_;
 };
 
 }  // namespace polymarket

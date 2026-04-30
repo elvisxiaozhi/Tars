@@ -201,14 +201,22 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        // R5-R9 尚未就绪（R4 EIP-712 密码库已集成，无运行时守卫步骤）
+        // R5: CLOB API key 鉴权
+        try {
+            trader.ensure_clob_authenticated();
+        } catch (const std::exception& e) {
+            spdlog::error("LIVE MODE: CLOB auth failed: {}", e.what());
+            spdlog::error("提示：若 HTTP 401，检查 EIP-712 type string（ClobAuth address 字段类型）");
+            return 1;
+        }
+
+        // R6-R9 尚未就绪
         spdlog::error("================================================================");
-        spdlog::error("LIVE MODE 部分就绪（进度：R2 wallet + R3 chain + R4 EIP-712 OK）");
+        spdlog::error("LIVE MODE 部分就绪（R2 wallet + R3 chain + R4 EIP-712 + R5 CLOB OK）");
         spdlog::error("  EOA   {}", trader.wallet_address());
         spdlog::error("  Proxy {}", cfg.polymarket.proxy_address);
         spdlog::error("");
-        spdlog::error("待完成：R5 CLOB 鉴权 / R6 approvals /");
-        spdlog::error("        R7 入场 / R8 出场 / R9 对账+应急平仓");
+        spdlog::error("待完成：R6 approvals / R7 入场 / R8 出场 / R9 对账+应急平仓");
         spdlog::error("");
         spdlog::error("请将 config 中 strategy.mode 改回 \"dry_run\" 后再启动。");
         spdlog::error("================================================================");
