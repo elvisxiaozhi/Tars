@@ -60,6 +60,7 @@ set(SOURCES
     src/core/trade_journal.cpp
     src/core/live_trader.cpp
     src/net/api_server.cpp
+    src/net/chain_client.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -84,6 +85,22 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # --- 测试可执行文件 ---
 add_executable(test_crypto tests/test_crypto.cpp)
 target_link_libraries(test_crypto PRIVATE polymarket_crypto)
+
+# test_chain: 验证 ChainClient + 真实 Polygon RPC（R3）
+add_executable(test_chain
+    tests/test_chain.cpp
+    src/net/chain_client.cpp
+    src/net/http_client.cpp
+)
+target_include_directories(test_chain PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_chain PRIVATE
+    Boost::boost
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    nlohmann_json
+    spdlog::spdlog
+    pthread
+)
 
 # --- 一次性 CLI 工具 ---
 # import_key: 把明文私钥加密成 keystore.enc（R2b）

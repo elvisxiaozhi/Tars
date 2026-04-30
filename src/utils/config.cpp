@@ -49,6 +49,8 @@ AppConfig load_config(const std::string& path) {
         cfg.polymarket.clob_ws_url = jstr(p, "clob_ws_url", "wss://ws-subscriptions-clob.polymarket.com/ws/market");
         cfg.polymarket.gamma_api_url = jstr(p, "gamma_api_url", "https://gamma-api.polymarket.com");
         cfg.polymarket.chain_id = jint(p, "chain_id", 137);
+        cfg.polymarket.proxy_address = jstr(p, "proxy_address");
+        cfg.polymarket.api_address = jstr(p, "api_address");
     }
 
     // strategy
@@ -111,14 +113,28 @@ AppConfig load_config(const std::string& path) {
         cfg.fees.gas_per_tx_usdc = jdbl(fe, "gas_per_tx_usdc", 0.0);
     }
 
-    // polygon (live 模式必填，dry_run 可以全空)
+    // polygon (live 模式必填；rpc_urls 默认填一组公开免费节点；合约地址用 struct 默认值)
     if (root.contains("polygon")) {
-        auto& p = root["polygon"];
-        cfg.polygon.rpc_url = jstr(p, "rpc_url");
-        cfg.polygon.chain_id = jint(p, "chain_id", 137);
-        cfg.polygon.usdc_address = jstr(p, "usdc_address");
-        cfg.polygon.ctf_address = jstr(p, "ctf_address");
-        cfg.polygon.exchange_address = jstr(p, "exchange_address");
+        auto& pg = root["polygon"];
+        if (pg.contains("rpc_urls") && pg["rpc_urls"].is_array()) {
+            for (const auto& u : pg["rpc_urls"]) {
+                if (u.is_string()) cfg.polygon.rpc_urls.push_back(u.get<std::string>());
+            }
+        }
+        cfg.polygon.chain_id = jint(pg, "chain_id", 137);
+        cfg.polygon.usdc_e_address = jstr(pg, "usdc_e_address", cfg.polygon.usdc_e_address);
+        cfg.polygon.usdc_native_address = jstr(pg, "usdc_native_address", cfg.polygon.usdc_native_address);
+        cfg.polygon.ctf_address = jstr(pg, "ctf_address", cfg.polygon.ctf_address);
+        cfg.polygon.ctf_exchange = jstr(pg, "ctf_exchange", cfg.polygon.ctf_exchange);
+        cfg.polygon.neg_risk_exchange = jstr(pg, "neg_risk_exchange", cfg.polygon.neg_risk_exchange);
+        cfg.polygon.neg_risk_adapter = jstr(pg, "neg_risk_adapter", cfg.polygon.neg_risk_adapter);
+    }
+    if (cfg.polygon.rpc_urls.empty()) {
+        cfg.polygon.rpc_urls = {
+            "https://polygon-bor-rpc.publicnode.com",
+            "https://polygon.drpc.org",
+            "https://1rpc.io/matic"
+        };
     }
 
     return cfg;

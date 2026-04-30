@@ -181,7 +181,7 @@ int main(int argc, char* argv[]) {
 
     // === Live 模式启动守卫（渐进式放宽） ===
     // 每完成一阶段（R2/R3/.../R9）守卫会通过对应自检；之后未实现的阶段仍然 fail-fast。
-    // R2b 进度：钱包加载 OK；后续 R3-R9 仍未实现。
+    // R3 进度：钱包 + 链上读 OK；后续 R4-R9 仍未实现。
     if (cfg.strategy.mode == "live") {
         polymarket::LiveTrader trader(cfg);
 
@@ -193,13 +193,22 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        // R3-R9 尚未就绪
+        // R3: 链上读（USDC 余额 + allowance）
+        try {
+            trader.read_chain_state();
+        } catch (const std::exception& e) {
+            spdlog::error("LIVE MODE: chain read failed: {}", e.what());
+            return 1;
+        }
+
+        // R4-R9 尚未就绪
         spdlog::error("================================================================");
-        spdlog::error("LIVE MODE 部分就绪（进度：R2 wallet OK，address={}）",
-                      trader.wallet_address());
+        spdlog::error("LIVE MODE 部分就绪（进度：R2 wallet + R3 chain OK）");
+        spdlog::error("  EOA   {}", trader.wallet_address());
+        spdlog::error("  Proxy {}", cfg.polymarket.proxy_address);
         spdlog::error("");
-        spdlog::error("待完成：R3 链上读 / R4 EIP-712 / R5 CLOB 鉴权 /");
-        spdlog::error("        R6 approvals / R7 入场 / R8 出场 / R9 对账+应急平仓");
+        spdlog::error("待完成：R4 EIP-712 / R5 CLOB 鉴权 / R6 approvals /");
+        spdlog::error("        R7 入场 / R8 出场 / R9 对账+应急平仓");
         spdlog::error("");
         spdlog::error("请将 config 中 strategy.mode 改回 \"dry_run\" 后再启动。");
         spdlog::error("================================================================");

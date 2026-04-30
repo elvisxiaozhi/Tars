@@ -1,5 +1,7 @@
 #include "core/live_trader.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -8,6 +10,7 @@
 #include <spdlog/spdlog.h>
 
 #include "crypto/wallet.h"
+#include "net/chain_client.h"
 
 namespace polymarket {
 
@@ -100,8 +103,61 @@ std::string LiveTrader::wallet_address() const {
 }
 
 // ===== 链上读（R3）=====
-ChainBalance LiveTrader::read_chain_state(const std::vector<std::string>&) {
-    throw std::runtime_error("LiveTrader::read_chain_state not implemented (R3 pending)");
+//
+// 查询目标 = polymarket.proxy_address（持有 USDC + CTF 的代理钱包）
+// 一次性发出 4 个 eth_call：
+//   1. USDC.e .balanceOf(proxy)
+//   2. USDC native .balanceOf(proxy)
+//   3. USDC.e .allowance(proxy, CTFExchange)
+//   4. USDC native .allowance(proxy, CTFExchange)
+//
+// CTF 余额暂不查（需要先知道 token_ids；token_ids 由 strategy 在持仓时给出，
+// 当前空仓状态下没有查询对象）。R7+ 在下单后会用 ChainBalance.ctf_balances 字段。
+ChainBalance LiveTrader::read_chain_state(const std::vector<std::string>& ctf_token_ids) {
+    if (cfg_.polymarket.proxy_address.empty()) {
+        throw std::runtime_error(
+            "read_chain_state: polymarket.proxy_address is empty (live 模式必填)");
+    }
+    if (cfg_.polygon.rpc_urls.empty()) {
+        throw std::runtime_error("read_chain_state: polygon.rpc_urls is empty");
+    }
+
+    net::ChainClient chain(cfg_.polygon.rpc_urls, cfg_.network.proxy_url);
+
+    const auto& proxy = cfg_.polymarket.proxy_address;
+    const auto& exchange = cfg_.polygon.ctf_exchange;
+
+    ChainBalance bal;
+    bal.snapshot_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    // USDC.e + USDC native 余额
+    double usdc_e = net::ChainClient::decode_usdc6(
+        chain.eth_call(cfg_.polygon.usdc_e_address,
+                       net::ChainClient::encode_balance_of(proxy)));
+    double usdc_native = net::ChainClient::decode_usdc6(
+        chain.eth_call(cfg_.polygon.usdc_native_address,
+                       net::ChainClient::encode_balance_of(proxy)));
+    bal.usdc = usdc_e + usdc_native;
+
+    // Allowance：proxy → CTFExchange
+    double allowance_e = net::ChainClient::decode_usdc6(
+        chain.eth_call(cfg_.polygon.usdc_e_address,
+                       net::ChainClient::encode_allowance(proxy, exchange)));
+    double allowance_native = net::ChainClient::decode_usdc6(
+        chain.eth_call(cfg_.polygon.usdc_native_address,
+                       net::ChainClient::encode_allowance(proxy, exchange)));
+    bal.allowance_usdc = std::max(allowance_e, allowance_native);
+
+    spdlog::info("CHAIN: proxy={} | USDC.e=${:.4f} USDC.native=${:.4f} | "
+                 "allowance.e=${:.2f} allowance.native=${:.2f}",
+                 proxy, usdc_e, usdc_native, allowance_e, allowance_native);
+
+    if (!ctf_token_ids.empty()) {
+        spdlog::warn("read_chain_state: CTF balanceOfBatch not implemented yet (R7+)");
+    }
+
+    return bal;
 }
 
 // ===== CLOB 鉴权（R5）=====

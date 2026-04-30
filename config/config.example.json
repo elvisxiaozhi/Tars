@@ -3,7 +3,10 @@
         "clob_rest_url": "https://clob.polymarket.com",
         "clob_ws_url": "wss://ws-subscriptions-clob.polymarket.com/ws/market",
         "gamma_api_url": "https://gamma-api.polymarket.com",
-        "chain_id": 137
+        "chain_id": 137,
+        "_comment": "live 模式必填：proxy_address 在 polymarket.com Deposit 页能看到；api_address 在 Profile Settings 页",
+        "proxy_address": "",
+        "api_address": ""
     },
 
     "strategy": {
@@ -51,10 +54,8 @@
     },
 
     "polygon": {
-        "rpc_url": "https://polygon-rpc.com",
-        "chain_id": 137,
-        "usdc_address": "",
-        "ctf_address": "",
-        "exchange_address": ""
+        "_comment": "rpc_urls 留空 = 用代码内置默认（publicnode + drpc + 1rpc，按顺序 failover）；合约地址默认 = Polymarket 主网值，无需改",
+        "rpc_urls": [],
+        "chain_id": 137
     }
 }
