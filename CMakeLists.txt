@@ -32,6 +32,21 @@ add_subdirectory(third_party/spdlog)
 add_library(nlohmann_json INTERFACE)
 target_include_directories(nlohmann_json INTERFACE ${CMAKE_SOURCE_DIR}/third_party)
 
+# --- crypto 静态库（Keccak-256 + Web3 keystore + 后续 EIP-712） ---
+add_library(polymarket_crypto STATIC
+    src/crypto/keccak256.cpp
+    src/crypto/wallet.cpp
+)
+target_include_directories(polymarket_crypto PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${SECP256K1_INCLUDE}
+)
+target_link_libraries(polymarket_crypto PUBLIC
+    OpenSSL::Crypto
+    ${SECP256K1_LIB}
+    nlohmann_json
+)
+
 # --- 主程序源文件 ---
 set(SOURCES
     src/main.cpp
@@ -62,5 +77,10 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${SECP256K1_LIB}
     spdlog::spdlog
     nlohmann_json
+    polymarket_crypto
     pthread
 )
+
+# --- 测试可执行文件 ---
+add_executable(test_crypto tests/test_crypto.cpp)
+target_link_libraries(test_crypto PRIVATE polymarket_crypto)
