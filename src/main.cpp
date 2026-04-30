@@ -179,11 +179,14 @@ int main(int argc, char* argv[]) {
     spdlog::info("polymarket-arb v0.3.0 [{}]",
                  cfg.strategy.mode == "live" ? "LIVE" : "DRY RUN");
 
+    // LIVE 模式下持有的 trader（unique_ptr，main 作用域；mode==live 才创建）
+    std::unique_ptr<polymarket::LiveTrader> live_trader;
+
     // === Live 模式启动守卫（渐进式放宽） ===
     // 每完成一阶段（R2/R3/.../R9）守卫会通过对应自检；之后未实现的阶段仍然 fail-fast。
-    // R4 进度：EIP-712 密码库就绪（纯库，无守卫步骤）；R5-R9 仍未实现。
     if (cfg.strategy.mode == "live") {
-        polymarket::LiveTrader trader(cfg);
+        live_trader = std::make_unique<polymarket::LiveTrader>(cfg);
+        auto& trader = *live_trader;
 
         // R2: 钱包加载（解密 keystore.enc + 派生地址 + 与 cfg.wallet.address 比对）
         try {
@@ -274,16 +277,13 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // R-V2.6 (待) — 接入策略主循环 + SIGINT handler 接 emergency_close_all
         spdlog::warn("================================================================");
-        spdlog::warn("LIVE MODE 启动横幅就绪（R2-R5 + R-V2.3 + R9-V2 reconcile）");
+        spdlog::warn("LIVE MODE 启动守卫通过（R2-R5 + R-V2.3 + R9-V2）");
         spdlog::warn("  EOA   {}", trader.wallet_address());
         spdlog::warn("  Proxy {}", cfg.polymarket.proxy_address);
-        spdlog::warn("");
-        spdlog::warn("待完成：R-V2.6 主循环接入 + 真成交闭环");
-        spdlog::warn("Tip: --dry-test-order 可触发非真成交 dry test（需手动更新 token_id）");
+        spdlog::warn("  ⚠️  接入主循环：策略将真发 BUY/SELL 订单；SIGINT/SIGTERM 触发 emergency_close_all");
         spdlog::warn("================================================================");
-        return 1;
+        // 不再 return — 让主循环开始接收策略信号并真下单
     }
 
     // 初始化模块
@@ -866,6 +866,22 @@ int main(int argc, char* argv[]) {
                         pos.consec_losses_before = risk.consecutive_losses();
                         pos.balance_before = risk.account_balance();
 
+                        // R-V2.6: LIVE 模式真发 POST /order；失败则放弃这次入场
+                        if (live_trader) {
+                            try {
+                                auto r = live_trader->place_entry_order(sig, shares);
+                                if (!r.success) {
+                                    spdlog::error("LIVE BUY rejected: {} (skip this signal)", r.error);
+                                    continue;
+                                }
+                                spdlog::info("LIVE BUY ok order_id={}", r.order_id);
+                                // TODO: 限价 GTC 可能未立即 fill；先假设 fill。后续加 GET /data/order/<id> 轮询。
+                            } catch (const std::exception& e) {
+                                spdlog::error("LIVE BUY threw: {} (skip)", e.what());
+                                continue;
+                            }
+                        }
+
                         positions.push_back(pos);
                         risk.add_position();
                         risk.deduct_balance(size + fee);  // 动态余额：扣除成本+买入手续费
@@ -966,8 +982,27 @@ int main(int argc, char* argv[]) {
                 for (auto& tp : pos.tp_levels) {
                     if (tp.triggered) continue;
                     if (current_price >= tp.trigger_price) {
-                        tp.triggered = true;
                         double sell_shares = pos.shares * tp.sell_pct * pos.shares_remaining_pct;
+
+                        // R-V2.6: LIVE 模式先发 SELL；失败就 skip（不标 triggered，下个 tick 重试）
+                        if (live_trader) {
+                            try {
+                                auto r = live_trader->place_exit_order(
+                                    pos, sell_shares, current_price,
+                                    /*is_taker=*/true, "tp" + std::to_string(tp.tier));
+                                if (!r.success) {
+                                    spdlog::error("LIVE TP{} SELL rejected: {} (retry next tick)",
+                                                 tp.tier, r.error);
+                                    continue;
+                                }
+                                spdlog::info("LIVE TP{} SELL ok order_id={}", tp.tier, r.order_id);
+                            } catch (const std::exception& e) {
+                                spdlog::error("LIVE TP{} SELL threw: {} (retry)", tp.tier, e.what());
+                                continue;
+                            }
+                        }
+
+                        tp.triggered = true;
                         double sell_value = sell_shares * current_price;
                         double cost_basis = sell_shares * pos.entry_price;
                         // TP 卖单在 best_bid 价吃单，taker 角色；入场是 maker，按 0 费摊销
@@ -1027,6 +1062,24 @@ int main(int argc, char* argv[]) {
                 auto exit_sig = strategy.evaluate_exit(pos, current_price, btc, btc.minutes_remaining);
                 if (exit_sig.should_exit) {
                     double remaining_shares = pos.shares * pos.shares_remaining_pct;
+
+                    // R-V2.6: LIVE 模式先发 SELL；失败就 skip（保持仓位，下个 tick 重试 evaluate_exit）
+                    if (live_trader) {
+                        try {
+                            auto r = live_trader->place_exit_order(
+                                pos, remaining_shares, exit_sig.exit_price,
+                                /*is_taker=*/true, exit_sig.reason);
+                            if (!r.success) {
+                                spdlog::error("LIVE STOP SELL rejected: {} (retry next tick)", r.error);
+                                continue;
+                            }
+                            spdlog::info("LIVE STOP SELL ok order_id={}", r.order_id);
+                        } catch (const std::exception& e) {
+                            spdlog::error("LIVE STOP SELL threw: {} (retry)", e.what());
+                            continue;
+                        }
+                    }
+
                     double sell_value = remaining_shares * exit_sig.exit_price;
                     double cost_basis = remaining_shares * pos.entry_price;
                     // 止损/拖尾/时间止损都是吃 best_bid，taker；入场 maker
@@ -1155,6 +1208,18 @@ int main(int argc, char* argv[]) {
     }
 
     spdlog::info("Shutting down...");
+
+    // R-V2.6: SIGINT/SIGTERM 兜底 — 紧急平所有未平仓位（cancel open orders + SELL FOK）
+    if (live_trader && !positions.empty()) {
+        spdlog::warn("LIVE: triggering emergency_close_all on {} open position(s)",
+                     positions.size());
+        try {
+            live_trader->emergency_close_all(positions);
+        } catch (const std::exception& e) {
+            spdlog::error("emergency_close_all threw: {}", e.what());
+        }
+    }
+
     api.stop();
     journal.print_summary();
     spdlog::info("Done.");
