@@ -172,11 +172,19 @@ int main() {
              eip712_type_hash(
                  "ClobAuth(address address,string timestamp,uint256 nonce,string message)"));
 
-        EIP712Domain poly_domain{
-            "Polymarket CTF Exchange", "1", 137,
-            "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"};
-        info("Polymarket CTFExchange domain separator",
-             eip712_domain_separator(poly_domain));
+        // V2 Order typehash KAT — 必须 == ctf-exchange-v2/Structs.sol ORDER_TYPEHASH 常量
+        check("V2 Order typehash matches on-chain constant",
+              eip712_type_hash(
+                  "Order(uint256 salt,address maker,address signer,uint256 tokenId,"
+                  "uint256 makerAmount,uint256 takerAmount,uint8 side,uint8 signatureType,"
+                  "uint256 timestamp,bytes32 metadata,bytes32 builder)"),
+              "bb86318a2138f5fa8ae32fbe8e659f8fcf13cc6ae4014a707893055433818589");
+
+        EIP712Domain poly_domain_v2{
+            "Polymarket CTF Exchange", "2", 137,
+            "0xE111180000d2663C0091e4f400237545B87B996B"};
+        info("V2 Polymarket CTFExchange domain separator",
+             eip712_domain_separator(poly_domain_v2));
 
         EIP712Domain clob_domain{"ClobAuthDomain", "1", 137, ""};
         info("ClobAuthDomain separator", eip712_domain_separator(clob_domain));
@@ -191,16 +199,15 @@ int main() {
         PolyOrder order{};
         order.salt           = 12345678;
         order.maker          = "0xCD2a3d9F938E13CD947Ec05AbC7FE734Df8DD826";
-        order.taker          = "0x0000000000000000000000000000000000000000";
+        order.signer         = "0xCD2a3d9F938E13CD947Ec05AbC7FE734Df8DD826";  // EOA == maker for sigType=EOA
         order.token_id       =
             "52114319501245915516055106046884209969926127482827954674443846427813813222426";
-        order.maker_amount   = 5'000'000;  // $5.00 USDC
+        order.maker_amount   = 5'000'000;  // $5.00 pUSD
         order.taker_amount   = 5'000'000;  // 5.00 shares @ $1.00 implied
-        order.expiration     = 0;
-        order.nonce          = 0;
-        order.fee_rate_bps   = 0;
         order.side           = 0;  // BUY
         order.signature_type = 0;  // EOA
+        order.timestamp      = 1714478400000ULL;  // 固定 ms 便于复现
+        // metadata / builder 默认全 0
 
         auto sig = sign_poly_order(key, order);
         std::cout << "  sig: " << sig.to_hex() << "\n";
