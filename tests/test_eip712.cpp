@@ -190,31 +190,65 @@ int main() {
         info("ClobAuthDomain separator", eip712_domain_separator(clob_domain));
     }
 
-    // ── 5. sign_poly_order smoke test ─────────────────────────────────────────
-    std::cout << "\n[5] sign_poly_order smoke test\n";
+    // ── 5. sign_poly_order V2 KAT (vs py-clob-client-v2) ─────────────────────
+    // 黄金对照：tools/dry_sign.py 在固定输入下用 py-clob-client-v2 SDK 签出的真实签名。
+    // 输入：EOA priv = 0x000...001（→ 0x7E5F4552...），funder = proxy，BUY 10 shares @ $0.50
+    std::cout << "\n[5] sign_poly_order V2 KAT (matches py-clob-client-v2)\n";
     {
         auto key = PrivateKey::from_hex(
-            "9c22ff5f21f0b81b113e63f7db6da94fedef11b2119b4088b89664fb9a3cb658");
+            "0000000000000000000000000000000000000000000000000000000000000001");
 
         PolyOrder order{};
-        order.salt           = 12345678;
-        order.maker          = "0xCD2a3d9F938E13CD947Ec05AbC7FE734Df8DD826";
-        order.signer         = "0xCD2a3d9F938E13CD947Ec05AbC7FE734Df8DD826";  // EOA == maker for sigType=EOA
+        order.salt           = 348624930908ULL;
+        order.maker          = "0x356E4c0a80B5Ac2466B7a62A11B35e8DbC7d2196";
+        order.signer         = "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf";
         order.token_id       =
             "52114319501245915516055106046884209969926127482827954674443846427813813222426";
-        order.maker_amount   = 5'000'000;  // $5.00 pUSD
-        order.taker_amount   = 5'000'000;  // 5.00 shares @ $1.00 implied
-        order.side           = 0;  // BUY
-        order.signature_type = 0;  // EOA
-        order.timestamp      = 1714478400000ULL;  // 固定 ms 便于复现
+        order.maker_amount   = 5'000'000ULL;   // size × price × 1e6 = 10 × 0.5 × 1e6
+        order.taker_amount   = 10'000'000ULL;  // size × 1e6 = 10 × 1e6
+        order.side           = 0;              // BUY
+        order.signature_type = 1;              // POLY_PROXY
+        order.timestamp      = 1777568848108ULL;  // ms
         // metadata / builder 默认全 0
 
         auto sig = sign_poly_order(key, order);
-        std::cout << "  sig: " << sig.to_hex() << "\n";
-        if (sig.v == 27 || sig.v == 28) {
-            std::cout << "  [OK]   v = " << (int)sig.v << " (27 or 28)\n";
+        std::string got = sig.to_hex();
+        std::string expected_sig =
+            "0xfa1e8a63c7c23909290c67b5db3e8054ac1bbaf9edba9584c2f2021de9cd1d37"
+            "709ed5c1bb0c60d2c9f24b69c6937c34667a799380c1e4d4d33ac75240c4159d1c";
+
+        if (got == expected_sig) {
+            std::cout << "  [OK]   sig matches py-clob-client-v2 dry-sign output\n";
+            std::cout << "         " << got << "\n";
         } else {
-            std::cout << "  [FAIL] v = " << (int)sig.v << "\n";
+            std::cout << "  [FAIL] sig mismatch\n"
+                      << "         expected: " << expected_sig << "\n"
+                      << "         got:      " << got << "\n";
+            ++g_failures;
+        }
+
+        // ── polyorder_to_json KAT —— 紧凑 JSON 必须与 py-clob-client-v2 字节级一致 ──
+        std::string json = polyorder_to_json(order, sig);
+        std::string expected_json =
+            "{\"salt\":\"348624930908\","
+            "\"maker\":\"0x356E4c0a80B5Ac2466B7a62A11B35e8DbC7d2196\","
+            "\"signer\":\"0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf\","
+            "\"tokenId\":\"52114319501245915516055106046884209969926127482827954674443846427813813222426\","
+            "\"makerAmount\":\"5000000\","
+            "\"takerAmount\":\"10000000\","
+            "\"side\":0,"
+            "\"signatureType\":1,"
+            "\"timestamp\":\"1777568848108\","
+            "\"metadata\":\"0x0000000000000000000000000000000000000000000000000000000000000000\","
+            "\"builder\":\"0x0000000000000000000000000000000000000000000000000000000000000000\","
+            "\"expiration\":\"0\","
+            "\"signature\":\"0xfa1e8a63c7c23909290c67b5db3e8054ac1bbaf9edba9584c2f2021de9cd1d37709ed5c1bb0c60d2c9f24b69c6937c34667a799380c1e4d4d33ac75240c4159d1c\"}";
+        if (json == expected_json) {
+            std::cout << "  [OK]   compact JSON matches dry-sign output\n";
+        } else {
+            std::cout << "  [FAIL] JSON mismatch\n"
+                      << "         expected: " << expected_json << "\n"
+                      << "         got:      " << json << "\n";
             ++g_failures;
         }
     }

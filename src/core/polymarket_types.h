@@ -72,4 +72,12 @@ std::string build_hmac_l2(const std::string& api_secret_b64,
                           const std::string& request_path,
                           const std::string& body = "");
 
+// Serialize PolyOrder + signature → V2 POST /order compact JSON。
+// 字段顺序 / 类型与 py-clob-client-v2 dry-sign 输出严格一致（KAT 验证）：
+//   salt, maker, signer, tokenId, makerAmount, takerAmount,
+//   side, signatureType, timestamp, metadata, builder, expiration, signature
+// expiration 是 API body 字段（不参与 EIP-712 hash），默认 "0"（无过期）。
+std::string polyorder_to_json(const PolyOrder& order, const Signature& sig,
+                              const std::string& expiration_str = "0");
+
 }  // namespace polymarket

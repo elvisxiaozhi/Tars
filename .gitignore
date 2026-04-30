@@ -15,3 +15,8 @@ config/config.json
 
 # Trading analysis docs with real P&L data
 docs/analysis-*.md
+
+# Python venv（tools/dry_sign.py KAT 对照用）
+.venv/
+__pycache__/
+*.pyc
