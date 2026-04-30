@@ -245,12 +245,31 @@ int main(int argc, char* argv[]) {
                 spdlog::info("===== R-V2.5c auto-cancel =====");
                 bool cancelled = trader.cancel_order(result.order_id);
                 if (cancelled) {
-                    spdlog::info("  ✅ order cancelled");
+                    spdlog::info("  ✅ entry order cancelled");
                 } else {
                     spdlog::warn("  ⚠️  cancel failed — 请去 polymarket.com 手动取消");
                 }
             } else {
                 spdlog::error("R-V2.5b-live failed: {}", result.error);
+            }
+
+            // R-V2.5c-exit: 测试 SELL 链路 — limit SELL @ $0.99 远高于 mid
+            // 我们没持仓，可能 server reject "insufficient position"，但即使 reject
+            // 也证明 SELL 字段格式 + 签名正确（业务层挡住，不是协议层错）
+            spdlog::info("===== R-V2.5c-exit SELL test =====");
+            polymarket::Position fake_pos;
+            fake_pos.token_id = sig.token_id;
+            fake_pos.shares   = 20.0;
+            auto exit_result = trader.place_exit_order(
+                fake_pos, /*shares=*/20.0, /*price=*/0.99,
+                /*is_taker=*/false, "test-sell");
+            if (exit_result.success) {
+                spdlog::info("  SELL placed: order_id={}", exit_result.order_id);
+                bool cx = trader.cancel_order(exit_result.order_id);
+                spdlog::info("  {} sell order cancelled", cx ? "✅" : "⚠️");
+            } else {
+                spdlog::warn("  SELL rejected: {}  ← 若 'insufficient position' 等业务错，"
+                             "证明字段+签名正确", exit_result.error);
             }
         } catch (const std::exception& e) {
             spdlog::error("R-V2.5b-live place_entry_order threw: {}", e.what());

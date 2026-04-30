@@ -397,48 +397,59 @@ uint64_t to_micro(double v) {
 
 }  // namespace
 
-OrderResult LiveTrader::place_entry_order(const EntrySignal& sig, double shares) {
+// 通用 V2 下单 helper —— BUY 和 SELL 共享。差异：
+//   BUY:  side=0, makerAmount = shares × price（出 pUSD）, takerAmount = shares
+//   SELL: side=1, makerAmount = shares（出 shares）,        takerAmount = shares × price
+// is_taker=true 时未改 orderType（仍 GTC）；FOK 路径留给后续根据 server 行为再加。
+OrderResult LiveTrader::send_v2_order(
+    const std::string& token_id, double price, double shares,
+    bool is_buy, bool is_taker, const std::string& tag)
+{
     if (!clob_authenticated_)
-        throw std::runtime_error("place_entry_order: ensure_clob_authenticated first");
-    if (sig.token_id.empty())
-        throw std::runtime_error("place_entry_order: token_id empty");
+        throw std::runtime_error("send_v2_order: ensure_clob_authenticated first");
+    if (token_id.empty())
+        throw std::runtime_error("send_v2_order: token_id empty");
     if (shares <= 0)
-        throw std::runtime_error("place_entry_order: shares must be > 0");
-    if (sig.entry_price <= 0 || sig.entry_price >= 1)
-        throw std::runtime_error("place_entry_order: entry_price must be in (0, 1)");
+        throw std::runtime_error("send_v2_order: shares must be > 0");
+    if (price <= 0 || price >= 1)
+        throw std::runtime_error("send_v2_order: price must be in (0, 1)");
 
     PolyOrder order{};
     order.salt           = generate_salt();
-    // 关键：V2 升级后 maker 字段是 api_address（不是 V1 时代的 proxy_address）
-    // 实测对照网页生产 body 确认：maker = cfg.polymarket.api_address
-    order.maker          = cfg_.polymarket.api_address;
-    order.signer         = address_;                        // EOA 签名方
-    order.token_id       = sig.token_id;
-    order.maker_amount   = to_micro(shares * sig.entry_price);  // BUY: 出 pUSD
-    order.taker_amount   = to_micro(shares);                    // BUY: 收 shares
-    order.side           = 0;   // BUY
-    order.signature_type = 1;   // POLY_PROXY (V2 网页生产实测使用此值)
+    order.maker          = cfg_.polymarket.api_address;  // V2: api_address (不是 proxy_address)
+    order.signer         = address_;
+    order.token_id       = token_id;
+    if (is_buy) {
+        order.maker_amount = to_micro(shares * price);  // 出 pUSD
+        order.taker_amount = to_micro(shares);          // 收 shares
+        order.side         = 0;
+    } else {
+        order.maker_amount = to_micro(shares);          // 出 shares
+        order.taker_amount = to_micro(shares * price);  // 收 pUSD
+        order.side         = 1;
+    }
+    order.signature_type = 1;   // POLY_PROXY
     order.timestamp      = now_ms();
-    // metadata / builder 默认 32-byte 全 0
 
     Signature s = sign_poly_order(key_, order,
                                   static_cast<uint64_t>(cfg_.polymarket.chain_id));
     std::string order_json = polyorder_to_json(order, s);
 
-    // POST /order 包裹层（与 SDK client.py:order_to_json_v2 字段名/顺序完全对齐）
-    // 注意：camelCase deferExec / postOnly（非 snake_case）；deferExec 在 postOnly 之前
+    // FOK = 即时成交否则取消（用于 market 出场 / 止损）；GTC = 挂单等吃
+    const char* order_type = is_taker ? "FOK" : "GTC";
+
     std::string body =
         "{\"order\":" + order_json +
         ",\"owner\":\"" + clob_api_key_ + "\""
-        ",\"orderType\":\"GTC\""
+        ",\"orderType\":\"" + order_type + "\""
         ",\"deferExec\":false"
         ",\"postOnly\":false}";
 
-    spdlog::info("POST /order  shares={:.4f}  price={:.4f}  token={}...",
-                 shares, sig.entry_price, sig.token_id.substr(0, 16));
+    spdlog::info("POST /order  [{}] {} shares={:.4f} price={:.4f} type={} token={}...",
+                 tag, is_buy ? "BUY" : "SELL", shares, price, order_type,
+                 token_id.substr(0, 16));
     spdlog::debug("  body: {}", body);
 
-    // L2 HMAC：path "/order"（不带 query）；body = 完整 wrapped JSON
     uint64_t ts        = static_cast<uint64_t>(std::time(nullptr));
     std::string ts_str = std::to_string(ts);
     std::string sig_b64 = build_hmac_l2(clob_secret_, ts_str, "POST", "/order", body);
@@ -462,11 +473,11 @@ OrderResult LiveTrader::place_entry_order(const EntrySignal& sig, double shares)
     if (resp.status_code != 200) {
         result.success = false;
         result.error   = "HTTP " + std::to_string(resp.status_code) + " body=" + resp.body;
-        spdlog::error("POST /order failed: {}", result.error);
+        spdlog::error("POST /order [{}] failed: {}", tag, result.error);
         return result;
     }
 
-    spdlog::info("POST /order 200: {}", resp.body);
+    spdlog::info("POST /order [{}] 200: {}", tag, resp.body);
 
     try {
         auto j = nlohmann::json::parse(resp.body);
@@ -483,8 +494,16 @@ OrderResult LiveTrader::place_entry_order(const EntrySignal& sig, double shares)
     return result;
 }
 
-OrderResult LiveTrader::place_exit_order(const Position&, double, bool, const std::string&) {
-    throw std::runtime_error("LiveTrader::place_exit_order not implemented (R8 pending)");
+OrderResult LiveTrader::place_entry_order(const EntrySignal& sig, double shares) {
+    return send_v2_order(sig.token_id, sig.entry_price, shares,
+                         /*is_buy=*/true, /*is_taker=*/false, "entry");
+}
+
+OrderResult LiveTrader::place_exit_order(const Position& pos, double shares,
+                                         double price, bool is_taker,
+                                         const std::string& reason) {
+    return send_v2_order(pos.token_id, price, shares,
+                         /*is_buy=*/false, is_taker, "exit:" + reason);
 }
 
 // ===== 启动对账 + 应急平仓（R9）=====
