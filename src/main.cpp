@@ -181,7 +181,7 @@ int main(int argc, char* argv[]) {
 
     // === Live 模式启动守卫（渐进式放宽） ===
     // 每完成一阶段（R2/R3/.../R9）守卫会通过对应自检；之后未实现的阶段仍然 fail-fast。
-    // R3 进度：钱包 + 链上读 OK；后续 R4-R9 仍未实现。
+    // R4 进度：EIP-712 密码库就绪（纯库，无守卫步骤）；R5-R9 仍未实现。
     if (cfg.strategy.mode == "live") {
         polymarket::LiveTrader trader(cfg);
 
@@ -201,13 +201,13 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        // R4-R9 尚未就绪
+        // R5-R9 尚未就绪（R4 EIP-712 密码库已集成，无运行时守卫步骤）
         spdlog::error("================================================================");
-        spdlog::error("LIVE MODE 部分就绪（进度：R2 wallet + R3 chain OK）");
+        spdlog::error("LIVE MODE 部分就绪（进度：R2 wallet + R3 chain + R4 EIP-712 OK）");
         spdlog::error("  EOA   {}", trader.wallet_address());
         spdlog::error("  Proxy {}", cfg.polymarket.proxy_address);
         spdlog::error("");
-        spdlog::error("待完成：R4 EIP-712 / R5 CLOB 鉴权 / R6 approvals /");
+        spdlog::error("待完成：R5 CLOB 鉴权 / R6 approvals /");
         spdlog::error("        R7 入场 / R8 出场 / R9 对账+应急平仓");
         spdlog::error("");
         spdlog::error("请将 config 中 strategy.mode 改回 \"dry_run\" 后再启动。");

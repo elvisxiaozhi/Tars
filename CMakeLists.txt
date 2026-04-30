@@ -36,6 +36,7 @@ target_include_directories(nlohmann_json INTERFACE ${CMAKE_SOURCE_DIR}/third_par
 add_library(polymarket_crypto STATIC
     src/crypto/keccak256.cpp
     src/crypto/wallet.cpp
+    src/crypto/eip712.cpp
 )
 target_include_directories(polymarket_crypto PUBLIC
     ${CMAKE_SOURCE_DIR}/src
@@ -59,6 +60,7 @@ set(SOURCES
     src/core/risk_manager.cpp
     src/core/trade_journal.cpp
     src/core/live_trader.cpp
+    src/core/polymarket_types.cpp
     src/net/api_server.cpp
     src/net/chain_client.cpp
 )
@@ -101,6 +103,14 @@ target_link_libraries(test_chain PRIVATE
     spdlog::spdlog
     pthread
 )
+
+# test_eip712: EIP-712 signing KATs (R4)
+add_executable(test_eip712
+    tests/test_eip712.cpp
+    src/core/polymarket_types.cpp
+)
+target_include_directories(test_eip712 PRIVATE ${CMAKE_SOURCE_DIR}/src ${SECP256K1_INCLUDE})
+target_link_libraries(test_eip712 PRIVATE polymarket_crypto)
 
 # --- 一次性 CLI 工具 ---
 # import_key: 把明文私钥加密成 keystore.enc（R2b）
