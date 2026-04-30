@@ -198,15 +198,17 @@ void LiveTrader::ensure_clob_authenticated() {
     };
 
     net::HttpClient http(15, cfg_.network.proxy_url);
-    std::string url = cfg_.polymarket.clob_rest_url + "/auth/api-key";
 
-    // GET = derive existing key（幂等，推荐）
-    auto resp = http.get(url, headers);
+    // create_or_derive：POST /auth/api-key 创建新 key；
+    // 若已存在 (HTTP 400 "Could not create api key") 则 GET /auth/derive-api-key 派生
+    std::string create_url = cfg_.polymarket.clob_rest_url + "/auth/api-key";
+    auto resp = http.post(create_url, "", headers);
 
-    // 404 / 401 → key 不存在，改用 POST 创建
-    if (resp.status_code == 404 || resp.status_code == 401) {
-        spdlog::info("CLOB: no existing key (HTTP {}), creating new one", resp.status_code);
-        resp = http.post(url, "", headers);
+    if (resp.status_code != 200) {
+        spdlog::info("CLOB: create returned HTTP {} ({}), falling back to derive",
+                     resp.status_code, resp.body);
+        std::string derive_url = cfg_.polymarket.clob_rest_url + "/auth/derive-api-key";
+        resp = http.get(derive_url, headers);
     }
 
     if (resp.status_code != 200) {
@@ -221,7 +223,7 @@ void LiveTrader::ensure_clob_authenticated() {
     clob_passphrase_ = j.at("passphrase").get<std::string>();
 
     clob_authenticated_ = true;
-    spdlog::info("CLOB: authenticated, api_key={}...", clob_api_key_.substr(0, 8));
+    spdlog::info("CLOB: authenticated OK, api_key={}...", clob_api_key_.substr(0, 8));
 }
 
 bool LiveTrader::is_authenticated() const {

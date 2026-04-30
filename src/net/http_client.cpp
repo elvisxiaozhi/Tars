@@ -109,7 +109,7 @@ static ProxyInfo detect_proxy(const std::string& config_proxy = "") {
 
 struct HttpClient::Impl {
     asio::io_context ioc;
-    ssl::context ssl_ctx{ssl::context::tlsv12_client};
+    ssl::context ssl_ctx{ssl::context::tls_client};  // 允许 TLS 1.2/1.3 协商
     int timeout_sec;
     ProxyInfo proxy;
 

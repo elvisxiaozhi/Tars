@@ -170,7 +170,7 @@ int main() {
 
         info("ClobAuth typeHash",
              eip712_type_hash(
-                 "ClobAuth(address address,uint256 timestamp,uint256 nonce,string message)"));
+                 "ClobAuth(address address,string timestamp,uint256 nonce,string message)"));
 
         EIP712Domain poly_domain{
             "Polymarket CTF Exchange", "1", 137,

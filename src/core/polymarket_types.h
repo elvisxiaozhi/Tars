@@ -36,8 +36,9 @@ struct ClobAuthData {
     std::string message;    // consent text (use CLOB_AUTH_MESSAGE below)
 };
 
+// 必须与 py-clob-client/signing/eip712.py 的 MSG_TO_SIGN 完全一致
 static const char* CLOB_AUTH_MESSAGE =
-    "This message attests that I agree to the Polymarket Privacy Policy and Terms of Service.";
+    "This message attests that I control the given wallet";
 
 // ── Signing helpers ───────────────────────────────────────────────────────────
 

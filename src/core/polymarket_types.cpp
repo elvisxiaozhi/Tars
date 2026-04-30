@@ -17,8 +17,10 @@ static const char* ORDER_TYPE =
     "uint256 nonce,uint256 feeRateBps,uint256 side,uint256 signatureType)";
 
 // side and signatureType are uint256 in the Polymarket ABI (not uint8)
+// timestamp 是 String 类型（py-clob-client 用 poly-eip712-structs.String()），
+// 编码为 keccak256(decimal_string)；POLY_TIMESTAMP header 必须是同一个十进制串
 static const char* CLOB_AUTH_TYPE =
-    "ClobAuth(address address,uint256 timestamp,uint256 nonce,string message)";
+    "ClobAuth(address address,string timestamp,uint256 nonce,string message)";
 
 Signature sign_poly_order(const PrivateKey& key, const PolyOrder& order, uint64_t chain_id) {
     EIP712Domain domain{"Polymarket CTF Exchange", "1", chain_id, EXCHANGE_ADDR};
@@ -51,7 +53,7 @@ Signature sign_clob_auth(const PrivateKey& key, const ClobAuthData& auth, uint64
     auto th = eip712_type_hash(CLOB_AUTH_TYPE);
     std::vector<std::array<uint8_t, 32>> fields = {
         eip712_address(auth.address),
-        eip712_uint256(auth.timestamp),
+        eip712_string(std::to_string(auth.timestamp)),
         eip712_uint256(auth.nonce),
         eip712_string(auth.message),
     };
