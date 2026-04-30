@@ -229,8 +229,32 @@ bool LiveTrader::is_authenticated() const {
 }
 
 // ===== Approval 校验（R6）=====
-bool LiveTrader::check_approvals_sufficient(double) {
-    throw std::runtime_error("LiveTrader::check_approvals_sufficient not implemented (R6 pending)");
+//
+// 读链上最新 allowance（proxy → CTFExchange），与 min_usdc_allowance 比较。
+// 不足则 throw（启动守卫会捕获并 return 1）；足够则 return true。
+// bot 不自动 approve：approve 是 chain write，风险高，由用户手动在 Polymarket 网页完成。
+bool LiveTrader::check_approvals_sufficient(double min_usdc_allowance) {
+    auto bal = read_chain_state();
+
+    if (bal.allowance_usdc >= min_usdc_allowance) {
+        spdlog::info("APPROVAL: allowance ${:.2f} >= required ${:.2f} OK",
+                     bal.allowance_usdc, min_usdc_allowance);
+        return true;
+    }
+
+    // 打印操作指引，然后 throw 让守卫 return 1
+    spdlog::error("APPROVAL: allowance ${:.4f} < required ${:.2f}",
+                  bal.allowance_usdc, min_usdc_allowance);
+    spdlog::error("  proxy address  : {}", cfg_.polymarket.proxy_address);
+    spdlog::error("  CTFExchange    : {}", cfg_.polygon.ctf_exchange);
+    spdlog::error("  操作方式（任选一）：");
+    spdlog::error("    1. Polymarket 网页 → Deposit 充 USDC（充值同时自动 approve）");
+    spdlog::error("    2. MetaMask → 手动调用 USDC.approve(CTFExchange, MAX_UINT)");
+
+    throw std::runtime_error(
+        "USDC allowance $" + std::to_string(bal.allowance_usdc) +
+        " < required $" + std::to_string(min_usdc_allowance) +
+        " (proxy=" + cfg_.polymarket.proxy_address + ")");
 }
 
 // ===== 下单（R7 / R8）=====
