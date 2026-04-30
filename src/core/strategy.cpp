@@ -186,15 +186,18 @@ ExitSignal Strategy::evaluate_exit(
             return exit;
         }
     } else if (mfe >= 0.10) {
-        // MFE ≥ +10¢：保本止损
-        if (current_contract_price <= pos.entry_price) {
+        // MFE ≥ +10¢：锁住 +5¢ 利润（Step 2.22 从保本档升级到 +5¢ 档）
+        // 依据：4-29~4-30 三笔 trailing 亏损 max 都在 +11¢~+12¢，触发保本档后回吐到 entry-2¢
+        // 出场（合计 -$1.40）；改为 entry+5¢ 阈值后这三笔可锁住 +$1.50（净 +$2.90）
+        double trailing_stop = pos.entry_price + 0.05;
+        if (current_contract_price <= trailing_stop) {
             exit.should_exit = true;
             exit.reason = "trailing_stop";
             exit.exit_price = current_contract_price;
             exit.use_market_order = true;
-            spdlog::warn("TRAILING STOP (breakeven): {} entry={:.3f} peak={:.3f} now={:.3f}",
+            spdlog::warn("TRAILING STOP (entry+5c): {} entry={:.3f} peak={:.3f} now={:.3f} stop={:.3f}",
                          pos.market_question, pos.entry_price, pos.max_price,
-                         current_contract_price);
+                         current_contract_price, trailing_stop);
             return exit;
         }
     }
