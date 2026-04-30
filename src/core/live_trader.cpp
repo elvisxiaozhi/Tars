@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 
@@ -331,9 +333,75 @@ bool LiveTrader::check_approvals_sufficient(double min_usdc_allowance) {
         " (proxy=" + cfg_.polymarket.proxy_address + ")");
 }
 
-// ===== 下单（R7 / R8）=====
-OrderResult LiveTrader::place_entry_order(const EntrySignal&, double) {
-    throw std::runtime_error("LiveTrader::place_entry_order not implemented (R7 pending)");
+// ===== 下单（R-V2.5b dry）=====
+//
+// R-V2.5b-dry：只构造 + 签 + 序列化，**不发 POST**，把 body 打到日志让用户肉眼验。
+// R-V2.5b-live（下一步）会去掉 dry 守卫，真发 POST /order 并解析 OrderResult。
+
+namespace {
+
+// salt：与 py-clob-client-v2 行为接近 — 60-bit 范围内随机正整数（不强制完整 uint256）
+uint64_t generate_salt() {
+    static thread_local std::mt19937_64 rng{std::random_device{}()};
+    return std::uniform_int_distribution<uint64_t>(1, (1ULL << 60) - 1)(rng);
+}
+
+// 当前 unix 毫秒
+uint64_t now_ms() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
+// 6-decimal micro-units：value × 1e6 四舍五入
+uint64_t to_micro(double v) {
+    return static_cast<uint64_t>(std::llround(v * 1'000'000.0));
+}
+
+}  // namespace
+
+OrderResult LiveTrader::place_entry_order(const EntrySignal& sig, double shares) {
+    if (!clob_authenticated_)
+        throw std::runtime_error("place_entry_order: ensure_clob_authenticated first");
+    if (sig.token_id.empty())
+        throw std::runtime_error("place_entry_order: token_id empty");
+    if (shares <= 0)
+        throw std::runtime_error("place_entry_order: shares must be > 0");
+    if (sig.entry_price <= 0 || sig.entry_price >= 1)
+        throw std::runtime_error("place_entry_order: entry_price must be in (0, 1)");
+
+    PolyOrder order{};
+    order.salt           = generate_salt();
+    order.maker          = cfg_.polymarket.proxy_address;  // 持仓 / 收款方
+    order.signer         = address_;                        // EOA 签名方
+    order.token_id       = sig.token_id;
+    order.maker_amount   = to_micro(shares * sig.entry_price);  // BUY: 出 pUSD
+    order.taker_amount   = to_micro(shares);                    // BUY: 收 shares
+    order.side           = 0;   // BUY
+    order.signature_type = 1;   // POLY_PROXY
+    order.timestamp      = now_ms();
+    // metadata / builder 默认 32-byte 全 0
+
+    Signature s = sign_poly_order(key_, order,
+                                  static_cast<uint64_t>(cfg_.polymarket.chain_id));
+    std::string order_json = polyorder_to_json(order, s);
+
+    // POST /order 包裹层（owner = api_key, orderType GTC = good-till-cancel）
+    std::string body =
+        "{\"order\":" + order_json +
+        ",\"owner\":\"" + clob_api_key_ + "\""
+        ",\"orderType\":\"GTC\""
+        ",\"post_only\":false"
+        ",\"defer_exec\":false}";
+
+    spdlog::info("ORDER ENTRY (DRY) shares={:.4f} price={:.4f} token={}",
+                 shares, sig.entry_price, sig.token_id.substr(0, 16) + "...");
+    spdlog::info("  body: {}", body);
+
+    OrderResult result;
+    result.success     = false;
+    result.error       = "DRY mode — order constructed/signed/serialized but not submitted";
+    result.fill_time_ms = static_cast<int64_t>(order.timestamp);
+    return result;
 }
 
 OrderResult LiveTrader::place_exit_order(const Position&, double, bool, const std::string&) {

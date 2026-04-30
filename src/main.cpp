@@ -222,7 +222,25 @@ int main(int argc, char* argv[]) {
         // R6 (V1) 已废：V2 vault 模式没有 approve CTFExchange 的概念；
         // R-V2.3 已读到 cash 余额；下一步 R-V2.5 改为 cash >= max_single_trade 的检查。
         spdlog::warn("R6 (V1 approval check) skipped — V2 vault 模式无此概念，待 R-V2.5 替换");
-        return 1;  // 暂停在此，R7+ 实盘下单尚未做 V2 改造
+
+        // R-V2.5b-dry：构造 + 签名 + 序列化一笔假单，打 JSON body 让人肉眼验
+        // 不发 POST，token_id 用 dummy 即可（dry 阶段不打到服务端）
+        try {
+            polymarket::EntrySignal fake;
+            fake.valid           = true;
+            fake.side            = polymarket::Side::UP;
+            fake.entry_price     = 0.05;
+            fake.market_ask      = 0.06;
+            fake.market_question = "(dry test market)";
+            fake.token_id        =
+                "52114319501245915516055106046884209969926127482827954674443846427813813222426";
+            (void)trader.place_entry_order(fake, 1.0);  // 1 share @ 5¢ = $0.05
+        } catch (const std::exception& e) {
+            spdlog::error("R-V2.5b-dry place_entry_order failed: {}", e.what());
+            return 1;
+        }
+
+        return 1;  // 暂停在此，R-V2.5b-live 尚未实现真发 POST
 
         // R7-R9 尚未就绪
         spdlog::error("================================================================");
