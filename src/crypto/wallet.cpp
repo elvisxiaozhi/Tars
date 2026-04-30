@@ -1,7 +1,10 @@
 #include "crypto/wallet.h"
 
 #include <cstring>
+#include <iostream>
 #include <stdexcept>
+#include <termios.h>
+#include <unistd.h>
 #include <vector>
 
 #include <json.hpp>
@@ -20,6 +23,30 @@ void secure_zero(void* ptr, size_t len) {
     // 用 volatile 函数指针绕过编译器死代码消除
     static void* (*const volatile memset_v)(void*, int, size_t) = std::memset;
     memset_v(ptr, 0, len);
+}
+
+std::string read_password(const std::string& prompt) {
+    std::cerr << prompt << std::flush;
+
+    termios oldt{};
+    bool tty = (isatty(STDIN_FILENO) != 0);
+    if (tty) {
+        if (tcgetattr(STDIN_FILENO, &oldt) != 0) tty = false;
+        else {
+            termios newt = oldt;
+            newt.c_lflag &= ~static_cast<tcflag_t>(ECHO);
+            tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+        }
+    }
+
+    std::string password;
+    std::getline(std::cin, password);
+
+    if (tty) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        std::cerr << "\n";
+    }
+    return password;
 }
 
 // ================== PrivateKey ==================

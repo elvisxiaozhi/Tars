@@ -84,3 +84,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # --- 测试可执行文件 ---
 add_executable(test_crypto tests/test_crypto.cpp)
 target_link_libraries(test_crypto PRIVATE polymarket_crypto)
+
+# --- 一次性 CLI 工具 ---
+# import_key: 把明文私钥加密成 keystore.enc（R2b）
+add_executable(import_key tools/import_key.cpp)
+target_link_libraries(import_key PRIVATE polymarket_crypto)

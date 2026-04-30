@@ -12,6 +12,7 @@
 #include "core/binance_feed.h"
 #include "core/market_feed.h"
 #include "core/risk_manager.h"
+#include "core/live_trader.h"
 #include "core/strategy.h"
 #include "core/trade_journal.h"
 #include "dashboard.h"
@@ -178,14 +179,26 @@ int main(int argc, char* argv[]) {
     spdlog::info("polymarket-arb v0.3.0 [{}]",
                  cfg.strategy.mode == "live" ? "LIVE" : "DRY RUN");
 
-    // === Live 模式启动守卫（R1 阶段：拒启动） ===
-    // 实盘下单链路尚未实现（R2~R8 待开发）。在此之前，live 模式必须 fail-fast，
-    // 防止主循环跑到下单点时才崩溃、留下半开仓位。每完成一阶段，本守卫会逐步放宽。
+    // === Live 模式启动守卫（渐进式放宽） ===
+    // 每完成一阶段（R2/R3/.../R9）守卫会通过对应自检；之后未实现的阶段仍然 fail-fast。
+    // R2b 进度：钱包加载 OK；后续 R3-R9 仍未实现。
     if (cfg.strategy.mode == "live") {
+        polymarket::LiveTrader trader(cfg);
+
+        // R2: 钱包加载（解密 keystore.enc + 派生地址 + 与 cfg.wallet.address 比对）
+        try {
+            trader.init_wallet();
+        } catch (const std::exception& e) {
+            spdlog::error("LIVE MODE: wallet init failed: {}", e.what());
+            return 1;
+        }
+
+        // R3-R9 尚未就绪
         spdlog::error("================================================================");
-        spdlog::error("LIVE MODE 暂未就绪（当前进度：R1 骨架）");
+        spdlog::error("LIVE MODE 部分就绪（进度：R2 wallet OK，address={}）",
+                      trader.wallet_address());
         spdlog::error("");
-        spdlog::error("待完成：R2 钱包 / R3 链上读 / R4 EIP-712 / R5 CLOB 鉴权 /");
+        spdlog::error("待完成：R3 链上读 / R4 EIP-712 / R5 CLOB 鉴权 /");
         spdlog::error("        R6 approvals / R7 入场 / R8 出场 / R9 对账+应急平仓");
         spdlog::error("");
         spdlog::error("请将 config 中 strategy.mode 改回 \"dry_run\" 后再启动。");

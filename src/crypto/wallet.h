@@ -54,4 +54,8 @@ PrivateKey decrypt_keystore(const std::string& json_str, const std::string& pass
 // 安全清擦内存（避免编译器优化掉 memset）
 void secure_zero(void* ptr, size_t len);
 
+// 从 stdin 读密码（关回显），prompt 写到 stderr 不含换行
+// 调用者用完应尽快 secure_zero(s.data(), s.size())
+std::string read_password(const std::string& prompt);
+
 }  // namespace polymarket
