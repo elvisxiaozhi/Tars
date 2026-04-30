@@ -232,71 +232,57 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        // R-V2.5b-live：真发一笔 BTC up/down 4h 远离 mid 的 limit BUY，验证 POST /order 全链路
-        // token = YES (UP) of "BTC Up or Down — Apr 30 12:00-4:00PM ET" (event slug btc-updown-4h-1777564800)
-        // 当前 bestAsk=$0.23, bestBid=$0.22；以 $0.05 × 20 shares = $1.00 远低于 mid 必然不成交
-        // 实测后请去 polymarket.com → My Profile → Open Orders 手动取消
-        try {
-            polymarket::EntrySignal sig;
-            sig.valid           = true;
-            sig.side            = polymarket::Side::UP;
-            sig.entry_price     = 0.05;
-            sig.market_ask      = 0.23;
-            sig.market_question = "BTC Up/Down 4h Apr 30 12-4PM ET (R-V2.5b-live test)";
-            sig.token_id        =
-                "6668191069090033015760586900919029140131491490577391794647144142930147112459";
-            auto result = trader.place_entry_order(sig, 20.0);  // 20 shares × $0.05 = $1.00 max
-            if (result.success) {
-                spdlog::info("===== R-V2.5b-live OK =====");
-                spdlog::info("  order_id : {}", result.order_id);
-
-                // R-V2.5c：立刻自动取消（远低于 mid 不会成交，但仍占 ledger cash）
-                spdlog::info("===== R-V2.5c auto-cancel =====");
-                bool cancelled = trader.cancel_order(result.order_id);
-                if (cancelled) {
-                    spdlog::info("  ✅ entry order cancelled");
+        // 可选 dry-test：用 --dry-test-order CLI flag 显式触发；默认不跑（避免依赖
+        // 过期的 hardcode token_id）。需要时手动改 token_id 后传 flag 触发。
+        bool run_dry_test = false;
+        for (int i = 1; i < argc; ++i) {
+            if (std::string(argv[i]) == "--dry-test-order") run_dry_test = true;
+        }
+        if (run_dry_test) {
+            spdlog::warn("--dry-test-order: 真发 1 笔 limit BUY + cancel + 1 笔 SELL（业务层 reject）");
+            try {
+                polymarket::EntrySignal sig;
+                sig.valid           = true;
+                sig.side            = polymarket::Side::UP;
+                sig.entry_price     = 0.05;
+                sig.market_ask      = 0.23;
+                sig.market_question = "(dry-test, manual token_id)";
+                // ⚠️ 跑前需 update：去 gamma-api 找一个 active BTC up/down market 拿 YES token
+                sig.token_id        =
+                    "6668191069090033015760586900919029140131491490577391794647144142930147112459";
+                auto result = trader.place_entry_order(sig, 20.0);
+                if (result.success) {
+                    spdlog::info("BUY ok order_id={}", result.order_id);
+                    bool cx = trader.cancel_order(result.order_id);
+                    spdlog::info("  BUY cancel: {}", cx ? "✅" : "⚠️ failed");
                 } else {
-                    spdlog::warn("  ⚠️  cancel failed — 请去 polymarket.com 手动取消");
+                    spdlog::error("BUY failed: {}", result.error);
                 }
-            } else {
-                spdlog::error("R-V2.5b-live failed: {}", result.error);
-            }
 
-            // R-V2.5c-exit: 测试 SELL 链路 — limit SELL @ $0.99 远高于 mid
-            // 我们没持仓，可能 server reject "insufficient position"，但即使 reject
-            // 也证明 SELL 字段格式 + 签名正确（业务层挡住，不是协议层错）
-            spdlog::info("===== R-V2.5c-exit SELL test =====");
-            polymarket::Position fake_pos;
-            fake_pos.token_id = sig.token_id;
-            fake_pos.shares   = 20.0;
-            auto exit_result = trader.place_exit_order(
-                fake_pos, /*shares=*/20.0, /*price=*/0.99,
-                /*is_taker=*/false, "test-sell");
-            if (exit_result.success) {
-                spdlog::info("  SELL placed: order_id={}", exit_result.order_id);
-                bool cx = trader.cancel_order(exit_result.order_id);
-                spdlog::info("  {} sell order cancelled", cx ? "✅" : "⚠️");
-            } else {
-                spdlog::warn("  SELL rejected: {}  ← 若 'insufficient position' 等业务错，"
-                             "证明字段+签名正确", exit_result.error);
+                polymarket::Position fake_pos;
+                fake_pos.token_id = sig.token_id;
+                fake_pos.shares   = 20.0;
+                auto er = trader.place_exit_order(fake_pos, 20.0, 0.99, false, "dry-test");
+                if (er.success) {
+                    spdlog::info("SELL ok order_id={}", er.order_id);
+                    trader.cancel_order(er.order_id);
+                } else {
+                    spdlog::warn("SELL rejected (业务层): {}", er.error);
+                }
+            } catch (const std::exception& e) {
+                spdlog::error("dry-test threw: {}", e.what());
             }
-        } catch (const std::exception& e) {
-            spdlog::error("R-V2.5b-live place_entry_order threw: {}", e.what());
-            return 1;
         }
 
-        return 1;  // 暂停在此，R-V2.5c (place_exit_order) 尚未实现
-
-        // R7-R9 尚未就绪
-        spdlog::error("================================================================");
-        spdlog::error("LIVE MODE 部分就绪（R2 wallet + R3 chain + R4 EIP-712 + R5 CLOB + R6 approval OK）");
-        spdlog::error("  EOA   {}", trader.wallet_address());
-        spdlog::error("  Proxy {}", cfg.polymarket.proxy_address);
-        spdlog::error("");
-        spdlog::error("待完成：R7 入场 / R8 出场 / R9 对账+应急平仓");
-        spdlog::error("");
-        spdlog::error("请将 config 中 strategy.mode 改回 \"dry_run\" 后再启动。");
-        spdlog::error("================================================================");
+        // R-V2.6 (待) — 接入策略主循环 + SIGINT handler 接 emergency_close_all
+        spdlog::warn("================================================================");
+        spdlog::warn("LIVE MODE 启动横幅就绪（R2-R5 + R-V2.3 + R9-V2 reconcile）");
+        spdlog::warn("  EOA   {}", trader.wallet_address());
+        spdlog::warn("  Proxy {}", cfg.polymarket.proxy_address);
+        spdlog::warn("");
+        spdlog::warn("待完成：R-V2.6 主循环接入 + 真成交闭环");
+        spdlog::warn("Tip: --dry-test-order 可触发非真成交 dry test（需手动更新 token_id）");
+        spdlog::warn("================================================================");
         return 1;
     }
 

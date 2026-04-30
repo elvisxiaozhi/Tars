@@ -585,33 +585,57 @@ std::vector<OpenOrder> LiveTrader::reconcile_on_startup() {
     return orders;
 }
 
-// emergency_close_all：对每个仍持有的 position 发一笔 SELL FOK @ price=0.01 (floor)。
-// FOK 让 server 按对手最佳 bid 立即成交，否则取消。**不**等 fill 确认（紧急退出时间紧）。
+// emergency_close_all：两阶段紧急退出。
+//   Step 1: 取消所有 open orders（防止 BUY 已发未 fill 时 emergency 触发，
+//           错误地走 SELL 路径；先 cancel 才是正确语义）
+//   Step 2: 对每个 bot 跟踪的持仓发 SELL FOK @ price=0.01 (floor)，
+//           server 按对手最佳 bid 立即成交，否则取消。**不**等 fill 确认。
 void LiveTrader::emergency_close_all(const std::vector<Position>& positions) {
     if (!clob_authenticated_) {
         spdlog::error("EMERGENCY: not authenticated, can't close");
         return;
     }
 
+    spdlog::warn("===== EMERGENCY CLOSE ALL =====");
+
+    // Step 1: cancel all open orders
+    try {
+        auto open = reconcile_on_startup();
+        if (open.empty()) {
+            spdlog::warn("  [step1] no open orders to cancel");
+        } else {
+            spdlog::warn("  [step1] cancelling {} open order(s)", open.size());
+            for (auto& o : open) {
+                bool ok = cancel_order(o.order_id);
+                spdlog::warn("    {} {}",
+                             o.order_id.substr(0, std::min<size_t>(o.order_id.size(), 16)),
+                             ok ? "✅ cancelled" : "⚠️ FAILED");
+            }
+        }
+    } catch (const std::exception& e) {
+        spdlog::error("  [step1] reconcile/cancel failed: {}", e.what());
+    }
+
+    // Step 2: SELL all bot-tracked positions FOK
     int sent = 0;
-    spdlog::warn("===== EMERGENCY CLOSE ALL ({} positions) =====", positions.size());
+    spdlog::warn("  [step2] selling {} position(s) FOK", positions.size());
     for (auto& pos : positions) {
         if (pos.shares <= 0 || pos.closed) continue;
         try {
             auto r = place_exit_order(pos, pos.shares, /*price=*/0.01,
                                       /*is_taker=*/true, "emergency");
             if (r.success)
-                spdlog::warn("  SENT  {} shares={:.4f} order_id={}",
+                spdlog::warn("    SENT  {} shares={:.4f} order_id={}",
                              pos.token_id.substr(0, 16), pos.shares,
                              r.order_id.substr(0, std::min<size_t>(r.order_id.size(), 16)));
             else
-                spdlog::error("  FAIL  {} {}", pos.token_id.substr(0, 16), r.error);
+                spdlog::error("    FAIL  {} {}", pos.token_id.substr(0, 16), r.error);
             ++sent;
         } catch (const std::exception& e) {
-            spdlog::error("  THREW {} {}", pos.token_id.substr(0, 16), e.what());
+            spdlog::error("    THREW {} {}", pos.token_id.substr(0, 16), e.what());
         }
     }
-    spdlog::warn("===== EMERGENCY done, {} order(s) sent =====", sent);
+    spdlog::warn("===== EMERGENCY done: {} sell(s) sent =====", sent);
 }
 
 }  // namespace polymarket
