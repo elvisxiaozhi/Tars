@@ -223,24 +223,33 @@ int main(int argc, char* argv[]) {
         // R-V2.3 已读到 cash 余额；下一步 R-V2.5 改为 cash >= max_single_trade 的检查。
         spdlog::warn("R6 (V1 approval check) skipped — V2 vault 模式无此概念，待 R-V2.5 替换");
 
-        // R-V2.5b-dry：构造 + 签名 + 序列化一笔假单，打 JSON body 让人肉眼验
-        // 不发 POST，token_id 用 dummy 即可（dry 阶段不打到服务端）
+        // R-V2.5b-live：真发一笔 BTC up/down 4h 远离 mid 的 limit BUY，验证 POST /order 全链路
+        // token = YES (UP) of "BTC Up or Down — Apr 30 12:00-4:00PM ET" (event slug btc-updown-4h-1777564800)
+        // 当前 bestAsk=$0.23, bestBid=$0.22；以 $0.05 × 20 shares = $1.00 远低于 mid 必然不成交
+        // 实测后请去 polymarket.com → My Profile → Open Orders 手动取消
         try {
-            polymarket::EntrySignal fake;
-            fake.valid           = true;
-            fake.side            = polymarket::Side::UP;
-            fake.entry_price     = 0.05;
-            fake.market_ask      = 0.06;
-            fake.market_question = "(dry test market)";
-            fake.token_id        =
-                "52114319501245915516055106046884209969926127482827954674443846427813813222426";
-            (void)trader.place_entry_order(fake, 1.0);  // 1 share @ 5¢ = $0.05
+            polymarket::EntrySignal sig;
+            sig.valid           = true;
+            sig.side            = polymarket::Side::UP;
+            sig.entry_price     = 0.05;
+            sig.market_ask      = 0.23;
+            sig.market_question = "BTC Up/Down 4h Apr 30 12-4PM ET (R-V2.5b-live test)";
+            sig.token_id        =
+                "6668191069090033015760586900919029140131491490577391794647144142930147112459";
+            auto result = trader.place_entry_order(sig, 20.0);  // 20 shares × $0.05 = $1.00 max
+            if (result.success) {
+                spdlog::info("===== R-V2.5b-live OK =====");
+                spdlog::info("  order_id : {}", result.order_id);
+                spdlog::warn("  ⚠️  请立刻去 polymarket.com → Profile → Open Orders 手动取消该单");
+            } else {
+                spdlog::error("R-V2.5b-live failed: {}", result.error);
+            }
         } catch (const std::exception& e) {
-            spdlog::error("R-V2.5b-dry place_entry_order failed: {}", e.what());
+            spdlog::error("R-V2.5b-live place_entry_order threw: {}", e.what());
             return 1;
         }
 
-        return 1;  // 暂停在此，R-V2.5b-live 尚未实现真发 POST
+        return 1;  // 暂停在此，R-V2.5c (place_exit_order) 尚未实现
 
         // R7-R9 尚未就绪
         spdlog::error("================================================================");

@@ -227,21 +227,23 @@ int main() {
             ++g_failures;
         }
 
-        // ── polyorder_to_json KAT —— 紧凑 JSON 必须与 py-clob-client-v2 字节级一致 ──
+        // ── polyorder_to_json KAT —— 字节级匹配 py-clob-client-v2 / order_to_json_v2 ──
+        // 关键：salt/signatureType 是 INT(无引号)，side 是 string "BUY"，
+        // 字段顺序按 SDK：side → expiration → signatureType（不是 side → signatureType → ... → expiration）
         std::string json = polyorder_to_json(order, sig);
         std::string expected_json =
-            "{\"salt\":\"348624930908\","
+            "{\"salt\":348624930908,"
             "\"maker\":\"0x356E4c0a80B5Ac2466B7a62A11B35e8DbC7d2196\","
             "\"signer\":\"0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf\","
             "\"tokenId\":\"52114319501245915516055106046884209969926127482827954674443846427813813222426\","
             "\"makerAmount\":\"5000000\","
             "\"takerAmount\":\"10000000\","
-            "\"side\":0,"
+            "\"side\":\"BUY\","
+            "\"expiration\":\"0\","
             "\"signatureType\":1,"
             "\"timestamp\":\"1777568848108\","
             "\"metadata\":\"0x0000000000000000000000000000000000000000000000000000000000000000\","
             "\"builder\":\"0x0000000000000000000000000000000000000000000000000000000000000000\","
-            "\"expiration\":\"0\","
             "\"signature\":\"0xfa1e8a63c7c23909290c67b5db3e8054ac1bbaf9edba9584c2f2021de9cd1d37709ed5c1bb0c60d2c9f24b69c6937c34667a799380c1e4d4d33ac75240c4159d1c\"}";
         if (json == expected_json) {
             std::cout << "  [OK]   compact JSON matches dry-sign output\n";

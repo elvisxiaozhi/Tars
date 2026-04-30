@@ -371,13 +371,15 @@ OrderResult LiveTrader::place_entry_order(const EntrySignal& sig, double shares)
 
     PolyOrder order{};
     order.salt           = generate_salt();
-    order.maker          = cfg_.polymarket.proxy_address;  // 持仓 / 收款方
+    // 关键：V2 升级后 maker 字段是 api_address（不是 V1 时代的 proxy_address）
+    // 实测对照网页生产 body 确认：maker = cfg.polymarket.api_address
+    order.maker          = cfg_.polymarket.api_address;
     order.signer         = address_;                        // EOA 签名方
     order.token_id       = sig.token_id;
     order.maker_amount   = to_micro(shares * sig.entry_price);  // BUY: 出 pUSD
     order.taker_amount   = to_micro(shares);                    // BUY: 收 shares
     order.side           = 0;   // BUY
-    order.signature_type = 1;   // POLY_PROXY
+    order.signature_type = 1;   // POLY_PROXY (V2 网页生产实测使用此值)
     order.timestamp      = now_ms();
     // metadata / builder 默认 32-byte 全 0
 
@@ -385,22 +387,61 @@ OrderResult LiveTrader::place_entry_order(const EntrySignal& sig, double shares)
                                   static_cast<uint64_t>(cfg_.polymarket.chain_id));
     std::string order_json = polyorder_to_json(order, s);
 
-    // POST /order 包裹层（owner = api_key, orderType GTC = good-till-cancel）
+    // POST /order 包裹层（与 SDK client.py:order_to_json_v2 字段名/顺序完全对齐）
+    // 注意：camelCase deferExec / postOnly（非 snake_case）；deferExec 在 postOnly 之前
     std::string body =
         "{\"order\":" + order_json +
         ",\"owner\":\"" + clob_api_key_ + "\""
         ",\"orderType\":\"GTC\""
-        ",\"post_only\":false"
-        ",\"defer_exec\":false}";
+        ",\"deferExec\":false"
+        ",\"postOnly\":false}";
 
-    spdlog::info("ORDER ENTRY (DRY) shares={:.4f} price={:.4f} token={}",
-                 shares, sig.entry_price, sig.token_id.substr(0, 16) + "...");
-    spdlog::info("  body: {}", body);
+    spdlog::info("POST /order  shares={:.4f}  price={:.4f}  token={}...",
+                 shares, sig.entry_price, sig.token_id.substr(0, 16));
+    spdlog::debug("  body: {}", body);
+
+    // L2 HMAC：path "/order"（不带 query）；body = 完整 wrapped JSON
+    uint64_t ts        = static_cast<uint64_t>(std::time(nullptr));
+    std::string ts_str = std::to_string(ts);
+    std::string sig_b64 = build_hmac_l2(clob_secret_, ts_str, "POST", "/order", body);
+
+    net::Headers headers = {
+        {"POLY_ADDRESS",    address_},
+        {"POLY_SIGNATURE",  sig_b64},
+        {"POLY_TIMESTAMP",  ts_str},
+        {"POLY_API_KEY",    clob_api_key_},
+        {"POLY_PASSPHRASE", clob_passphrase_},
+        {"Content-Type",    "application/json"},
+    };
+
+    net::HttpClient http(15, cfg_.network.proxy_url);
+    std::string url = cfg_.polymarket.clob_rest_url + "/order";
+    auto resp = http.post(url, body, headers);
 
     OrderResult result;
-    result.success     = false;
-    result.error       = "DRY mode — order constructed/signed/serialized but not submitted";
     result.fill_time_ms = static_cast<int64_t>(order.timestamp);
+
+    if (resp.status_code != 200) {
+        result.success = false;
+        result.error   = "HTTP " + std::to_string(resp.status_code) + " body=" + resp.body;
+        spdlog::error("POST /order failed: {}", result.error);
+        return result;
+    }
+
+    spdlog::info("POST /order 200: {}", resp.body);
+
+    try {
+        auto j = nlohmann::json::parse(resp.body);
+        result.success  = j.value("success", false);
+        result.order_id = j.value("orderID", j.value("orderId", std::string{}));
+        if (!result.success) {
+            result.error = j.value("errorMsg", j.dump());
+        }
+    } catch (const std::exception& e) {
+        result.success = false;
+        result.error   = std::string("response parse failed: ") + e.what();
+    }
+
     return result;
 }
 

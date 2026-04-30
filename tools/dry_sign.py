@@ -100,9 +100,24 @@ print(f"  side          : {SIDE}")
 print(f"  signature_type: 1 (POLY_PROXY)")
 print()
 
-print("=== SIGNED ORDER (plain dict) ===")
+print("=== SIGNED ORDER (dataclass dump, NOT what hits server) ===")
 print(json.dumps(plain, indent=2, default=str))
 print()
 
-print("=== COMPACT JSON (HMAC body input for POST /order) ===")
-print(json.dumps(plain, separators=(",", ":"), ensure_ascii=False, default=str))
+# 真实发到 server 的 body — 用 SDK 自带的 order_to_json_v2 函数包装
+from py_clob_client_v2.client import order_to_json_v2
+from py_clob_client_v2.clob_types import OrderType
+
+OWNER_API_KEY = "00000000-0000-0000-0000-000000000000"  # 占位，实际是 R5 derive 的 UUID
+
+wrapped = order_to_json_v2(signed, OWNER_API_KEY, OrderType.GTC, post_only=False, defer_exec=False)
+print("=== WRAPPED body (REAL POST /order payload) ===")
+print(json.dumps(wrapped, indent=2, default=str))
+print()
+
+print("=== WRAPPED COMPACT JSON ===")
+print(json.dumps(wrapped, separators=(",", ":"), ensure_ascii=False, default=str))
+print()
+
+print("=== INNER ORDER COMPACT (matches what polyorder_to_json should output) ===")
+print(json.dumps(wrapped["order"], separators=(",", ":"), ensure_ascii=False, default=str))

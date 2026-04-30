@@ -81,27 +81,32 @@ std::string build_hmac_l2(const std::string& api_secret_b64,
     return base64url_encode(sig.data(), sig.size(), /*padded=*/true);
 }
 
-// 手撸紧凑 JSON serializer — nlohmann::json 默认按 key 字母序，与 py-clob-client-v2
-// 的 dict 插入序不一致；服务端 HMAC 比对要求字节级匹配，必须自己控字段顺序。
-// 所有字段值均为 ASCII safe（hex / 数字 / EIP-55 地址），不需要 JSON escape。
+// 手撸紧凑 JSON serializer — 字节级匹配 py-clob-client-v2 / order_to_json_v2 输出。
+// 关键不变量（与 SDK 源码 client.py:order_to_json_v2 对齐）：
+//   字段顺序: salt, maker, signer, tokenId, makerAmount, takerAmount,
+//             side, expiration, signatureType, timestamp,
+//             metadata, builder, signature
+//   值类型: salt / signatureType  → INT（无引号）
+//           side                  → 字符串 "BUY"/"SELL"（不是 0/1）
+//           其他 amount/timestamp → 字符串
 std::string polyorder_to_json(const PolyOrder& order, const Signature& sig,
                               const std::string& expiration_str) {
     std::string out;
     out.reserve(900);
     out += '{';
-    out += "\"salt\":\"";          out += std::to_string(order.salt);          out += "\",";
-    out += "\"maker\":\"";         out += order.maker;                         out += "\",";
-    out += "\"signer\":\"";        out += order.signer;                        out += "\",";
-    out += "\"tokenId\":\"";       out += order.token_id;                      out += "\",";
-    out += "\"makerAmount\":\"";   out += std::to_string(order.maker_amount);  out += "\",";
-    out += "\"takerAmount\":\"";   out += std::to_string(order.taker_amount);  out += "\",";
-    out += "\"side\":";            out += std::to_string(static_cast<int>(order.side));            out += ",";
+    out += "\"salt\":";            out += std::to_string(order.salt);                        out += ",";
+    out += "\"maker\":\"";         out += order.maker;                                       out += "\",";
+    out += "\"signer\":\"";        out += order.signer;                                      out += "\",";
+    out += "\"tokenId\":\"";       out += order.token_id;                                    out += "\",";
+    out += "\"makerAmount\":\"";   out += std::to_string(order.maker_amount);                out += "\",";
+    out += "\"takerAmount\":\"";   out += std::to_string(order.taker_amount);                out += "\",";
+    out += "\"side\":\"";          out += (order.side == 0 ? "BUY" : "SELL");                out += "\",";
+    out += "\"expiration\":\"";    out += expiration_str;                                    out += "\",";
     out += "\"signatureType\":";   out += std::to_string(static_cast<int>(order.signature_type));  out += ",";
-    out += "\"timestamp\":\"";     out += std::to_string(order.timestamp);     out += "\",";
-    out += "\"metadata\":\"0x";    out += hex_encode(order.metadata.data(), 32); out += "\",";
-    out += "\"builder\":\"0x";     out += hex_encode(order.builder.data(),  32); out += "\",";
-    out += "\"expiration\":\"";    out += expiration_str;                      out += "\",";
-    out += "\"signature\":\"";     out += sig.to_hex();                        out += '"';
+    out += "\"timestamp\":\"";     out += std::to_string(order.timestamp);                   out += "\",";
+    out += "\"metadata\":\"0x";    out += hex_encode(order.metadata.data(), 32);             out += "\",";
+    out += "\"builder\":\"0x";     out += hex_encode(order.builder.data(),  32);             out += "\",";
+    out += "\"signature\":\"";     out += sig.to_hex();                                      out += '"';
     out += '}';
     return out;
 }
