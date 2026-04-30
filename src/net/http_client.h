@@ -28,7 +28,9 @@ public:
                       const std::string& body,
                       const Headers& headers = {});
 
-    HttpResponse del(const std::string& url, const Headers& headers = {});
+    HttpResponse del(const std::string& url,
+                     const std::string& body = "",
+                     const Headers& headers = {});
 
     void set_timeout(int sec);
 

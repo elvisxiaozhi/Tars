@@ -240,7 +240,15 @@ int main(int argc, char* argv[]) {
             if (result.success) {
                 spdlog::info("===== R-V2.5b-live OK =====");
                 spdlog::info("  order_id : {}", result.order_id);
-                spdlog::warn("  ⚠️  请立刻去 polymarket.com → Profile → Open Orders 手动取消该单");
+
+                // R-V2.5c：立刻自动取消（远低于 mid 不会成交，但仍占 ledger cash）
+                spdlog::info("===== R-V2.5c auto-cancel =====");
+                bool cancelled = trader.cancel_order(result.order_id);
+                if (cancelled) {
+                    spdlog::info("  ✅ order cancelled");
+                } else {
+                    spdlog::warn("  ⚠️  cancel failed — 请去 polymarket.com 手动取消");
+                }
             } else {
                 spdlog::error("R-V2.5b-live failed: {}", result.error);
             }

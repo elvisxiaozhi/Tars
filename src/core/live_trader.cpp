@@ -333,6 +333,44 @@ bool LiveTrader::check_approvals_sufficient(double min_usdc_allowance) {
         " (proxy=" + cfg_.polymarket.proxy_address + ")");
 }
 
+// ===== 取消订单（R-V2.5c）=====
+//
+// 与 SDK py-clob-client-v2 client.py:cancel_order 行为对齐：
+//   DELETE /order  body = {"orderID":"<id>"}  L2 HMAC（method=DELETE, path=/order）
+bool LiveTrader::cancel_order(const std::string& order_id) {
+    if (!clob_authenticated_)
+        throw std::runtime_error("cancel_order: ensure_clob_authenticated first");
+    if (order_id.empty())
+        throw std::runtime_error("cancel_order: order_id empty");
+
+    std::string body = "{\"orderID\":\"" + order_id + "\"}";
+
+    uint64_t ts        = static_cast<uint64_t>(std::time(nullptr));
+    std::string ts_str = std::to_string(ts);
+    std::string sig_b64 = build_hmac_l2(clob_secret_, ts_str, "DELETE", "/order", body);
+
+    net::Headers headers = {
+        {"POLY_ADDRESS",    address_},
+        {"POLY_SIGNATURE",  sig_b64},
+        {"POLY_TIMESTAMP",  ts_str},
+        {"POLY_API_KEY",    clob_api_key_},
+        {"POLY_PASSPHRASE", clob_passphrase_},
+        {"Content-Type",    "application/json"},
+    };
+
+    net::HttpClient http(15, cfg_.network.proxy_url);
+    std::string url = cfg_.polymarket.clob_rest_url + "/order";
+    auto resp = http.del(url, body, headers);
+
+    if (resp.status_code != 200) {
+        spdlog::error("DELETE /order failed: HTTP {} body={}", resp.status_code, resp.body);
+        return false;
+    }
+
+    spdlog::info("DELETE /order 200: {}", resp.body);
+    return true;
+}
+
 // ===== 下单（R-V2.5b dry）=====
 //
 // R-V2.5b-dry：只构造 + 签 + 序列化，**不发 POST**，把 body 打到日志让用户肉眼验。

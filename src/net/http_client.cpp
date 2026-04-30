@@ -291,8 +291,10 @@ HttpResponse HttpClient::post(const std::string& url,
     return impl_->request(http::verb::post, url, body, headers);
 }
 
-HttpResponse HttpClient::del(const std::string& url, const Headers& headers) {
-    return impl_->request(http::verb::delete_, url, "", headers);
+HttpResponse HttpClient::del(const std::string& url,
+                              const std::string& body,
+                              const Headers& headers) {
+    return impl_->request(http::verb::delete_, url, body, headers);
 }
 
 void HttpClient::set_timeout(int sec) {

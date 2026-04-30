@@ -75,6 +75,10 @@ public:
     // GET /balance-allowance（L2 HMAC）→ pUSD ledger 数额；V2 升级后必须经此读余额。
     PolymarketBalance read_polymarket_balance();
 
+    // ===== 取消订单（R-V2.5c）=====
+    // DELETE /order with body {"orderID":"..."}（L2 HMAC）。返回 true=成功。
+    bool cancel_order(const std::string& order_id);
+
     // ===== Approval 校验（R6）=====
     bool check_approvals_sufficient(double min_usdc_allowance);
 
