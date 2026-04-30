@@ -506,13 +506,112 @@ OrderResult LiveTrader::place_exit_order(const Position& pos, double shares,
                          /*is_buy=*/false, is_taker, "exit:" + reason);
 }
 
-// ===== 启动对账 + 应急平仓（R9）=====
-void LiveTrader::reconcile_on_startup() {
-    throw std::runtime_error("LiveTrader::reconcile_on_startup not implemented (R9 pending)");
+// ===== 启动对账 + 应急平仓（R9-V2）=====
+//
+// reconcile_on_startup：GET /data/orders（L2 HMAC）+ 分页 cursor 读完所有 open orders。
+// 与 SDK get_open_orders 行为一致：first cursor "MA==" (base64 "0")；终止 "LTE=" (base64 "-1")。
+// HMAC 只签 path "/data/orders"，query (next_cursor=...) 单独传 URL（不参与 HMAC）。
+std::vector<OpenOrder> LiveTrader::reconcile_on_startup() {
+    if (!clob_authenticated_)
+        throw std::runtime_error("reconcile_on_startup: ensure_clob_authenticated first");
+
+    static const char* INITIAL_CURSOR = "MA==";
+    static const char* END_CURSOR     = "LTE=";
+
+    std::vector<OpenOrder> orders;
+    std::string cursor = INITIAL_CURSOR;
+
+    net::HttpClient http(15, cfg_.network.proxy_url);
+
+    int page = 0;
+    while (cursor != END_CURSOR && page < 50 /*safety cap*/) {
+        ++page;
+
+        uint64_t ts        = static_cast<uint64_t>(std::time(nullptr));
+        std::string ts_str = std::to_string(ts);
+        std::string sig_b64 = build_hmac_l2(clob_secret_, ts_str, "GET", "/data/orders");
+
+        net::Headers headers = {
+            {"POLY_ADDRESS",    address_},
+            {"POLY_SIGNATURE",  sig_b64},
+            {"POLY_TIMESTAMP",  ts_str},
+            {"POLY_API_KEY",    clob_api_key_},
+            {"POLY_PASSPHRASE", clob_passphrase_},
+        };
+
+        std::string url = cfg_.polymarket.clob_rest_url + "/data/orders?next_cursor=" + cursor;
+        auto resp = http.get(url, headers);
+        if (resp.status_code != 200) {
+            throw std::runtime_error(
+                "reconcile_on_startup: HTTP " + std::to_string(resp.status_code) +
+                " body=" + resp.body);
+        }
+
+        auto j = nlohmann::json::parse(resp.body);
+
+        // 首次拿到 raw body 用于诊断 / 字段名校准
+        if (page == 1) spdlog::debug("RECONCILE raw[1]: {}", resp.body);
+
+        cursor = j.value("next_cursor", END_CURSOR);  // 没字段当作结束
+
+        for (auto& it : j.value("data", nlohmann::json::array())) {
+            OpenOrder o;
+            o.order_id = it.value("id", "");
+            o.token_id = it.value("asset_id", "");
+            o.side     = it.value("side", "");
+            // 数值字段可能是 string 或 number，做兼容
+            auto to_d = [&](const nlohmann::json& v) -> double {
+                if (v.is_string()) {
+                    const auto& s = v.get_ref<const std::string&>();
+                    return s.empty() ? 0.0 : std::stod(s);
+                }
+                return v.is_number() ? v.get<double>() : 0.0;
+            };
+            o.price        = to_d(it.value("price", nlohmann::json("0")));
+            o.size         = to_d(it.value("original_size", it.value("size", nlohmann::json("0"))));
+            o.size_matched = to_d(it.value("size_matched", nlohmann::json("0")));
+            o.status       = it.value("status", "");
+            orders.push_back(std::move(o));
+        }
+    }
+
+    spdlog::info("RECONCILE: {} open order(s)", orders.size());
+    for (auto& o : orders) {
+        spdlog::info("  - id={}... {} {:.4f}@{:.4f} matched={:.4f} status={}",
+                     o.order_id.substr(0, std::min<size_t>(o.order_id.size(), 16)),
+                     o.side, o.size, o.price, o.size_matched, o.status);
+    }
+
+    return orders;
 }
 
-void LiveTrader::emergency_close_all(const std::vector<Position>&) {
-    throw std::runtime_error("LiveTrader::emergency_close_all not implemented (R9 pending)");
+// emergency_close_all：对每个仍持有的 position 发一笔 SELL FOK @ price=0.01 (floor)。
+// FOK 让 server 按对手最佳 bid 立即成交，否则取消。**不**等 fill 确认（紧急退出时间紧）。
+void LiveTrader::emergency_close_all(const std::vector<Position>& positions) {
+    if (!clob_authenticated_) {
+        spdlog::error("EMERGENCY: not authenticated, can't close");
+        return;
+    }
+
+    int sent = 0;
+    spdlog::warn("===== EMERGENCY CLOSE ALL ({} positions) =====", positions.size());
+    for (auto& pos : positions) {
+        if (pos.shares <= 0 || pos.closed) continue;
+        try {
+            auto r = place_exit_order(pos, pos.shares, /*price=*/0.01,
+                                      /*is_taker=*/true, "emergency");
+            if (r.success)
+                spdlog::warn("  SENT  {} shares={:.4f} order_id={}",
+                             pos.token_id.substr(0, 16), pos.shares,
+                             r.order_id.substr(0, std::min<size_t>(r.order_id.size(), 16)));
+            else
+                spdlog::error("  FAIL  {} {}", pos.token_id.substr(0, 16), r.error);
+            ++sent;
+        } catch (const std::exception& e) {
+            spdlog::error("  THREW {} {}", pos.token_id.substr(0, 16), e.what());
+        }
+    }
+    spdlog::warn("===== EMERGENCY done, {} order(s) sent =====", sent);
 }
 
 }  // namespace polymarket

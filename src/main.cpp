@@ -223,6 +223,15 @@ int main(int argc, char* argv[]) {
         // R-V2.3 已读到 cash 余额；下一步 R-V2.5 改为 cash >= max_single_trade 的检查。
         spdlog::warn("R6 (V1 approval check) skipped — V2 vault 模式无此概念，待 R-V2.5 替换");
 
+        // R9-V2: 启动对账 — 列出未平仓订单
+        try {
+            auto open_orders = trader.reconcile_on_startup();
+            (void)open_orders;
+        } catch (const std::exception& e) {
+            spdlog::error("LIVE MODE: reconcile failed: {}", e.what());
+            return 1;
+        }
+
         // R-V2.5b-live：真发一笔 BTC up/down 4h 远离 mid 的 limit BUY，验证 POST /order 全链路
         // token = YES (UP) of "BTC Up or Down — Apr 30 12:00-4:00PM ET" (event slug btc-updown-4h-1777564800)
         // 当前 bestAsk=$0.23, bestBid=$0.22；以 $0.05 × 20 shares = $1.00 远低于 mid 必然不成交

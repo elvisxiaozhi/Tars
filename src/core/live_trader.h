@@ -54,6 +54,17 @@ struct PolymarketBalance {
     int64_t snapshot_ms   = 0;
 };
 
+// 启动对账拿到的未平仓订单（GET /data/orders）。
+struct OpenOrder {
+    std::string order_id;
+    std::string token_id;
+    std::string side;          // "BUY" / "SELL"
+    double      price = 0;
+    double      size  = 0;     // 原始 size
+    double      size_matched = 0;
+    std::string status;        // "live" / "matched" / etc
+};
+
 class LiveTrader {
 public:
     explicit LiveTrader(const AppConfig& cfg);
@@ -87,8 +98,13 @@ public:
     OrderResult place_exit_order(const Position& pos, double shares, double price,
                                  bool is_taker, const std::string& reason);
 
-    // ===== 启动对账 + 应急平仓（R9）=====
-    void reconcile_on_startup();
+    // ===== 启动对账 + 应急平仓（R9-V2）=====
+    // GET /data/orders 列出 user 当前未平仓订单（含状态/已成交量），供 main loop
+    // 决定是否 cancel 残留 / 等待 fill 等。返回空 vector 表示无遗留订单。
+    std::vector<OpenOrder> reconcile_on_startup();
+
+    // 紧急平仓：对每个 position 发 SELL FOK @ price=0.01 (floor) 让 server 按对手最佳 bid 吃。
+    // 不阻塞、不等 fill 确认；SIGINT 紧急退出时调用。
     void emergency_close_all(const std::vector<Position>& positions);
 
 private:
