@@ -150,16 +150,18 @@ ExitSignal Strategy::evaluate_exit(
         return exit;
     }
 
-    // §五.1b 死水早退：入场 5 分钟后若 MFE 未启动，立即平仓
-    // 阈值从 5¢ 收紧到 **2¢**（Step 2.23）：4-26~5-1 共 14 笔触发数据复盘显示
-    // 旧阈值（5¢）累计 -$4.21，其中 12 笔为"近平误杀"（exit 在 entry ±2¢，主要损失为 fees）；
-    // 仅 #3 #9 #14 三笔 MFE_gain=0 是规则真正想救的"死透"case。
-    // 收紧到 2¢ 后历史回放仅这 3 笔触发，让 11 笔近平 case 由 trailing/expired 自然处理。
+    // §五.1b 死水早退：入场 8 分钟后若 MFE 未启动，立即平仓
+    // Step 2.23：阈值从 5¢ 收紧到 2¢（dry 14 笔回放只让 3 笔深死 case 触发）。
+    // Step 2.24：窗口从 5min → 8min（实验性单变量调整，观察 5-10 笔再评估）。
+    //   触发：5/1 live 4/4 都是"近平卖飞"，无救命 case。两笔反弹时刻：
+    //     · 18:10 case：7m00s 涨到 0.43（mfe +20¢） → 8min 窗口能救
+    //     · 13:11 case：18+ min 才反弹 → 8min 仍救不了，接受 -$0.36 损失
+    //   救命 case（04-29、04-30 15:25）多扛 3 分钟，最坏多损 ~$0.2/笔。
     auto now_chrono = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
     int64_t elapsed_sec = (now_chrono - pos.entry_time) / 1000;
     double mfe_gain = pos.max_price - pos.entry_price;
-    if (elapsed_sec >= 300 && mfe_gain < 0.02) {
+    if (elapsed_sec >= 480 && mfe_gain < 0.02) {
         exit.should_exit = true;
         exit.reason = "dead_water_exit";
         exit.exit_price = current_contract_price;
