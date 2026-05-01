@@ -94,6 +94,7 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div class="metric">
     <div class="metric-label">Realized P&L</div>
     <div class="metric-value" id="total-pnl">$0.00</div>
+    <div class="metric-sub">Daily <span id="daily-pnl">$0.00</span></div>
     <svg class="metric-spark" id="pnl-spark" width="100%" height="16" preserveAspectRatio="none" viewBox="0 0 100 16"></svg>
   </div>
   <div class="metric">
@@ -303,7 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('dashboard.' + id + '.open', el.open ? '1' : '0');
     });
   };
-  persistDetails('trade-history-details', false);
+  persistDetails('trade-history-details', true);   // 主要内容，默认展开
   persistDetails('analytics-details',     false);
   persistDetails('ad-perf',               false);
   persistDetails('ad-distribution',       false);
