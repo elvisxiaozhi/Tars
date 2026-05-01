@@ -1,6 +1,7 @@
 #include "core/live_trader.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -388,6 +389,8 @@ OrderDetail LiveTrader::get_order(const std::string& order_id) {
     try {
         auto j = nlohmann::json::parse(resp.body);
         d.status = j.value("status", std::string{});
+        // 服务端可能返回大写（MATCHED）或小写（matched）— 统一转小写便于调用方比较
+        for (auto& c : d.status) c = static_cast<char>(std::tolower(c));
         // size_matched 兼容 string/number
         if (j.contains("size_matched")) {
             const auto& v = j.at("size_matched");
