@@ -293,6 +293,11 @@ int main(int argc, char* argv[]) {
     polymarket::RiskManager risk(cfg);
     polymarket::TradeJournal journal("./logs/trades.jsonl");
 
+    // 显示用 balance：LIVE 模式取真实 vault cash；dry_run 取虚拟 risk balance
+    auto display_balance = [&]() {
+        return live_trader ? live_trader->cached_cash_pusd() : risk.account_balance();
+    };
+
     // 共享状态
     SharedState state;
     state.mode = cfg.strategy.mode;
@@ -319,7 +324,7 @@ int main(int argc, char* argv[]) {
         j["open_positions"] = static_cast<int>(state.positions.size());
         j["consecutive_losses"] = state.consecutive_losses;
         j["daily_pnl"] = state.daily_pnl;
-        j["account_balance"] = risk.account_balance();
+        j["account_balance"] = display_balance();
 
         // 计算持仓汇总：买入成本、未实现盈亏
         double total_cost = 0;
@@ -755,6 +760,9 @@ int main(int argc, char* argv[]) {
     std::string last_market_slug;  // 跟踪市场切换，检测新 K线
     while (g_running) {
         try {
+            // R-V2.7: LIVE 模式每 5min 刷一次真实 cash（节流，避免 rate limit）
+            if (live_trader) live_trader->refresh_balance_if_stale(5 * 60 * 1000);
+
             auto btc = binance.fetch();
 
             // 更新共享状态
@@ -910,6 +918,8 @@ int main(int argc, char* argv[]) {
                                 continue;  // 不创建 paper position，等下个信号
                             }
                             spdlog::info("LIVE BUY filled in {}s ✓", waited);
+                            // fill 完真扣 cash，立刻刷余额（push 给 dashboard）
+                            try { live_trader->read_polymarket_balance(); } catch (...) {}
                         }
 
                         positions.push_back(pos);
@@ -919,7 +929,7 @@ int main(int argc, char* argv[]) {
                         spdlog::info("OPEN [{}] {} {} @ {:.3f} | ${:.2f} ({} shares) | fee=${:.2f} | balance=${:.2f}",
                                      cfg.strategy.mode, pos.id,
                                      (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
-                                     pos.entry_price, size, shares, fee, risk.account_balance());
+                                     pos.entry_price, size, shares, fee, display_balance());
                     } else {
                         spdlog::debug("Signal blocked: {}", risk_reject);
                     }
@@ -955,7 +965,7 @@ int main(int argc, char* argv[]) {
                     spdlog::warn("EXPIRED [{}] {} market gone, settle @ last_price={:.3f} | pnl=${:+.2f} | balance=${:.2f}",
                                  pos.id,
                                  (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
-                                 last_price, pnl, risk.account_balance());
+                                 last_price, pnl, display_balance());
 
                     polymarket::TradeRecord rec;
                     rec.id = pos.id;
@@ -1028,6 +1038,8 @@ int main(int argc, char* argv[]) {
                                     continue;
                                 }
                                 spdlog::info("LIVE TP{} SELL ok order_id={}", tp.tier, r.order_id);
+                                // SELL 成交后立即刷余额（dashboard 同步）
+                                try { live_trader->read_polymarket_balance(); } catch (...) {}
                             } catch (const std::exception& e) {
                                 spdlog::error("LIVE TP{} SELL threw: {} (retry)", tp.tier, e.what());
                                 continue;
@@ -1048,7 +1060,7 @@ int main(int argc, char* argv[]) {
 
                         spdlog::info("TP{} [{}]: sell {:.1f} shares @ {:.3f} | pnl=${:+.4f} | remaining={:.0f}% | balance=${:.2f}",
                                      tp.tier, pos.id, sell_shares, current_price,
-                                     pnl, pos.shares_remaining_pct * 100, risk.account_balance());
+                                     pnl, pos.shares_remaining_pct * 100, display_balance());
 
                         if (pnl > 0) risk.record_profit(pnl);
                         else risk.record_loss(-pnl);
@@ -1086,7 +1098,7 @@ int main(int argc, char* argv[]) {
                     risk.remove_position();
 
                     spdlog::info("ALL TP FILLED [{}]: total_rpnl=${:+.2f} | balance=${:.2f}",
-                                 pos.id, pos.realized_pnl, risk.account_balance());
+                                 pos.id, pos.realized_pnl, display_balance());
                     continue;
                 }
 
@@ -1106,6 +1118,8 @@ int main(int argc, char* argv[]) {
                                 continue;
                             }
                             spdlog::info("LIVE STOP SELL ok order_id={}", r.order_id);
+                            // SELL 成交后立即刷余额
+                            try { live_trader->read_polymarket_balance(); } catch (...) {}
                         } catch (const std::exception& e) {
                             spdlog::error("LIVE STOP SELL threw: {} (retry)", e.what());
                             continue;
@@ -1139,7 +1153,7 @@ int main(int argc, char* argv[]) {
                     spdlog::info("CLOSE [{}] {} reason={} | pnl=${:+.2f} | balance=${:.2f}",
                                  pos.id,
                                  (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
-                                 exit_sig.reason, pnl, risk.account_balance());
+                                 exit_sig.reason, pnl, display_balance());
 
                     polymarket::TradeRecord rec;
                     rec.id = pos.id;
@@ -1219,7 +1233,7 @@ int main(int argc, char* argv[]) {
                              state.tick_count, mins,
                              state.btc.current_price, state.btc.deviation_pct,
                              last_up_ask, last_down_ask,
-                             risk.account_balance(), sleep_sec);
+                             display_balance(), sleep_sec);
             } else {
                 for (const auto& p : positions) {
                     double chg_pct = p.entry_price > 0 ? (p.current_price - p.entry_price) / p.entry_price * 100 : 0;
@@ -1229,7 +1243,7 @@ int main(int argc, char* argv[]) {
                                  p.id, (p.side == polymarket::Side::UP ? "UP" : "DN"),
                                  p.entry_price, p.current_price, chg_pct,
                                  p.max_price, p.shares_remaining_pct * 100,
-                                 risk.account_balance(), sleep_sec);
+                                 display_balance(), sleep_sec);
                 }
             }
         }

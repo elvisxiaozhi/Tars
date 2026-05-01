@@ -93,7 +93,15 @@ public:
 
     // ===== Polymarket V2 cash balance（R-V2.3）=====
     // GET /balance-allowance（L2 HMAC）→ pUSD ledger 数额；V2 升级后必须经此读余额。
+    // 内部更新 cached_cash_pusd_ + last_balance_refresh_ms_。
     PolymarketBalance read_polymarket_balance();
+
+    // 缓存的最后一次余额（read_polymarket_balance 调用后更新；启动前=0）。
+    double cached_cash_pusd() const { return cached_cash_pusd_; }
+
+    // 如果距上次刷新超过 max_age_ms，触发一次 read_polymarket_balance；否则 no-op。
+    // 主循环可频繁调用，内部会节流。
+    void refresh_balance_if_stale(int64_t max_age_ms);
 
     // ===== 取消订单（R-V2.5c）=====
     // DELETE /order with body {"orderID":"..."}（L2 HMAC）。返回 true=成功。
@@ -132,6 +140,10 @@ private:
     bool       wallet_initialized_ = false;
     PrivateKey key_;            // stays alive after init_wallet for signing (R5/R7/R8)
     std::string address_;       // EOA "0x…"
+
+    // R-V2.3 cached balance（read_polymarket_balance 后更新）
+    double      cached_cash_pusd_         = 0;
+    int64_t     last_balance_refresh_ms_  = 0;
 
     // R5: CLOB API credentials
     bool        clob_authenticated_ = false;

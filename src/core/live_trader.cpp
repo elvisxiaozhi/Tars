@@ -298,10 +298,29 @@ PolymarketBalance LiveTrader::read_polymarket_balance() {
     bal.snapshot_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
 
+    // 更新缓存
+    cached_cash_pusd_        = bal.cash_pusd;
+    last_balance_refresh_ms_ = bal.snapshot_ms;
+
     spdlog::info("POLY: cash=${:.4f} pUSD  allowance=${:.4f}  (V2 vault ledger)",
                  bal.cash_pusd, bal.allowance);
 
     return bal;
+}
+
+// 节流刷新：如果上次刷新超过 max_age_ms 就调一次 read_polymarket_balance；否则 no-op。
+// 调用方可每 tick 调，自动节流避免 rate limit。
+void LiveTrader::refresh_balance_if_stale(int64_t max_age_ms) {
+    if (!clob_authenticated_) return;
+    int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    if (last_balance_refresh_ms_ != 0 && (now - last_balance_refresh_ms_) < max_age_ms)
+        return;
+    try {
+        read_polymarket_balance();  // 内部更新 cache
+    } catch (const std::exception& e) {
+        spdlog::warn("refresh_balance_if_stale failed: {}", e.what());
+    }
 }
 
 // ===== Approval 校验（R6）=====
