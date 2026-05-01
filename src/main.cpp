@@ -452,13 +452,13 @@ int main(int argc, char* argv[]) {
         return j.dump();
     });
 
-    api.on_analytics([&]() -> std::string {
-        const auto& recs = journal.records();
+    // 把 analytics 计算抽出来：接 records 子集 → 返回完整 analytics json。
+    // 调 3 次：所有记录 / 仅 dry_run / 仅 live。
+    auto compute_analytics = [](const std::vector<polymarket::TradeRecord>& recs) -> json {
         json j;
-
         if (recs.empty()) {
             j["has_data"] = false;
-            return j.dump();
+            return j;
         }
         j["has_data"] = true;
 
@@ -708,10 +708,15 @@ int main(int argc, char* argv[]) {
         j["tp_hit_rates"] = tp;
 
         // 核心指标
+        // ev_per_trade 改成基于 candle_agg 累加（避免依赖 journal.total_pnl 全局，
+        // by_mode 子集才能正确计算）
+        double subset_total_pnl = 0;
+        for (const auto& [_, ca] : candle_agg) subset_total_pnl += ca.pnl;
+
         j["profit_factor"] = gross_loss > 0 ? gross_profit / gross_loss : 0;
         j["max_drawdown"] = max_dd;
         j["max_drawdown_pct"] = peak_bal > 0 ? max_dd / peak_bal * 100 : 0;
-        j["ev_per_trade"] = candle_total > 0 ? journal.total_pnl() / candle_total : 0;
+        j["ev_per_trade"] = candle_total > 0 ? subset_total_pnl / candle_total : 0;
         j["avg_win"] = avg_win;
         j["avg_loss"] = avg_loss;
         j["win_loss_ratio"] = avg_loss != 0 ? std::abs(avg_win / avg_loss) : 0;
@@ -753,6 +758,21 @@ int main(int argc, char* argv[]) {
         }
         j["duration_buckets"] = dur_j;
 
+        return j;
+    };
+
+    api.on_analytics([&]() -> std::string {
+        // 顶层 = 所有记录
+        json j = compute_analytics(journal.records());
+
+        // by_mode 分组
+        std::vector<polymarket::TradeRecord> dry, live;
+        for (const auto& r : journal.records()) {
+            std::string m = r.mode.empty() ? "dry_run" : r.mode;
+            (m == "live" ? live : dry).push_back(r);
+        }
+        j["by_mode"]["dry_run"] = compute_analytics(dry);
+        j["by_mode"]["live"]    = compute_analytics(live);
         return j.dump();
     });
 

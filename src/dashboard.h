@@ -278,7 +278,7 @@ async function fetchJSON(path) {
 function fmtDur(s) { return Math.floor(s/60) + 'm' + (s%60) + 's'; }
 
 async function refresh() {
-  const [status, trades, stats, analytics] = await Promise.all([
+  let [status, trades, stats, analytics] = await Promise.all([
     fetchJSON('/api/status'),
     fetchJSON('/api/trades'),
     fetchJSON('/api/stats'),
@@ -385,7 +385,11 @@ async function refresh() {
     tbody.innerHTML = html;
   }
 
-  // Analytics section
+  // Analytics section — 根据 currentFilter 选数据源
+  // all = 顶层；live/dry_run = analytics.by_mode.X
+  if (currentFilter !== 'all' && analytics && analytics.by_mode && analytics.by_mode[currentFilter]) {
+    analytics = analytics.by_mode[currentFilter];
+  }
   if (analytics && analytics.has_data) {
     const mm = analytics.mfe_mae;
     document.getElementById('a-avg-mfe').textContent = '+' + (mm.avg_mfe * 100).toFixed(1) + 'c';
