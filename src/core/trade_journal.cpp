@@ -86,6 +86,9 @@ TradeJournal::TradeJournal(const std::string& path) : path_(path) {
     spdlog::info("TradeJournal loaded {} historical record(s) from {}{}",
                  loaded, path_,
                  skipped ? (" (" + std::to_string(skipped) + " line(s) skipped)") : "");
+
+    // 标记会话起点：之后 record() 加入的都是本次会话新增
+    session_start_index_ = records_.size();
 }
 
 void TradeJournal::record(const TradeRecord& trade) {
@@ -153,22 +156,58 @@ void TradeJournal::print_summary() const {
     }
 
     spdlog::info("");
-    spdlog::info("=== Trade Summary ({} candles, {} records) ===", candle_count(), records_.size());
-    spdlog::info("{:<45} {:>5} {:>8} {:>8} {:>8} {:>10}",
-                 "Market", "Side", "Entry", "Exit", "Reason", "P&L");
-    spdlog::info("{}", std::string(90, '-'));
 
-    for (const auto& t : records_) {
-        std::string q = t.market_question;
-        if (q.size() > 45) q = q.substr(0, 42) + "...";
-        spdlog::info("{:<45} {:>5} {:>8.3f} {:>8.3f} {:>8} {:>+10.2f}",
-                     q, t.side, t.entry_price, t.exit_price,
-                     t.exit_reason, t.realized_pnl);
+    // === This session: 本次会话新增的 trades 详细打印 ===
+    size_t new_count = records_.size() > session_start_index_
+                       ? records_.size() - session_start_index_ : 0;
+    if (new_count > 0) {
+        spdlog::info("=== This session: {} new record(s) ===", new_count);
+        spdlog::info("{:<45} {:>5} {:>8} {:>8} {:>16} {:>10} {}",
+                     "Market", "Side", "Entry", "Exit", "Reason", "P&L", "Mode");
+        spdlog::info("{}", std::string(100, '-'));
+        for (size_t i = session_start_index_; i < records_.size(); ++i) {
+            const auto& t = records_[i];
+            std::string q = t.market_question;
+            if (q.size() > 45) q = q.substr(0, 42) + "...";
+            std::string m = t.mode.empty() ? "dry_run" : t.mode;
+            spdlog::info("{:<45} {:>5} {:>8.3f} {:>8.3f} {:>16} {:>+10.2f} [{}]",
+                         q, t.side, t.entry_price, t.exit_price,
+                         t.exit_reason, t.realized_pnl,
+                         m == "live" ? "LIVE" : "DRY");
+        }
+        spdlog::info("");
     }
 
-    spdlog::info("{}", std::string(90, '-'));
-    spdlog::info("Total P&L: ${:+.2f} | Win rate: {:.1f}% ({}/{})",
-                 total_pnl(), candle_win_rate() * 100, candle_wins(), candle_count());
+    // === All-time totals: 按 mode 分组（按 base position id 聚合 TP partial）===
+    auto group_stats = [&](const std::string& target_mode) {
+        std::map<std::string, double> pos_pnl;
+        for (const auto& t : records_) {
+            std::string m = t.mode.empty() ? "dry_run" : t.mode;
+            if (m != target_mode) continue;
+            std::string base = base_position_id(t.id);
+            pos_pnl[base] += t.realized_pnl;
+        }
+        int wins = 0, losses = 0;
+        double total = 0;
+        for (auto& [_, p] : pos_pnl) {
+            total += p;
+            if (p > 0) ++wins; else if (p < 0) ++losses;
+        }
+        return std::make_tuple(static_cast<int>(pos_pnl.size()), wins, losses, total);
+    };
+
+    auto [d_n, d_w, d_l, d_pnl] = group_stats("dry_run");
+    auto [l_n, l_w, l_l, l_pnl] = group_stats("live");
+
+    spdlog::info("=== All-time totals ===");
+    if (d_n > 0)
+        spdlog::info("  Dry  : {:>4} candles | win {:>5.1f}% ({}/{}) | P&L ${:+.2f}",
+                     d_n, d_n > 0 ? 100.0 * d_w / d_n : 0.0, d_w, d_n, d_pnl);
+    if (l_n > 0)
+        spdlog::info("  Live : {:>4} candles | win {:>5.1f}% ({}/{}) | P&L ${:+.2f}",
+                     l_n, l_n > 0 ? 100.0 * l_w / l_n : 0.0, l_w, l_n, l_pnl);
+    if (d_n + l_n == 0)
+        spdlog::info("  (no candles in journal)");
 }
 
 // 按仓位 ID 分组，汇总每个仓位的总 P&L

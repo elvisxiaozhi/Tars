@@ -224,9 +224,8 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        // R6 (V1) 已废：V2 vault 模式没有 approve CTFExchange 的概念；
-        // R-V2.3 已读到 cash 余额；下一步 R-V2.5 改为 cash >= max_single_trade 的检查。
-        spdlog::warn("R6 (V1 approval check) skipped — V2 vault 模式无此概念，待 R-V2.5 替换");
+        // R6 (V1 approval check) 已废：V2 vault 模式无 ERC-20 approve 概念；
+        // cash 校验由 R-V2.3 read_polymarket_balance 已覆盖（上面那行 POLY: cash=$X.XX）。
 
         // R9-V2: 启动对账 — 列出未平仓订单
         try {

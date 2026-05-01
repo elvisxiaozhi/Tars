@@ -87,6 +87,7 @@ public:
 private:
     std::string path_;
     std::vector<TradeRecord> records_;
+    size_t session_start_index_ = 0;  // 本次会话开始时的 records_.size()，print_summary 据此区分新旧
     std::mutex mu_;
 };
 
