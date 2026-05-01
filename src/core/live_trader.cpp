@@ -333,6 +333,55 @@ bool LiveTrader::check_approvals_sufficient(double min_usdc_allowance) {
         " (proxy=" + cfg_.polymarket.proxy_address + ")");
 }
 
+// ===== 查单笔订单（R-V2.7-P0）=====
+// 与 SDK py-clob-client-v2 client.py:get_order 行为对齐：
+//   path = /data/order/<order_id>（含 id），L2 HMAC 签同样 path
+//   响应字段：id / status / size_matched / ...
+OrderDetail LiveTrader::get_order(const std::string& order_id) {
+    OrderDetail d;
+    d.order_id = order_id;
+
+    if (!clob_authenticated_) { d.error = "not authenticated"; return d; }
+    if (order_id.empty())     { d.error = "empty order_id";    return d; }
+
+    std::string path = "/data/order/" + order_id;
+
+    uint64_t ts        = static_cast<uint64_t>(std::time(nullptr));
+    std::string ts_str = std::to_string(ts);
+    std::string sig_b64 = build_hmac_l2(clob_secret_, ts_str, "GET", path);
+
+    net::Headers headers = {
+        {"POLY_ADDRESS",    address_},
+        {"POLY_SIGNATURE",  sig_b64},
+        {"POLY_TIMESTAMP",  ts_str},
+        {"POLY_API_KEY",    clob_api_key_},
+        {"POLY_PASSPHRASE", clob_passphrase_},
+    };
+
+    net::HttpClient http(15, cfg_.network.proxy_url);
+    auto resp = http.get(cfg_.polymarket.clob_rest_url + path, headers);
+
+    if (resp.status_code != 200) {
+        d.error = "HTTP " + std::to_string(resp.status_code) + " body=" + resp.body;
+        return d;
+    }
+
+    try {
+        auto j = nlohmann::json::parse(resp.body);
+        d.status = j.value("status", std::string{});
+        // size_matched 兼容 string/number
+        if (j.contains("size_matched")) {
+            const auto& v = j.at("size_matched");
+            if (v.is_string()) d.size_matched = std::stod(v.get<std::string>());
+            else if (v.is_number()) d.size_matched = v.get<double>();
+        }
+        d.ok = true;
+    } catch (const std::exception& e) {
+        d.error = std::string("parse: ") + e.what();
+    }
+    return d;
+}
+
 // ===== 取消订单（R-V2.5c）=====
 //
 // 与 SDK py-clob-client-v2 client.py:cancel_order 行为对齐：

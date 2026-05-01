@@ -65,6 +65,15 @@ struct OpenOrder {
     std::string status;        // "live" / "matched" / etc
 };
 
+// 单笔订单详情（GET /data/order/<id>）— 用于轮询 fill 状态。
+struct OrderDetail {
+    std::string order_id;
+    std::string status;        // "live" / "matched" / "cancelled" / "killed" / 空=未找到
+    double      size_matched = 0;
+    bool        ok = false;    // false 表示请求失败（HTTP 错或解析错）
+    std::string error;
+};
+
 class LiveTrader {
 public:
     explicit LiveTrader(const AppConfig& cfg);
@@ -89,6 +98,10 @@ public:
     // ===== 取消订单（R-V2.5c）=====
     // DELETE /order with body {"orderID":"..."}（L2 HMAC）。返回 true=成功。
     bool cancel_order(const std::string& order_id);
+
+    // ===== 查单笔订单（R-V2.7-P0）=====
+    // GET /data/order/<order_id>（L2 HMAC path 含 id）。用于入场后轮询 fill。
+    OrderDetail get_order(const std::string& order_id);
 
     // ===== Approval 校验（R6）=====
     bool check_approvals_sufficient(double min_usdc_allowance);

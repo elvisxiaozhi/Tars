@@ -866,20 +866,50 @@ int main(int argc, char* argv[]) {
                         pos.consec_losses_before = risk.consecutive_losses();
                         pos.balance_before = risk.account_balance();
 
-                        // R-V2.6: LIVE 模式真发 POST /order；失败则放弃这次入场
+                        // R-V2.6 + P0 fix: LIVE 模式真发 POST /order，然后轮询直到 fill
+                        // 关键：BUY 是限价 GTC，可能挂着不立即成交。bot 必须等 fill 确认才创建
+                        // paper position，否则后续 SELL 会被 server reject "not enough balance"。
                         if (live_trader) {
+                            std::string buy_id;
                             try {
                                 auto r = live_trader->place_entry_order(sig, shares);
                                 if (!r.success) {
-                                    spdlog::error("LIVE BUY rejected: {} (skip this signal)", r.error);
+                                    spdlog::error("LIVE BUY rejected: {} (skip)", r.error);
                                     continue;
                                 }
-                                spdlog::info("LIVE BUY ok order_id={}", r.order_id);
-                                // TODO: 限价 GTC 可能未立即 fill；先假设 fill。后续加 GET /data/order/<id> 轮询。
+                                buy_id = r.order_id;
+                                spdlog::info("LIVE BUY placed order_id={}, polling fill...", buy_id);
                             } catch (const std::exception& e) {
                                 spdlog::error("LIVE BUY threw: {} (skip)", e.what());
                                 continue;
                             }
+
+                            // 轮询 fill：max 60s, 每 3s 一次 GET /data/order/<id>
+                            const int max_wait_sec = 60;
+                            const int poll_interval = 3;
+                            int waited = 0;
+                            bool filled = false;
+                            std::string final_status;
+                            while (waited < max_wait_sec && g_running) {
+                                std::this_thread::sleep_for(std::chrono::seconds(poll_interval));
+                                waited += poll_interval;
+                                auto d = live_trader->get_order(buy_id);
+                                if (!d.ok) {
+                                    spdlog::warn("get_order err: {} (continue polling)", d.error);
+                                    continue;
+                                }
+                                final_status = d.status;
+                                if (d.status == "matched") { filled = true; break; }
+                                if (d.status == "cancelled" || d.status == "killed") break;
+                            }
+
+                            if (!filled) {
+                                spdlog::warn("LIVE BUY didn't fill in {}s (status={}), cancelling",
+                                             waited, final_status);
+                                try { live_trader->cancel_order(buy_id); } catch (...) {}
+                                continue;  // 不创建 paper position，等下个信号
+                            }
+                            spdlog::info("LIVE BUY filled in {}s ✓", waited);
                         }
 
                         positions.push_back(pos);
@@ -984,11 +1014,13 @@ int main(int argc, char* argv[]) {
                     if (current_price >= tp.trigger_price) {
                         double sell_shares = pos.shares * tp.sell_pct * pos.shares_remaining_pct;
 
-                        // R-V2.6: LIVE 模式先发 SELL；失败就 skip（不标 triggered，下个 tick 重试）
+                        // R-V2.6 + P1 fix: LIVE FOK SELL 用 floor 0.01（不是 strategy.current_price）
+                        // 因为 strategy 给的价格可能高于 best_bid，FOK 会 kill；用 0.01 让 server 按对手最佳 bid 全成交。
+                        // paper P&L 仍按 current_price 算（与 dry_run 一致），LIVE 实际成交价可能稍低。
                         if (live_trader) {
                             try {
                                 auto r = live_trader->place_exit_order(
-                                    pos, sell_shares, current_price,
+                                    pos, sell_shares, /*price=*/0.01,
                                     /*is_taker=*/true, "tp" + std::to_string(tp.tier));
                                 if (!r.success) {
                                     spdlog::error("LIVE TP{} SELL rejected: {} (retry next tick)",
@@ -1063,11 +1095,11 @@ int main(int argc, char* argv[]) {
                 if (exit_sig.should_exit) {
                     double remaining_shares = pos.shares * pos.shares_remaining_pct;
 
-                    // R-V2.6: LIVE 模式先发 SELL；失败就 skip（保持仓位，下个 tick 重试 evaluate_exit）
+                    // R-V2.6 + P1 fix: LIVE FOK SELL 用 floor 0.01（让 server 按 best_bid 吃）
                     if (live_trader) {
                         try {
                             auto r = live_trader->place_exit_order(
-                                pos, remaining_shares, exit_sig.exit_price,
+                                pos, remaining_shares, /*price=*/0.01,
                                 /*is_taker=*/true, exit_sig.reason);
                             if (!r.success) {
                                 spdlog::error("LIVE STOP SELL rejected: {} (retry next tick)", r.error);
