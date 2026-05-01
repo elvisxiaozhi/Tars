@@ -11,6 +11,7 @@ namespace polymarket {
 
 struct TradeRecord {
     std::string id;
+    std::string mode;            // "live" / "dry_run"（区分实盘 vs 模拟；老记录加载时默认 "dry_run"）
     std::string market_question;
     std::string side;            // "UP" / "DOWN"
     int64_t entry_time = 0;

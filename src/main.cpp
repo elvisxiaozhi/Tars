@@ -120,7 +120,9 @@ static void get_et_time(int& hour_et, int& day_of_week) {
 // 将 analytics 字段从 Position 填充到 TradeRecord
 static void fill_analytics(polymarket::TradeRecord& rec,
                            const polymarket::Position& pos,
-                           const polymarket::BtcMarketData& btc) {
+                           const polymarket::BtcMarketData& btc,
+                           const std::string& mode) {
+    rec.mode = mode;
     rec.max_price = pos.max_price;
     rec.min_price = (pos.min_price > 1e8) ? pos.entry_price : pos.min_price;
     rec.btc_price_at_exit = btc.current_price;
@@ -375,6 +377,7 @@ int main(int argc, char* argv[]) {
         for (const auto& t : journal.records()) {
             json j;
             j["id"] = t.id;
+            j["mode"] = t.mode.empty() ? "dry_run" : t.mode;  // 老记录默认 dry_run
             j["market"] = t.market_question;
             j["side"] = t.side;
             j["entry_time"] = t.entry_time;
@@ -987,7 +990,7 @@ int main(int argc, char* argv[]) {
                     rec.exit_reason = "expired";
                     rec.realized_pnl = pnl;  // 只记本次卖出的 P&L，不是累积
                     rec.fee_paid = exit_fee + entry_fee_portion;
-                    fill_analytics(rec, pos, btc);
+                    fill_analytics(rec, pos, btc, cfg.strategy.mode);
                     journal.record(rec);
                     continue;
                 }
@@ -1086,7 +1089,7 @@ int main(int argc, char* argv[]) {
                         tp_rec.exit_reason = "tp" + std::to_string(tp.tier);
                         tp_rec.realized_pnl = pnl;
                         tp_rec.fee_paid = exit_fee + entry_fee_portion;
-                        fill_analytics(tp_rec, pos, btc);
+                        fill_analytics(tp_rec, pos, btc, cfg.strategy.mode);
                         journal.record(tp_rec);
                     }
                 }
@@ -1175,7 +1178,7 @@ int main(int argc, char* argv[]) {
                     rec.exit_reason = exit_sig.reason;
                     rec.realized_pnl = pnl;  // 只记本次卖出的 P&L，不是累积
                     rec.fee_paid = exit_fee + entry_fee_portion;
-                    fill_analytics(rec, pos, btc);
+                    fill_analytics(rec, pos, btc, cfg.strategy.mode);
                     journal.record(rec);
                 }
             }

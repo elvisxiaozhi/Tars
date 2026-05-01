@@ -22,6 +22,66 @@ TradeJournal::TradeJournal(const std::string& path) : path_(path) {
     if (!dir.empty()) {
         std::filesystem::create_directories(dir);
     }
+
+    // 启动加载历史 jsonl（容错：缺字段用默认；解析失败的行跳过）
+    std::ifstream f(path_);
+    if (!f.is_open()) return;
+
+    std::string line;
+    int loaded = 0, skipped = 0;
+    while (std::getline(f, line)) {
+        if (line.empty()) continue;
+        try {
+            auto j = json::parse(line);
+            TradeRecord r;
+            r.id                          = j.value("id", "");
+            // mode 字段：老记录无此字段 → 默认 "dry_run"（4-28 V2 升级前全是模拟）
+            r.mode                        = j.value("mode", std::string{"dry_run"});
+            r.market_question             = j.value("market", "");
+            r.side                        = j.value("side", "");
+            r.entry_time                  = j.value("entry_time", int64_t{0});
+            r.exit_time                   = j.value("exit_time", int64_t{0});
+            r.minutes_remaining_at_entry  = j.value("minutes_remaining", 0);
+            r.entry_price                 = j.value("entry_price", 0.0);
+            r.exit_price                  = j.value("exit_price", 0.0);
+            r.size_usdc                   = j.value("size_usdc", 0.0);
+            r.shares                      = j.value("shares", 0.0);
+            r.btc_price_at_entry          = j.value("btc_price", 0.0);
+            r.btc_strike                  = j.value("btc_strike", 0.0);
+            r.btc_deviation_pct           = j.value("btc_deviation_pct", 0.0);
+            r.entry_vol                   = j.value("entry_vol", 0.0);
+            r.avg_vol                     = j.value("avg_vol", 0.0);
+            r.exit_reason                 = j.value("exit_reason", "");
+            r.realized_pnl                = j.value("pnl", 0.0);
+            r.fee_paid                    = j.value("fee", 0.0);
+            r.max_price                   = j.value("max_price", 0.0);
+            r.min_price                   = j.value("min_price", 0.0);
+            r.btc_price_at_exit           = j.value("btc_price_at_exit", 0.0);
+            r.btc_deviation_at_exit       = j.value("btc_deviation_at_exit", 0.0);
+            r.spread_at_entry             = j.value("spread_at_entry", 0.0);
+            r.ask_depth_at_entry          = j.value("ask_depth_at_entry", 0.0);
+            r.hour_et                     = j.value("hour_et", -1);
+            r.day_of_week                 = j.value("day_of_week", -1);
+            r.consec_wins_before          = j.value("consec_wins_before", 0);
+            r.consec_losses_before        = j.value("consec_losses_before", 0);
+            r.balance_before              = j.value("balance_before", 0.0);
+            r.hold_duration_sec           = j.value("hold_duration_sec", 0);
+            r.mfe_capture_rate            = j.value("mfe_capture_rate", 0.0);
+            r.mfe_at_5min                 = j.value("mfe_at_5min", 0.0);
+            r.mfe_at_10min                = j.value("mfe_at_10min", 0.0);
+            r.mfe_at_15min                = j.value("mfe_at_15min", 0.0);
+            r.mfe5_gain_pct               = j.value("mfe5_gain_pct", 0.0);
+            r.mfe10_gain_pct              = j.value("mfe10_gain_pct", 0.0);
+            r.mfe15_gain_pct              = j.value("mfe15_gain_pct", 0.0);
+            records_.push_back(std::move(r));
+            ++loaded;
+        } catch (const std::exception&) {
+            ++skipped;  // 损坏 / 半行
+        }
+    }
+    spdlog::info("TradeJournal loaded {} historical record(s) from {}{}",
+                 loaded, path_,
+                 skipped ? (" (" + std::to_string(skipped) + " line(s) skipped)") : "");
 }
 
 void TradeJournal::record(const TradeRecord& trade) {
@@ -31,6 +91,7 @@ void TradeJournal::record(const TradeRecord& trade) {
     // 追加写入 JSONL 文件
     json j;
     j["id"] = trade.id;
+    j["mode"] = trade.mode;
     j["market"] = trade.market_question;
     j["side"] = trade.side;
     j["entry_time"] = trade.entry_time;
