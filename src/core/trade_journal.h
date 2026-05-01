@@ -52,6 +52,12 @@ struct TradeRecord {
     double mfe5_gain_pct = 0;   // (mfe_at_5min - entry) / entry
     double mfe10_gain_pct = 0;
     double mfe15_gain_pct = 0;
+    // §五.1b dead_water 触发时的市场上下文埋点（仅 exit_reason=="dead_water_exit" 填）
+    // Step 2.23：用于 20+ 笔后回归是否要加 BTC 方向 / vol 条件
+    double dw_btc_dev_pct = 0;       // 触发瞬间 BTC dev (%)
+    double dw_vol_ratio = 0;         // current_1h_vol / avg_24h_vol（>1 = 当前更活跃）
+    double dw_spread = 0;            // 触发瞬间 ask-bid（我方 token）
+    bool   dw_dev_favors = false;    // BTC dev 方向是否帮助仓位（UP & dev>0 / DOWN & dev<0）
 };
 
 class TradeJournal {

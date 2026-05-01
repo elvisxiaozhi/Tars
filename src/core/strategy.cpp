@@ -150,14 +150,16 @@ ExitSignal Strategy::evaluate_exit(
         return exit;
     }
 
-    // §五.1b 死水早退：入场 5 分钟后若 MFE 未达 +5¢，立即平仓
-    // 依据：4-26 P1 trip mfe5/10/15 全部 0.13（entry 0.10），最终亏 -$0.53；
-    // 实测显示 MFE 在 5 分钟后仍未启动的 trip 几乎不会反转，提前出场可减损
+    // §五.1b 死水早退：入场 5 分钟后若 MFE 未启动，立即平仓
+    // 阈值从 5¢ 收紧到 **2¢**（Step 2.23）：4-26~5-1 共 14 笔触发数据复盘显示
+    // 旧阈值（5¢）累计 -$4.21，其中 12 笔为"近平误杀"（exit 在 entry ±2¢，主要损失为 fees）；
+    // 仅 #3 #9 #14 三笔 MFE_gain=0 是规则真正想救的"死透"case。
+    // 收紧到 2¢ 后历史回放仅这 3 笔触发，让 11 笔近平 case 由 trailing/expired 自然处理。
     auto now_chrono = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
     int64_t elapsed_sec = (now_chrono - pos.entry_time) / 1000;
     double mfe_gain = pos.max_price - pos.entry_price;
-    if (elapsed_sec >= 300 && mfe_gain < 0.05) {
+    if (elapsed_sec >= 300 && mfe_gain < 0.02) {
         exit.should_exit = true;
         exit.reason = "dead_water_exit";
         exit.exit_price = current_contract_price;

@@ -1255,6 +1255,24 @@ int main(int argc, char* argv[]) {
                     rec.realized_pnl = pnl;  // 只记本次卖出的 P&L，不是累积
                     rec.fee_paid = exit_fee + entry_fee_portion;
                     fill_analytics(rec, pos, btc, cfg.strategy.mode);
+
+                    // §五.1b dead_water 埋点（Step 2.23）：触发瞬间的市场上下文
+                    // 用于 20+ 笔后回归是否要加 BTC 方向 / vol 条件
+                    if (exit_sig.reason == "dead_water_exit") {
+                        rec.dw_btc_dev_pct = btc.deviation_pct;
+                        rec.dw_vol_ratio   = (btc.avg_24h_vol > 1e-9)
+                                             ? (btc.current_1h_vol / btc.avg_24h_vol) : 0.0;
+                        // dev_favors：BTC dev 方向是否帮持仓方向获胜
+                        // UP 仓位希望 BTC > strike (dev>0)；DOWN 仓位希望 BTC < strike (dev<0)
+                        rec.dw_dev_favors = (pos.side == polymarket::Side::UP && btc.deviation_pct > 0) ||
+                                            (pos.side == polymarket::Side::DOWN && btc.deviation_pct < 0);
+                        // 触发瞬间 spread（我方 token 的 ask - bid）
+                        auto bp_it = updated->best_prices.find(pos.token_id);
+                        if (bp_it != updated->best_prices.end()) {
+                            rec.dw_spread = bp_it->second.best_ask - bp_it->second.best_bid;
+                        }
+                    }
+
                     journal.record(rec);
                 }
             }
