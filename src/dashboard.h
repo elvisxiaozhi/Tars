@@ -46,6 +46,25 @@ inline const std::string DASHBOARD_HTML = R"html(
   .refresh { font-size: 0.7em; color: #484f58; }
   .pnl-bar { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
   .pnl-bar-fill { height: 4px; border-radius: 2px; min-width: 2px; }
+
+  /* === P0/P1/P2 紧凑布局 === */
+  /* metric-row: 顶部一排 8 个紧凑 metric（替代原 grid + stats-grid 双层）*/
+  .metric-row { display: grid; grid-template-columns: repeat(8, 1fr); gap: 1px; background: #1e2d3d; border: 1px solid #1e2d3d; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
+  .metric { background: #111827; padding: 10px 14px; min-height: 64px; display: flex; flex-direction: column; justify-content: center; }
+  .metric-label { font-size: 0.65em; color: #7d8590; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; }
+  .metric-value { font-size: 1.15em; font-weight: bold; line-height: 1.1; }
+  .metric-sub { font-size: 0.65em; color: #7d8590; margin-top: 2px; }
+  .metric-spark { margin-top: 4px; height: 16px; }
+  /* 嵌套 details（Analytics 内子折叠）*/
+  details details { margin-top: 12px; }
+  details details > summary { padding: 6px 0; font-size: 0.85em; color: #58a6ff; cursor: pointer; list-style: none; user-select: none; }
+  /* 响应式：窄屏 metric-row 折叠成 2 行 */
+  @media (max-width: 900px) {
+    .metric-row { grid-template-columns: repeat(4, 1fr); }
+  }
+  @media (max-width: 500px) {
+    .metric-row { grid-template-columns: repeat(2, 1fr); }
+  }
 </style>
 </head>
 <body>
@@ -60,61 +79,59 @@ inline const std::string DASHBOARD_HTML = R"html(
   </div>
 </div>
 
-<div class="grid">
-  <div class="card">
-    <div class="card-title">Account Balance</div>
-    <div class="card-value neutral" id="account-balance">--</div>
-    <div style="font-size:0.75em;color:#7d8590;margin-top:4px;">
-      BTC: <span id="btc-price">--</span> | Dev: <span id="btc-dev">--</span>
-    </div>
+<!-- 顶部 8 metric 紧凑一排（P0-1 + P2-5）-->
+<div class="metric-row">
+  <div class="metric">
+    <div class="metric-label">Balance</div>
+    <div class="metric-value neutral" id="account-balance">--</div>
+    <div class="metric-sub">BTC <span id="btc-price">--</span></div>
   </div>
-  <div class="card">
-    <div class="card-title">Position Cost</div>
-    <div class="card-value neutral" id="total-cost">$0.00</div>
-    <div style="font-size:0.75em;color:#7d8590;margin-top:4px;">
-      Unrealized: <span id="unrealized-pnl">$0.00</span>
-    </div>
+  <div class="metric">
+    <div class="metric-label">Position Cost</div>
+    <div class="metric-value neutral" id="total-cost">$0.00</div>
+    <div class="metric-sub">UPnL <span id="unrealized-pnl">$0.00</span></div>
   </div>
-  <div class="card">
-    <div class="card-title">Realized P&L</div>
-    <div class="card-value" id="total-pnl">$0.00</div>
-    <div style="font-size:0.75em;color:#7d8590;margin-top:4px;">
-      Daily: <span id="daily-pnl">$0.00</span>
-    </div>
+  <div class="metric">
+    <div class="metric-label">Realized P&L</div>
+    <div class="metric-value" id="total-pnl">$0.00</div>
+    <svg class="metric-spark" id="pnl-spark" width="100%" height="16" preserveAspectRatio="none" viewBox="0 0 100 16"></svg>
   </div>
-  <div class="card">
-    <div class="card-title">Win Rate</div>
-    <div class="card-value neutral" id="win-rate">--%</div>
-    <div style="font-size:0.75em;color:#7d8590;margin-top:4px;">
-      <span id="win-loss">0W / 0L</span> of <span id="total-trades">0</span> trades
-    </div>
+  <div class="metric">
+    <div class="metric-label">Win Rate</div>
+    <div class="metric-value neutral" id="win-rate">--%</div>
+    <div class="metric-sub"><span id="win-loss">0W/0L</span> · <span id="total-trades">0</span></div>
   </div>
-</div>
-
-<div class="stats-grid">
-  <div class="stat">
-    <div class="stat-label">Open Positions</div>
-    <div class="stat-value neutral" id="open-pos">0</div>
+  <div class="metric">
+    <div class="metric-label">Open</div>
+    <div class="metric-value neutral" id="open-pos">0</div>
+    <div class="metric-sub">positions</div>
   </div>
-  <div class="stat">
-    <div class="stat-label">Volatility</div>
-    <div class="stat-value" id="volatility">--</div>
+  <div class="metric">
+    <div class="metric-label">Volatility</div>
+    <div class="metric-value" id="volatility">--</div>
+    <div class="metric-sub">BTC 1h</div>
   </div>
-  <div class="stat">
-    <div class="stat-label">Candle Remaining</div>
-    <div class="stat-value" id="remaining">--</div>
+  <div class="metric">
+    <div class="metric-label">Remaining</div>
+    <div class="metric-value" id="remaining">--</div>
+    <div class="metric-sub">candle</div>
   </div>
-  <div class="stat">
-    <div class="stat-label">Consecutive Losses</div>
-    <div class="stat-value" id="consec-losses">0</div>
+  <div class="metric">
+    <div class="metric-label">Cons Losses</div>
+    <div class="metric-value" id="consec-losses">0</div>
+    <div class="metric-sub">streak</div>
   </div>
 </div>
 
-<div class="section">
+<!-- BTC dev 独立一行（之前在 Account Balance card 副标里，紧凑后挪出）-->
+<div style="font-size:0.7em;color:#7d8590;margin-bottom:16px;text-align:right;">
+  BTC dev: <span id="btc-dev">--</span>
+</div>
+
+<!-- Open Positions section 仅在有持仓时显示（P1-4）-->
+<div class="section" id="open-positions-section" style="display:none;">
   <div class="section-title">Open Positions</div>
-  <div id="positions-container">
-    <div class="positions-empty">No open positions</div>
-  </div>
+  <div id="positions-container"></div>
 </div>
 
 <details class="section" id="trade-history-details">
@@ -152,92 +169,104 @@ inline const std::string DASHBOARD_HTML = R"html(
   </table>
 </details>
 
-<div class="section">
-  <div class="section-title">Analytics</div>
-  <div class="stats-grid" id="analytics-cards">
-    <div class="stat"><div class="stat-label">Avg MFE</div><div class="stat-value positive" id="a-avg-mfe">--</div></div>
-    <div class="stat"><div class="stat-label">Avg MAE</div><div class="stat-value negative" id="a-avg-mae">--</div></div>
-    <div class="stat"><div class="stat-label">MFE:MAE Ratio</div><div class="stat-value neutral" id="a-ratio">--</div></div>
-    <div class="stat"><div class="stat-label">Max MFE</div><div class="stat-value positive" id="a-max-mfe">--</div></div>
-  </div>
-  <div class="stats-grid" id="analytics-duration">
-    <div class="stat"><div class="stat-label">Avg Hold</div><div class="stat-value" id="a-avg-dur">--</div></div>
-    <div class="stat"><div class="stat-label">Min Hold</div><div class="stat-value" id="a-min-dur">--</div></div>
-    <div class="stat"><div class="stat-label">Max Hold</div><div class="stat-value" id="a-max-dur">--</div></div>
-    <div class="stat"><div class="stat-label">Spread (W vs L)</div><div class="stat-value" id="a-spread">--</div></div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
-    <div class="card">
-      <div class="card-title">P&L by Hour (ET)</div>
-      <div id="hour-heatmap" style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-top:8px;"></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Exit Reason Distribution</div>
-      <div id="exit-reasons" style="margin-top:8px;"></div>
-    </div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
-    <div class="card">
-      <div class="card-title">P&L by Day of Week</div>
-      <div id="day-of-week" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:8px;"></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Streak Analysis</div>
-      <div id="streak-analysis" style="margin-top:8px;font-size:0.85em;"></div>
-    </div>
-  </div>
+<!-- Analytics 整块默认折叠（P0-2），内部分 4 个子 details（P1-3）-->
+<details class="section" id="analytics-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;"><span>Analytics</span></summary>
 
-  <div class="stats-grid" id="analytics-core">
-    <div class="stat"><div class="stat-label">Profit Factor</div><div class="stat-value neutral" id="a-pf">--</div></div>
-    <div class="stat"><div class="stat-label">EV / Trade</div><div class="stat-value" id="a-ev">--</div></div>
-    <div class="stat"><div class="stat-label">Avg Win / Avg Loss</div><div class="stat-value" id="a-wl">--</div></div>
-    <div class="stat"><div class="stat-label">Max Drawdown</div><div class="stat-value negative" id="a-dd">--</div></div>
-  </div>
-  <div class="stats-grid" id="analytics-capture">
-    <div class="stat"><div class="stat-label">MFE Capture (All)</div><div class="stat-value neutral" id="a-cap-all">--</div></div>
-    <div class="stat"><div class="stat-label">MFE Capture (Win)</div><div class="stat-value positive" id="a-cap-win">--</div></div>
-    <div class="stat"><div class="stat-label">MFE Capture (Loss)</div><div class="stat-value negative" id="a-cap-lose">--</div></div>
-    <div class="stat"><div class="stat-label">Trailing Stop Avg</div><div class="stat-value" id="a-ts-avg">--</div></div>
-  </div>
+  <details id="ad-perf">
+    <summary><span>Performance &amp; MFE/MAE</span></summary>
+    <div class="stats-grid" id="analytics-cards" style="margin-top:8px;">
+      <div class="stat"><div class="stat-label">Avg MFE</div><div class="stat-value positive" id="a-avg-mfe">--</div></div>
+      <div class="stat"><div class="stat-label">Avg MAE</div><div class="stat-value negative" id="a-avg-mae">--</div></div>
+      <div class="stat"><div class="stat-label">MFE:MAE Ratio</div><div class="stat-value neutral" id="a-ratio">--</div></div>
+      <div class="stat"><div class="stat-label">Max MFE</div><div class="stat-value positive" id="a-max-mfe">--</div></div>
+    </div>
+    <div class="stats-grid" id="analytics-duration">
+      <div class="stat"><div class="stat-label">Avg Hold</div><div class="stat-value" id="a-avg-dur">--</div></div>
+      <div class="stat"><div class="stat-label">Min Hold</div><div class="stat-value" id="a-min-dur">--</div></div>
+      <div class="stat"><div class="stat-label">Max Hold</div><div class="stat-value" id="a-max-dur">--</div></div>
+      <div class="stat"><div class="stat-label">Spread (W vs L)</div><div class="stat-value" id="a-spread">--</div></div>
+    </div>
+    <div class="stats-grid" id="analytics-core">
+      <div class="stat"><div class="stat-label">Profit Factor</div><div class="stat-value neutral" id="a-pf">--</div></div>
+      <div class="stat"><div class="stat-label">EV / Trade</div><div class="stat-value" id="a-ev">--</div></div>
+      <div class="stat"><div class="stat-label">Avg Win / Avg Loss</div><div class="stat-value" id="a-wl">--</div></div>
+      <div class="stat"><div class="stat-label">Max Drawdown</div><div class="stat-value negative" id="a-dd">--</div></div>
+    </div>
+    <div class="stats-grid" id="analytics-capture">
+      <div class="stat"><div class="stat-label">MFE Capture (All)</div><div class="stat-value neutral" id="a-cap-all">--</div></div>
+      <div class="stat"><div class="stat-label">MFE Capture (Win)</div><div class="stat-value positive" id="a-cap-win">--</div></div>
+      <div class="stat"><div class="stat-label">MFE Capture (Loss)</div><div class="stat-value negative" id="a-cap-lose">--</div></div>
+      <div class="stat"><div class="stat-label">Trailing Stop Avg</div><div class="stat-value" id="a-ts-avg">--</div></div>
+    </div>
+  </details>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
-    <div class="card">
-      <div class="card-title">Direction Analysis (Candle Level)</div>
-      <div id="direction-analysis" style="margin-top:8px;"></div>
+  <details id="ad-distribution">
+    <summary><span>Time &amp; Distribution</span></summary>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;margin-bottom:12px;">
+      <div class="card">
+        <div class="card-title">P&L by Hour (ET)</div>
+        <div id="hour-heatmap" style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-top:8px;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Exit Reason Distribution</div>
+        <div id="exit-reasons" style="margin-top:8px;"></div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title">TP Hit Rates (% of candles)</div>
-      <div id="tp-hit-rates" style="margin-top:8px;"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div class="card">
+        <div class="card-title">P&L by Day of Week</div>
+        <div id="day-of-week" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:8px;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Streak Analysis</div>
+        <div id="streak-analysis" style="margin-top:8px;font-size:0.85em;"></div>
+      </div>
     </div>
-  </div>
+  </details>
 
-  <div class="card" style="margin-bottom:20px;">
-    <div class="card-title">Equity Curve</div>
-    <div id="equity-curve" style="margin-top:8px;height:160px;position:relative;"></div>
-  </div>
+  <details id="ad-direction">
+    <summary><span>Direction, TP &amp; Equity</span></summary>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;margin-bottom:12px;">
+      <div class="card">
+        <div class="card-title">Direction Analysis (Candle Level)</div>
+        <div id="direction-analysis" style="margin-top:8px;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">TP Hit Rates (% of candles)</div>
+        <div id="tp-hit-rates" style="margin-top:8px;"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Equity Curve</div>
+      <div id="equity-curve" style="margin-top:8px;height:160px;position:relative;"></div>
+    </div>
+  </details>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
-    <div class="card">
-      <div class="card-title">P&L by Entry Price</div>
-      <div id="entry-price-buckets" style="margin-top:8px;"></div>
+  <details id="ad-buckets">
+    <summary><span>P&amp;L Buckets</span></summary>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;margin-bottom:12px;">
+      <div class="card">
+        <div class="card-title">P&L by Entry Price</div>
+        <div id="entry-price-buckets" style="margin-top:8px;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">P&L by BTC Deviation</div>
+        <div id="btc-dev-buckets" style="margin-top:8px;"></div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title">P&L by BTC Deviation</div>
-      <div id="btc-dev-buckets" style="margin-top:8px;"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div class="card">
+        <div class="card-title">P&L by Hold Duration</div>
+        <div id="duration-buckets" style="margin-top:8px;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Trailing Stop vs Price Stop</div>
+        <div id="trailing-vs-stop" style="margin-top:8px;font-size:0.85em;"></div>
+      </div>
     </div>
-  </div>
-
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
-    <div class="card">
-      <div class="card-title">P&L by Hold Duration</div>
-      <div id="duration-buckets" style="margin-top:8px;"></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Trailing Stop vs Price Stop</div>
-      <div id="trailing-vs-stop" style="margin-top:8px;font-size:0.85em;"></div>
-    </div>
-  </div>
-</div>
+  </details>
+</details>
 
 <script>
 const API_BASE = '';
@@ -264,14 +293,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Trade History 折叠状态恢复
-  const histDetails = document.getElementById('trade-history-details');
-  if (histDetails) {
-    histDetails.open = localStorage.getItem('dashboard.history.open') === '1';
-    histDetails.addEventListener('toggle', () => {
-      localStorage.setItem('dashboard.history.open', histDetails.open ? '1' : '0');
+  // 折叠状态恢复（多个 details）
+  const persistDetails = (id, defaultOpen=false) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const stored = localStorage.getItem('dashboard.' + id + '.open');
+    el.open = stored === null ? defaultOpen : stored === '1';
+    el.addEventListener('toggle', () => {
+      localStorage.setItem('dashboard.' + id + '.open', el.open ? '1' : '0');
     });
-  }
+  };
+  persistDetails('trade-history-details', false);
+  persistDetails('analytics-details',     false);
+  persistDetails('ad-perf',               false);
+  persistDetails('ad-distribution',       false);
+  persistDetails('ad-direction',          false);
+  persistDetails('ad-buckets',            false);
 });
 
 function formatPrice(v) { return v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '--'; }
@@ -290,6 +327,25 @@ async function fetchJSON(path) {
 }
 
 function fmtDur(s) { return Math.floor(s/60) + 'm' + (s%60) + 's'; }
+
+// mini sparkline: 给 SVG 元素填一条 polyline，最后点决定颜色（正绿负红）
+function renderSparkline(svgId, values) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+  if (!values || values.length < 2) { svg.innerHTML = ''; return; }
+  const min = Math.min(...values), max = Math.max(...values);
+  const range = max - min || 1;
+  const w = 100, h = 16;
+  let path = '';
+  for (let i = 0; i < values.length; i++) {
+    const x = (i / (values.length - 1)) * w;
+    const y = h - ((values[i] - min) / range) * h;
+    path += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+  }
+  const last = values[values.length - 1];
+  const color = last >= 0 ? '#3fb950' : '#f85149';
+  svg.innerHTML = '<path d="' + path.trim() + '" stroke="' + color + '" stroke-width="1.4" fill="none"/>';
+}
 
 async function refresh() {
   let [status, trades, stats, analytics] = await Promise.all([
@@ -324,7 +380,8 @@ async function refresh() {
     document.getElementById('consec-losses').textContent = status.consecutive_losses;
     document.getElementById('uptime').textContent = 'Uptime: ' + status.uptime + ' | Tick #' + status.tick_count;
 
-    // Positions
+    // Positions — 仅有持仓时显示整个 section（P1-4）
+    const posSection   = document.getElementById('open-positions-section');
     const posContainer = document.getElementById('positions-container');
     if (status.positions && status.positions.length > 0) {
       let html = '<table><thead><tr><th>ID</th><th>Side</th><th>Entry</th><th>Current</th><th>Shares</th><th>Unrealized P&L</th><th>TP Progress</th><th>MFE</th><th>MAE</th></tr></thead><tbody>';
@@ -344,8 +401,9 @@ async function refresh() {
       }
       html += '</tbody></table>';
       posContainer.innerHTML = html;
+      if (posSection) posSection.style.display = '';
     } else {
-      posContainer.innerHTML = '<div class="positions-empty">No open positions</div>';
+      if (posSection) posSection.style.display = 'none';
     }
   }
 
@@ -372,6 +430,13 @@ async function refresh() {
       : trades.filter(t => (t.mode || 'dry_run') === currentFilter);
     const thCount = document.getElementById('th-count');
     if (thCount) thCount.textContent = '(' + filtered.length + ' trades)';
+
+    // P&L mini sparkline（cum P&L 按 exit_time 排序）
+    let cum = 0;
+    const sparkData = filtered.slice()
+      .sort((a, b) => (a.exit_time || 0) - (b.exit_time || 0))
+      .map(t => (cum += (t.pnl || 0)));
+    renderSparkline('pnl-spark', sparkData);
     for (const t of filtered.slice().reverse()) {
       const cost = t.shares * t.entry_price;
       const revenue = t.shares * t.exit_price;
