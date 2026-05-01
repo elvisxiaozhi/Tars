@@ -38,6 +38,9 @@ inline const std::string DASHBOARD_HTML = R"html(
   .side-down { color: #f85149; font-weight: bold; }
   .section { margin-bottom: 20px; }
   .section-title { font-size: 0.9em; color: #58a6ff; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #1e2d3d; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] > summary > span:first-child::before { content: '▾ '; }
+  details:not([open]) > summary > span:first-child::before { content: '▸ '; }
   .positions-empty { color: #7d8590; padding: 20px; text-align: center; }
   .uptime { font-size: 0.8em; color: #7d8590; }
   .refresh { font-size: 0.7em; color: #484f58; }
@@ -114,14 +117,15 @@ inline const std::string DASHBOARD_HTML = R"html(
   </div>
 </div>
 
-<div class="section">
-  <div class="section-title" style="display:flex;align-items:center;gap:12px;">
-    <span>Trade History</span>
-    <span style="font-size:0.75em;font-weight:normal;color:#7d8590;">filter:</span>
-    <button class="mode-filter active" data-filter="all"  style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;">All</button>
-    <button class="mode-filter"        data-filter="live" style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;">Live</button>
-    <button class="mode-filter"        data-filter="dry_run" style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;">Dry</button>
-  </div>
+<details class="section" id="trade-history-details">
+  <summary class="section-title" style="display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none;">
+    <span style="user-select:none;">Trade History</span>
+    <span id="th-count" style="font-size:0.75em;font-weight:normal;color:#7d8590;">--</span>
+    <span style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:auto;">filter:</span>
+    <button class="mode-filter" data-filter="all"     style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;" onclick="event.stopPropagation();">All</button>
+    <button class="mode-filter" data-filter="live"    style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;" onclick="event.stopPropagation();">Live</button>
+    <button class="mode-filter" data-filter="dry_run" style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;" onclick="event.stopPropagation();">Dry</button>
+  </summary>
   <table>
     <thead>
       <tr>
@@ -146,7 +150,7 @@ inline const std::string DASHBOARD_HTML = R"html(
       <tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
     </tbody>
   </table>
-</div>
+</details>
 
 <div class="section">
   <div class="section-title">Analytics</div>
@@ -238,9 +242,9 @@ inline const std::string DASHBOARD_HTML = R"html(
 <script>
 const API_BASE = '';
 const REFRESH_MS = 5000;
-let currentFilter = 'all';  // 'all' / 'live' / 'dry_run'
+// 持久化用户偏好（filter / 折叠状态）
+let currentFilter = localStorage.getItem('dashboard.filter') || 'all';
 
-// 给 mode-filter 按钮绑定 click（DOM 已渲染 → 直接用 querySelectorAll）
 document.addEventListener('DOMContentLoaded', () => {
   const buttons = document.querySelectorAll('.mode-filter');
   function applyActive(active) {
@@ -251,13 +255,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   buttons.forEach(btn => {
-    if (btn.dataset.filter === 'all') applyActive(btn);  // 初始 All 高亮
+    if (btn.dataset.filter === currentFilter) applyActive(btn);  // 恢复上次选择
     btn.addEventListener('click', () => {
       currentFilter = btn.dataset.filter;
+      localStorage.setItem('dashboard.filter', currentFilter);
       applyActive(btn);
       if (typeof refresh === 'function') refresh();
     });
   });
+
+  // Trade History 折叠状态恢复
+  const histDetails = document.getElementById('trade-history-details');
+  if (histDetails) {
+    histDetails.open = localStorage.getItem('dashboard.history.open') === '1';
+    histDetails.addEventListener('toggle', () => {
+      localStorage.setItem('dashboard.history.open', histDetails.open ? '1' : '0');
+    });
+  }
 });
 
 function formatPrice(v) { return v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '--'; }
@@ -356,6 +370,8 @@ async function refresh() {
     const filtered = (currentFilter === 'all')
       ? trades
       : trades.filter(t => (t.mode || 'dry_run') === currentFilter);
+    const thCount = document.getElementById('th-count');
+    if (thCount) thCount.textContent = '(' + filtered.length + ' trades)';
     for (const t of filtered.slice().reverse()) {
       const cost = t.shares * t.entry_price;
       const revenue = t.shares * t.exit_price;
