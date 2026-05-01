@@ -881,14 +881,15 @@ int main(int argc, char* argv[]) {
                         // 关键：BUY 是限价 GTC，可能挂着不立即成交。bot 必须等 fill 确认才创建
                         // paper position，否则后续 SELL 会被 server reject "not enough balance"。
                         if (live_trader) {
+                            polymarket::OrderResult buy_result;
                             std::string buy_id;
                             try {
-                                auto r = live_trader->place_entry_order(sig, shares);
-                                if (!r.success) {
-                                    spdlog::error("LIVE BUY rejected: {} (skip)", r.error);
+                                buy_result = live_trader->place_entry_order(sig, shares);
+                                if (!buy_result.success) {
+                                    spdlog::error("LIVE BUY rejected: {} (skip)", buy_result.error);
                                     continue;
                                 }
-                                buy_id = r.order_id;
+                                buy_id = buy_result.order_id;
                                 spdlog::info("LIVE BUY placed order_id={}, polling fill...", buy_id);
                             } catch (const std::exception& e) {
                                 spdlog::error("LIVE BUY threw: {} (skip)", e.what());
@@ -921,6 +922,35 @@ int main(int argc, char* argv[]) {
                                 continue;  // 不创建 paper position，等下个信号
                             }
                             spdlog::info("LIVE BUY filled in {}s ✓", waited);
+
+                            // R-V2.7-P1: 用真实成交价覆盖逻辑价（POST /order 响应里 makingAmount/takingAmount）
+                            // CLOB 限价单常获得优于挂单价的成交（吃到更深 ask），不修正会让策略 P&L 严重偏离真实余额
+                            if (buy_result.filled_shares > 0 && buy_result.filled_avg_price > 0) {
+                                double real_entry  = buy_result.filled_avg_price;
+                                double real_shares = buy_result.filled_shares;
+                                spdlog::info("LIVE BUY real fill: shares={:.4f} avg_price={:.4f} (limit was {:.4f}, slippage {:+.4f})",
+                                             real_shares, real_entry, sig.entry_price,
+                                             sig.entry_price - real_entry);
+                                pos.entry_price = real_entry;
+                                pos.shares      = real_shares;
+                                pos.size_usdc   = real_shares * real_entry;
+                                // 重算 V2 maker fee（=0）+ TP/MFE 基线，确保后续止盈与 stop 都按真实成本评估
+                                pos.entry_fee   = calc_fee(real_shares, real_entry, /*is_taker=*/false, cfg.fees);
+                                pos.tp_levels   = strategy.compute_tp_levels(real_entry);
+                                pos.max_price   = real_entry;
+                                pos.min_price   = real_entry;
+                                pos.mfe_at_5min  = real_entry;
+                                pos.mfe_at_10min = real_entry;
+                                pos.mfe_at_15min = real_entry;
+                                // 同步本地变量，下面 deduct_balance / OPEN 日志用
+                                size = pos.size_usdc;
+                                fee  = pos.entry_fee;
+                                shares = real_shares;
+                            } else {
+                                spdlog::warn("LIVE BUY filled but no fill amount in response (taking={:.4f}/avg={:.4f}); "
+                                             "falling back to logical limit price",
+                                             buy_result.filled_shares, buy_result.filled_avg_price);
+                            }
                             // fill 完真扣 cash，立刻刷余额（push 给 dashboard）
                             try { live_trader->read_polymarket_balance(); } catch (...) {}
                         }
@@ -1030,6 +1060,8 @@ int main(int argc, char* argv[]) {
                         // R-V2.6 + P1 fix: LIVE FOK SELL 用 floor 0.01（不是 strategy.current_price）
                         // 因为 strategy 给的价格可能高于 best_bid，FOK 会 kill；用 0.01 让 server 按对手最佳 bid 全成交。
                         // paper P&L 仍按 current_price 算（与 dry_run 一致），LIVE 实际成交价可能稍低。
+                        double real_exit_price = current_price;
+                        double real_sell_shares = sell_shares;
                         if (live_trader) {
                             try {
                                 auto r = live_trader->place_exit_order(
@@ -1041,6 +1073,13 @@ int main(int argc, char* argv[]) {
                                     continue;
                                 }
                                 spdlog::info("LIVE TP{} SELL ok order_id={}", tp.tier, r.order_id);
+                                // R-V2.7-P1: 真实成交价（FOK floor 0.01 → server 按 best_bid 成交，价格远高于 floor）
+                                if (r.filled_shares > 0 && r.filled_avg_price > 0) {
+                                    real_exit_price  = r.filled_avg_price;
+                                    real_sell_shares = r.filled_shares;
+                                    spdlog::info("LIVE TP{} real fill: shares={:.4f} avg_price={:.4f} (book mid was {:.4f})",
+                                                 tp.tier, real_sell_shares, real_exit_price, current_price);
+                                }
                                 // SELL 成交后立即刷余额（dashboard 同步）
                                 try { live_trader->read_polymarket_balance(); } catch (...) {}
                             } catch (const std::exception& e) {
@@ -1050,11 +1089,11 @@ int main(int argc, char* argv[]) {
                         }
 
                         tp.triggered = true;
-                        double sell_value = sell_shares * current_price;
-                        double cost_basis = sell_shares * pos.entry_price;
+                        double sell_value = real_sell_shares * real_exit_price;
+                        double cost_basis = real_sell_shares * pos.entry_price;
                         // TP 卖单在 best_bid 价吃单，taker 角色；入场是 maker，按 0 费摊销
-                        double exit_fee = calc_fee(sell_shares, current_price, /*is_taker=*/true, cfg.fees);
-                        double entry_fee_portion = calc_fee(sell_shares, pos.entry_price, /*is_taker=*/false, cfg.fees);
+                        double exit_fee = calc_fee(real_sell_shares, real_exit_price, /*is_taker=*/true, cfg.fees);
+                        double entry_fee_portion = calc_fee(real_sell_shares, pos.entry_price, /*is_taker=*/false, cfg.fees);
                         double pnl = sell_value - cost_basis - exit_fee - entry_fee_portion;
 
                         pos.shares_remaining_pct -= tp.sell_pct * pos.shares_remaining_pct;
@@ -1062,7 +1101,7 @@ int main(int argc, char* argv[]) {
                         risk.add_balance(sell_value - exit_fee);  // 动态余额：回收卖出收入
 
                         spdlog::info("TP{} [{}]: sell {:.1f} shares @ {:.3f} | pnl=${:+.4f} | remaining={:.0f}% | balance=${:.2f}",
-                                     tp.tier, pos.id, sell_shares, current_price,
+                                     tp.tier, pos.id, real_sell_shares, real_exit_price,
                                      pnl, pos.shares_remaining_pct * 100, display_balance());
 
                         if (pnl > 0) risk.record_profit(pnl);
@@ -1077,9 +1116,9 @@ int main(int argc, char* argv[]) {
                         tp_rec.exit_time = now_ms();
                         tp_rec.minutes_remaining_at_entry = pos.minutes_remaining_at_entry;
                         tp_rec.entry_price = pos.entry_price;
-                        tp_rec.exit_price = current_price;
-                        tp_rec.size_usdc = sell_shares * pos.entry_price;
-                        tp_rec.shares = sell_shares;
+                        tp_rec.exit_price = real_exit_price;
+                        tp_rec.size_usdc = real_sell_shares * pos.entry_price;
+                        tp_rec.shares = real_sell_shares;
                         tp_rec.btc_price_at_entry = pos.btc_price_at_entry;
                         tp_rec.btc_strike = pos.btc_strike_at_entry;
                         tp_rec.btc_deviation_pct = (pos.btc_price_at_entry - pos.btc_strike_at_entry) /
@@ -1111,6 +1150,8 @@ int main(int argc, char* argv[]) {
                     double remaining_shares = pos.shares * pos.shares_remaining_pct;
 
                     // R-V2.6 + P1 fix: LIVE FOK SELL 用 floor 0.01（让 server 按 best_bid 吃）
+                    double real_exit_price = exit_sig.exit_price;
+                    double real_exit_shares = remaining_shares;
                     if (live_trader) {
                         try {
                             auto r = live_trader->place_exit_order(
@@ -1121,6 +1162,13 @@ int main(int argc, char* argv[]) {
                                 continue;
                             }
                             spdlog::info("LIVE STOP SELL ok order_id={}", r.order_id);
+                            // R-V2.7-P1: 真实成交价（FOK floor 0.01 → server 按 best_bid 成交）
+                            if (r.filled_shares > 0 && r.filled_avg_price > 0) {
+                                real_exit_price  = r.filled_avg_price;
+                                real_exit_shares = r.filled_shares;
+                                spdlog::info("LIVE STOP real fill: shares={:.4f} avg_price={:.4f} (strategy mid was {:.4f})",
+                                             real_exit_shares, real_exit_price, exit_sig.exit_price);
+                            }
                             // SELL 成交后立即刷余额
                             try { live_trader->read_polymarket_balance(); } catch (...) {}
                         } catch (const std::exception& e) {
@@ -1129,11 +1177,11 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
-                    double sell_value = remaining_shares * exit_sig.exit_price;
-                    double cost_basis = remaining_shares * pos.entry_price;
+                    double sell_value = real_exit_shares * real_exit_price;
+                    double cost_basis = real_exit_shares * pos.entry_price;
                     // 止损/拖尾/时间止损都是吃 best_bid，taker；入场 maker
-                    double exit_fee = calc_fee(remaining_shares, exit_sig.exit_price, /*is_taker=*/true, cfg.fees);
-                    double entry_fee_portion = calc_fee(remaining_shares, pos.entry_price, /*is_taker=*/false, cfg.fees);
+                    double exit_fee = calc_fee(real_exit_shares, real_exit_price, /*is_taker=*/true, cfg.fees);
+                    double entry_fee_portion = calc_fee(real_exit_shares, pos.entry_price, /*is_taker=*/false, cfg.fees);
                     double pnl = sell_value - cost_basis - exit_fee - entry_fee_portion;
 
                     pos.realized_pnl += pnl;
@@ -1166,9 +1214,9 @@ int main(int argc, char* argv[]) {
                     rec.exit_time = now_ms();
                     rec.minutes_remaining_at_entry = pos.minutes_remaining_at_entry;
                     rec.entry_price = pos.entry_price;
-                    rec.exit_price = exit_sig.exit_price;
-                    rec.size_usdc = remaining_shares * pos.entry_price;
-                    rec.shares = remaining_shares;
+                    rec.exit_price = real_exit_price;
+                    rec.size_usdc = real_exit_shares * pos.entry_price;
+                    rec.shares = real_exit_shares;
                     rec.btc_price_at_entry = pos.btc_price_at_entry;
                     rec.btc_strike = pos.btc_strike_at_entry;
                     rec.btc_deviation_pct = (pos.btc_price_at_entry - pos.btc_strike_at_entry) /

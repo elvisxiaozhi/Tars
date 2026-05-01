@@ -557,6 +557,27 @@ OrderResult LiveTrader::send_v2_order(
         if (!result.success) {
             result.error = j.value("errorMsg", j.dump());
         }
+
+        // R-V2.7-P1: 解析真实成交量（POST /order 响应字段，单位为人类可读 pUSD/shares）
+        // BUY  side=0：takingAmount = shares 入账, makingAmount = pUSD 支出 → fill_price = making/taking
+        // SELL side=1：makingAmount = shares 卖出, takingAmount = pUSD 收入 → fill_price = taking/making
+        // matched 状态下两字段必定填；live/cancelled 等状态可能为 0，由调用方走 polling 兜底
+        auto parse_amt = [](const nlohmann::json& v) -> double {
+            if (v.is_string()) {
+                try { return std::stod(v.get<std::string>()); } catch (...) { return 0.0; }
+            }
+            if (v.is_number()) return v.get<double>();
+            return 0.0;
+        };
+        double taking_amt = j.contains("takingAmount") ? parse_amt(j.at("takingAmount")) : 0.0;
+        double making_amt = j.contains("makingAmount") ? parse_amt(j.at("makingAmount")) : 0.0;
+        if (is_buy) {
+            result.filled_shares    = taking_amt;
+            result.filled_avg_price = (taking_amt > 0) ? making_amt / taking_amt : 0.0;
+        } else {
+            result.filled_shares    = making_amt;
+            result.filled_avg_price = (making_amt > 0) ? taking_amt / making_amt : 0.0;
+        }
     } catch (const std::exception& e) {
         result.success = false;
         result.error   = std::string("response parse failed: ") + e.what();
