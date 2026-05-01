@@ -115,11 +115,18 @@ inline const std::string DASHBOARD_HTML = R"html(
 </div>
 
 <div class="section">
-  <div class="section-title">Trade History</div>
+  <div class="section-title" style="display:flex;align-items:center;gap:12px;">
+    <span>Trade History</span>
+    <span style="font-size:0.75em;font-weight:normal;color:#7d8590;">filter:</span>
+    <button class="mode-filter active" data-filter="all"  style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;">All</button>
+    <button class="mode-filter"        data-filter="live" style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;">Live</button>
+    <button class="mode-filter"        data-filter="dry_run" style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;">Dry</button>
+  </div>
   <table>
     <thead>
       <tr>
         <th>Time</th>
+        <th>Mode</th>
         <th>ID</th>
         <th>Side</th>
         <th>Entry</th>
@@ -136,7 +143,7 @@ inline const std::string DASHBOARD_HTML = R"html(
       </tr>
     </thead>
     <tbody id="trades-body">
-      <tr><td colspan="14" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
+      <tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
     </tbody>
   </table>
 </div>
@@ -231,6 +238,27 @@ inline const std::string DASHBOARD_HTML = R"html(
 <script>
 const API_BASE = '';
 const REFRESH_MS = 5000;
+let currentFilter = 'all';  // 'all' / 'live' / 'dry_run'
+
+// 给 mode-filter 按钮绑定 click（DOM 已渲染 → 直接用 querySelectorAll）
+document.addEventListener('DOMContentLoaded', () => {
+  const buttons = document.querySelectorAll('.mode-filter');
+  function applyActive(active) {
+    buttons.forEach(b => {
+      const on = b === active;
+      b.style.background = on ? '#388bfd' : '#21262d';
+      b.style.color      = on ? '#ffffff' : '#c9d1d9';
+    });
+  }
+  buttons.forEach(btn => {
+    if (btn.dataset.filter === 'all') applyActive(btn);  // 初始 All 高亮
+    btn.addEventListener('click', () => {
+      currentFilter = btn.dataset.filter;
+      applyActive(btn);
+      if (typeof refresh === 'function') refresh();
+    });
+  });
+});
 
 function formatPrice(v) { return v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '--'; }
 function formatPct(v) { return v !== undefined ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '--'; }
@@ -308,23 +336,34 @@ async function refresh() {
   }
 
   if (stats) {
+    // 根据 currentFilter 选择数据源（all = 总计；live/dry_run = 单组）
+    const grp = (currentFilter === 'all')
+      ? { total_pnl: stats.total_pnl, win_rate: stats.win_rate,
+          wins: stats.wins, losses: stats.losses, total_trades: stats.total_trades }
+      : (stats.by_mode && stats.by_mode[currentFilter]) || { total_pnl: 0, win_rate: 0, wins: 0, losses: 0, total_trades: 0 };
     const pnlEl = document.getElementById('total-pnl');
-    pnlEl.textContent = formatPnl(stats.total_pnl);
-    pnlEl.className = 'card-value ' + pnlClass(stats.total_pnl);
+    pnlEl.textContent = formatPnl(grp.total_pnl);
+    pnlEl.className = 'card-value ' + pnlClass(grp.total_pnl);
     document.getElementById('daily-pnl').textContent = formatPnl(stats.daily_pnl);
-    document.getElementById('win-rate').textContent = stats.win_rate.toFixed(1) + '%';
-    document.getElementById('win-loss').textContent = stats.wins + 'W / ' + stats.losses + 'L';
-    document.getElementById('total-trades').textContent = stats.total_trades;
+    document.getElementById('win-rate').textContent = grp.win_rate.toFixed(1) + '%';
+    document.getElementById('win-loss').textContent = grp.wins + 'W / ' + grp.losses + 'L';
+    document.getElementById('total-trades').textContent = grp.total_trades;
   }
 
   if (trades && trades.length > 0) {
     const tbody = document.getElementById('trades-body');
     let html = '';
-    for (const t of trades.slice().reverse()) {
+    const filtered = (currentFilter === 'all')
+      ? trades
+      : trades.filter(t => (t.mode || 'dry_run') === currentFilter);
+    for (const t of filtered.slice().reverse()) {
       const cost = t.shares * t.entry_price;
       const revenue = t.shares * t.exit_price;
+      const tm = t.mode || 'dry_run';
       html += '<tr>';
       html += '<td>' + formatTime(t.exit_time || t.entry_time) + '</td>';
+      html += '<td><span class="mode mode-' + (tm === 'live' ? 'live' : 'dry') + '">' +
+              (tm === 'live' ? 'LIVE' : 'DRY') + '</span></td>';
       html += '<td>' + t.id + '</td>';
       html += '<td class="side-' + t.side.toLowerCase() + '">' + t.side + '</td>';
       html += '<td>' + t.entry_price.toFixed(3) + '</td>';

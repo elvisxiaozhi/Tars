@@ -416,11 +416,39 @@ int main(int argc, char* argv[]) {
         std::lock_guard<std::mutex> lock(state.mu);
         json j;
         j["total_trades"] = journal.candle_count();
-        j["wins"] = journal.candle_wins();
-        j["losses"] = journal.candle_losses();
-        j["total_pnl"] = journal.total_pnl();
-        j["win_rate"] = journal.candle_win_rate() * 100.0;
-        j["daily_pnl"] = state.daily_pnl;
+        j["wins"]         = journal.candle_wins();
+        j["losses"]       = journal.candle_losses();
+        j["total_pnl"]    = journal.total_pnl();
+        j["win_rate"]     = journal.candle_win_rate() * 100.0;
+        j["daily_pnl"]    = state.daily_pnl;
+
+        // 按 mode 分组（按 base position id 聚合 TP partial）
+        auto compute_group = [&](const std::string& target_mode) -> json {
+            std::map<std::string, double> pos_pnl;
+            for (const auto& r : journal.records()) {
+                std::string m = r.mode.empty() ? "dry_run" : r.mode;
+                if (m != target_mode) continue;
+                std::string base = r.id;
+                auto p = base.find("-TP");
+                if (p != std::string::npos) base = base.substr(0, p);
+                pos_pnl[base] += r.realized_pnl;
+            }
+            int wins = 0, losses = 0;
+            double total = 0;
+            for (auto& [_, v] : pos_pnl) {
+                total += v;
+                if (v > 0) ++wins; else if (v < 0) ++losses;
+            }
+            json g;
+            g["total_trades"] = static_cast<int>(pos_pnl.size());
+            g["wins"]         = wins;
+            g["losses"]       = losses;
+            g["total_pnl"]    = total;
+            g["win_rate"]     = pos_pnl.empty() ? 0.0 : (100.0 * wins / pos_pnl.size());
+            return g;
+        };
+        j["by_mode"]["dry_run"] = compute_group("dry_run");
+        j["by_mode"]["live"]    = compute_group("live");
         return j.dump();
     });
 
