@@ -1,7 +1,11 @@
 #include "net/http_client.h"
 
+#include <chrono>
 #include <cstdlib>
+#include <future>
+#include <memory>
 #include <stdexcept>
+#include <thread>
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -108,7 +112,9 @@ static ProxyInfo detect_proxy(const std::string& config_proxy = "") {
 }
 
 struct HttpClient::Impl {
-    asio::io_context ioc;
+    // ssl_ctx 保留为成员（OpenSSL 内部线程安全，重复使用避免每次重新加载证书）。
+    // io_context 改为每次 request 栈上局部对象——这是 wall-clock guard 能 detach
+    // 卡死线程而不破坏后续调用的前提（共享 ioc 在多线程同步使用时未定义）。
     ssl::context ssl_ctx{ssl::context::tls_client};  // 允许 TLS 1.2/1.3 协商
     int timeout_sec;
     ProxyInfo proxy;
@@ -120,6 +126,8 @@ struct HttpClient::Impl {
         proxy = detect_proxy(proxy_url);
     }
 
+    // 对外入口：用 wall-clock guard 包住实际请求。boost::beast 的 expires_after
+    // 在某些代理/SSL 异常路径下不生效（实测出现过 28 分钟挂死），这里硬上限兜底。
     HttpResponse request(http::verb method,
                          const std::string& url,
                          const std::string& body,
@@ -128,14 +136,37 @@ struct HttpClient::Impl {
 
         spdlog::debug("HTTP {} {}", std::string(http::to_string(method)), url);
 
-        if (!parsed.https) {
-            return request_plain(method, parsed, body, extra_headers);
+        // 硬上限 = 配置 timeout 的 2 倍 + 5s 余量，给 beast 自己的 deadline 优先生效。
+        const int hard_cap_sec = timeout_sec * 2 + 5;
+        const std::string method_str = std::string(http::to_string(method));
+
+        // packaged_task + detach 模式：std::async 的 future 析构会阻塞，无法 detach。
+        // shared_ptr 让 task 跨线程共享生命周期，detach 后内部线程仍持有引用。
+        auto task = std::make_shared<std::packaged_task<HttpResponse()>>(
+            [this, method, parsed, body, extra_headers]() {
+                if (!parsed.https) {
+                    return request_plain(method, parsed, body, extra_headers);
+                }
+                return request_ssl(method, parsed, body, extra_headers);
+            });
+        auto fut = task->get_future();
+        std::thread([task]() { (*task)(); }).detach();
+
+        if (fut.wait_for(std::chrono::seconds(hard_cap_sec)) ==
+            std::future_status::ready) {
+            return fut.get();  // 内部异常会在这里 rethrow
         }
-        return request_ssl(method, parsed, body, extra_headers);
+
+        spdlog::error("HTTP wall-clock timeout after {}s for {} {}",
+                      hard_cap_sec, method_str, url);
+        throw std::runtime_error(
+            "HTTP wall-clock timeout after " + std::to_string(hard_cap_sec) +
+            "s for " + method_str + " " + url);
     }
 
     // Connect TCP stream to target (direct or via proxy CONNECT tunnel)
-    void connect_tcp(beast::tcp_stream& tcp_stream, const ParsedUrl& parsed) {
+    void connect_tcp(asio::io_context& ioc, beast::tcp_stream& tcp_stream,
+                     const ParsedUrl& parsed) {
         tcp::resolver resolver(ioc);
 
         if (proxy.enabled) {
@@ -181,6 +212,7 @@ struct HttpClient::Impl {
                              const ParsedUrl& parsed,
                              const std::string& body,
                              const Headers& extra_headers) {
+        asio::io_context ioc;
         beast::ssl_stream<beast::tcp_stream> stream(ioc, ssl_ctx);
 
         // SNI
@@ -191,7 +223,7 @@ struct HttpClient::Impl {
                 "Failed to set SNI hostname");
         }
 
-        connect_tcp(beast::get_lowest_layer(stream), parsed);
+        connect_tcp(ioc, beast::get_lowest_layer(stream), parsed);
 
         beast::get_lowest_layer(stream).expires_after(
             std::chrono::seconds(timeout_sec));
@@ -220,9 +252,10 @@ struct HttpClient::Impl {
                                const ParsedUrl& parsed,
                                const std::string& body,
                                const Headers& extra_headers) {
+        asio::io_context ioc;
         beast::tcp_stream stream(ioc);
 
-        connect_tcp(stream, parsed);
+        connect_tcp(ioc, stream, parsed);
 
         auto req = build_request(method, parsed, body, extra_headers);
 
