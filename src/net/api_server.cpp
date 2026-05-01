@@ -18,6 +18,7 @@ struct ApiServer::Impl {
     ApiDataCallback trades_cb;
     ApiDataCallback stats_cb;
     ApiDataCallback analytics_cb;
+    ApiDataCallback shutdown_cb;
     std::string dashboard_html;
 
     http::response<http::string_body>
@@ -39,6 +40,14 @@ struct ApiServer::Impl {
         }
         if (target == "/api/analytics" && analytics_cb) {
             return make_response(http::status::ok, analytics_cb(), "application/json");
+        }
+        if (target == "/api/shutdown" && shutdown_cb) {
+            // 仅接受 POST/DELETE，避免 GET 误触发（如浏览器预取）
+            if (req.method() != http::verb::post && req.method() != http::verb::delete_) {
+                return make_response(http::status::method_not_allowed,
+                                     R"({"error":"use POST"})", "application/json");
+            }
+            return make_response(http::status::ok, shutdown_cb(), "application/json");
         }
 
         return make_response(http::status::not_found, R"({"error":"not found"})", "application/json");
@@ -80,6 +89,7 @@ void ApiServer::on_status(ApiDataCallback cb) { impl_->status_cb = std::move(cb)
 void ApiServer::on_trades(ApiDataCallback cb) { impl_->trades_cb = std::move(cb); }
 void ApiServer::on_stats(ApiDataCallback cb) { impl_->stats_cb = std::move(cb); }
 void ApiServer::on_analytics(ApiDataCallback cb) { impl_->analytics_cb = std::move(cb); }
+void ApiServer::on_shutdown(ApiDataCallback cb) { impl_->shutdown_cb = std::move(cb); }
 void ApiServer::set_dashboard_html(const std::string& html) { impl_->dashboard_html = html; }
 
 void ApiServer::start() {

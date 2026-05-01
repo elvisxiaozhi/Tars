@@ -159,6 +159,10 @@ struct SharedState {
     std::vector<polymarket::Position> positions;
     int consecutive_losses = 0;
     double daily_pnl = 0;
+    // 当前活跃市场的 UP/DOWN quotes（dashboard 显示）
+    double up_bid = 0, up_ask = 0;
+    double down_bid = 0, down_ask = 0;
+    std::string market_question;
 };
 
 static int next_position_id = 1;
@@ -326,6 +330,12 @@ int main(int argc, char* argv[]) {
         j["consecutive_losses"] = state.consecutive_losses;
         j["daily_pnl"] = state.daily_pnl;
         j["account_balance"] = display_balance();
+        // 当前活跃市场的 UP/DOWN quotes（dashboard metric 显示）
+        j["up_bid"]   = state.up_bid;
+        j["up_ask"]   = state.up_ask;
+        j["down_bid"] = state.down_bid;
+        j["down_ask"] = state.down_ask;
+        j["market_question"] = state.market_question;
 
         // 计算持仓汇总：买入成本、未实现盈亏
         double total_cost = 0;
@@ -775,6 +785,14 @@ int main(int argc, char* argv[]) {
         return j.dump();
     });
 
+    // POST /api/shutdown — 优雅停止 bot（前端"Stop Bot"按钮触发）
+    // 设 g_running=false → 主循环退出 → emergency_close_all 兜底 → 进程退出
+    api.on_shutdown([&]() -> std::string {
+        spdlog::warn("API: shutdown requested via /api/shutdown");
+        g_running = false;
+        return std::string(R"({"ok":true,"message":"Shutting down, emergency_close_all will run"})");
+    });
+
     api.start();
 
     int poll_sec = cfg.strategy.poll_interval_sec;
@@ -857,6 +875,16 @@ int main(int argc, char* argv[]) {
 
                 last_up_ask = quotes.up_ask;
                 last_down_ask = quotes.down_ask;
+
+                // 同步当前 market quotes 到 SharedState（dashboard 显示用）
+                {
+                    std::lock_guard<std::mutex> lock(state.mu);
+                    state.up_bid          = quotes.up_bid;
+                    state.up_ask          = quotes.up_ask;
+                    state.down_bid        = quotes.down_bid;
+                    state.down_ask        = quotes.down_ask;
+                    state.market_question = entry.market.question;
+                }
 
                 spdlog::debug("Market: {} | Up: {:.3f}/{:.3f} | Down: {:.3f}/{:.3f}",
                               entry.market.question,

@@ -24,6 +24,8 @@ public:
     void on_trades(ApiDataCallback cb);
     void on_stats(ApiDataCallback cb);
     void on_analytics(ApiDataCallback cb);
+    // POST /api/shutdown — 触发优雅退出（设 g_running=false → 主循环退出 → emergency_close_all）
+    void on_shutdown(ApiDataCallback cb);
 
     // 设置前端 HTML 内容（嵌入到二进制中）
     void set_dashboard_html(const std::string& html);

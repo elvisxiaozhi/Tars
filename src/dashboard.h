@@ -73,9 +73,13 @@ inline const std::string DASHBOARD_HTML = R"html(
     <h1>Polymarket BTC 1h Bot</h1>
     <span class="uptime" id="uptime">--</span>
   </div>
-  <div>
+  <div style="display:flex;align-items:center;gap:12px;">
     <span class="mode" id="mode-badge">--</span>
-    <span class="refresh" id="refresh-info">auto-refresh 5s</span>
+    <span class="refresh" id="refresh-info">auto 5s</span>
+    <button id="stop-bot-btn" title="优雅停止 bot（触发 emergency_close_all 兜底）"
+      style="cursor:pointer;padding:5px 12px;border:1px solid #6e1a1a;background:#3a1a1a;color:#f85149;border-radius:4px;font-size:0.8em;font-weight:bold;">
+      ⏹ Stop Bot
+    </button>
   </div>
 </div>
 
@@ -124,9 +128,13 @@ inline const std::string DASHBOARD_HTML = R"html(
   </div>
 </div>
 
-<!-- BTC dev 独立一行（之前在 Account Balance card 副标里，紧凑后挪出）-->
-<div style="font-size:0.7em;color:#7d8590;margin-bottom:16px;text-align:right;">
-  BTC dev: <span id="btc-dev">--</span>
+<!-- 行情行：当前 market + BTC dev + UP/DN bid·ask  -->
+<div style="font-size:0.75em;color:#7d8590;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:18px;align-items:center;">
+  <span id="market-name" style="color:#58a6ff;font-weight:bold;">--</span>
+  <span>BTC dev <span id="btc-dev">--</span></span>
+  <span>UP <span class="positive" id="up-bid">--</span>/<span class="positive" id="up-ask">--</span></span>
+  <span>DN <span class="negative" id="down-bid">--</span>/<span class="negative" id="down-ask">--</span></span>
+  <span style="color:#484f58;font-size:0.85em;">(bid/ask)</span>
 </div>
 
 <!-- Open Positions section 仅在有持仓时显示（P1-4）-->
@@ -310,6 +318,27 @@ document.addEventListener('DOMContentLoaded', () => {
   persistDetails('ad-distribution',       false);
   persistDetails('ad-direction',          false);
   persistDetails('ad-buckets',            false);
+
+  // Stop Bot 按钮
+  const stopBtn = document.getElementById('stop-bot-btn');
+  if (stopBtn) {
+    stopBtn.addEventListener('click', async () => {
+      if (!confirm('确认停止 bot？\n\n会触发 emergency_close_all：\n· cancel 所有未平仓订单\n· SELL FOK 所有持仓平仓\n\n之后程序退出。')) return;
+      stopBtn.disabled = true;
+      stopBtn.textContent = '⏳ Stopping...';
+      try {
+        const res = await fetch('/api/shutdown', { method: 'POST' });
+        const data = await res.json();
+        stopBtn.textContent = '✓ ' + (data.message || 'Stopped');
+        stopBtn.style.background = '#1a3a2a';
+        stopBtn.style.color = '#3fb950';
+      } catch (e) {
+        stopBtn.textContent = '✗ Failed';
+        alert('Stop failed: ' + e.message);
+        stopBtn.disabled = false;
+      }
+    });
+  }
 });
 
 function formatPrice(v) { return v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '--'; }
@@ -366,6 +395,14 @@ async function refresh() {
     const devEl = document.getElementById('btc-dev');
     devEl.textContent = formatPct(status.btc_deviation_pct);
     devEl.className = status.btc_deviation_pct >= 0 ? 'positive' : 'negative';
+
+    // 当前 market + UP/DN quotes
+    const fmtPrice = v => (v && v > 0) ? v.toFixed(3) : '--';
+    document.getElementById('market-name').textContent = status.market_question || '(no active market)';
+    document.getElementById('up-bid').textContent   = fmtPrice(status.up_bid);
+    document.getElementById('up-ask').textContent   = fmtPrice(status.up_ask);
+    document.getElementById('down-bid').textContent = fmtPrice(status.down_bid);
+    document.getElementById('down-ask').textContent = fmtPrice(status.down_ask);
 
     document.getElementById('total-cost').textContent = '$' + status.total_cost.toFixed(2);
     const upnlEl = document.getElementById('unrealized-pnl');
