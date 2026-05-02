@@ -1149,9 +1149,9 @@ int main(int argc, char* argv[]) {
                                 }
                                 spdlog::info("LIVE TP{} SELL ok order_id={}", tp.tier, r.order_id);
                                 // R-V2.7-P1: 真实成交价（FOK floor 0.01 → server 按 best_bid 成交，价格远高于 floor）
-                                if (r.filled_shares > 0 && r.filled_avg_price > 0) {
-                                    real_exit_price  = r.filled_avg_price;
+                                if (r.filled_shares > 0) {
                                     real_sell_shares = r.filled_shares;
+                                    if (r.filled_avg_price > 0) real_exit_price = r.filled_avg_price;
                                     spdlog::info("LIVE TP{} real fill: shares={:.4f} avg_price={:.4f} (book mid was {:.4f})",
                                                  tp.tier, real_sell_shares, real_exit_price, current_price);
                                 }
@@ -1238,9 +1238,9 @@ int main(int argc, char* argv[]) {
                             }
                             spdlog::info("LIVE STOP SELL ok order_id={}", r.order_id);
                             // R-V2.7-P1: 真实成交价（FOK floor 0.01 → server 按 best_bid 成交）
-                            if (r.filled_shares > 0 && r.filled_avg_price > 0) {
-                                real_exit_price  = r.filled_avg_price;
+                            if (r.filled_shares > 0) {
                                 real_exit_shares = r.filled_shares;
+                                if (r.filled_avg_price > 0) real_exit_price = r.filled_avg_price;
                                 spdlog::info("LIVE STOP real fill: shares={:.4f} avg_price={:.4f} (strategy mid was {:.4f})",
                                              real_exit_shares, real_exit_price, exit_sig.exit_price);
                             }

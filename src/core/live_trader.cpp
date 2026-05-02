@@ -8,6 +8,7 @@
 #include <ctime>
 #include <fstream>
 #include <random>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 
@@ -466,6 +467,31 @@ uint64_t to_micro(double v) {
     return static_cast<uint64_t>(std::llround(v * 1'000'000.0));
 }
 
+double floor_6dp(double v) {
+    return std::floor(v * 1'000'000.0) / 1'000'000.0;
+}
+
+double safe_sell_shares(double requested) {
+    // V2 CLOB checks 6-decimal token balances strictly. Leave a tiny dust buffer
+    // so rounding/ledger drift does not reject an otherwise valid exit order.
+    constexpr double kDustBuffer = 0.005;
+    constexpr double kMinSellShares = 0.001;
+    if (requested <= kMinSellShares) return 0.0;
+    double adjusted = floor_6dp(requested - kDustBuffer);
+    return adjusted >= kMinSellShares ? adjusted : 0.0;
+}
+
+double parse_available_balance_from_error(const std::string& error) {
+    std::smatch m;
+    static const std::regex balance_re(R"(balance:\s*([0-9]+))");
+    if (!std::regex_search(error, m, balance_re) || m.size() < 2) return 0.0;
+    try {
+        return std::stod(m[1].str()) / 1'000'000.0;
+    } catch (...) {
+        return 0.0;
+    }
+}
+
 }  // namespace
 
 // 通用 V2 下单 helper —— BUY 和 SELL 共享。差异：
@@ -594,8 +620,37 @@ OrderResult LiveTrader::place_entry_order(const EntrySignal& sig, double shares)
 OrderResult LiveTrader::place_exit_order(const Position& pos, double shares,
                                          double price, bool is_taker,
                                          const std::string& reason) {
-    return send_v2_order(pos.token_id, price, shares,
-                         /*is_buy=*/false, is_taker, "exit:" + reason);
+    double safe_shares = safe_sell_shares(shares);
+    if (safe_shares <= 0) {
+        OrderResult r;
+        r.error = "exit shares too small after dust buffer: requested=" + std::to_string(shares);
+        return r;
+    }
+
+    if (safe_shares < shares) {
+        spdlog::warn("LIVE SELL sizing [{}]: requested={:.6f} safe={:.6f} dust={:.6f}",
+                     reason, shares, safe_shares, shares - safe_shares);
+    }
+
+    auto first = send_v2_order(pos.token_id, price, safe_shares,
+                               /*is_buy=*/false, is_taker, "exit:" + reason);
+    if (first.success) {
+        if (first.filled_shares <= 0) first.filled_shares = safe_shares;
+        return first;
+    }
+
+    double server_balance = parse_available_balance_from_error(first.error);
+    double retry_shares = safe_sell_shares(server_balance);
+    if (server_balance <= 0 || retry_shares <= 0 || retry_shares >= safe_shares) {
+        return first;
+    }
+
+    spdlog::warn("LIVE SELL retry [{}]: server_balance={:.6f}, retry_shares={:.6f}",
+                 reason, server_balance, retry_shares);
+    auto retry = send_v2_order(pos.token_id, price, retry_shares,
+                               /*is_buy=*/false, is_taker, "exit:" + reason + ":retry");
+    if (retry.success && retry.filled_shares <= 0) retry.filled_shares = retry_shares;
+    return retry;
 }
 
 // ===== 启动对账 + 应急平仓（R9-V2）=====
@@ -718,7 +773,8 @@ void LiveTrader::emergency_close_all(const std::vector<Position>& positions) {
                                       /*is_taker=*/true, "emergency");
             if (r.success)
                 spdlog::warn("    SENT  {} shares={:.4f} order_id={}",
-                             pos.token_id.substr(0, 16), pos.shares,
+                             pos.token_id.substr(0, 16),
+                             r.filled_shares > 0 ? r.filled_shares : pos.shares,
                              r.order_id.substr(0, std::min<size_t>(r.order_id.size(), 16)));
             else
                 spdlog::error("    FAIL  {} {}", pos.token_id.substr(0, 16), r.error);
