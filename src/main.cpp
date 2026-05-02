@@ -900,14 +900,15 @@ int main(int argc, char* argv[]) {
                 if (sig.valid) {
                     std::string risk_reject;
                     if (risk.can_open_position(sig, risk_reject)) {
-                        double shares = risk.compute_position_size();  // 固定 5 shares
-                        double size = shares * sig.entry_price;
+                        double shares = sig.shares;
+                        double size = sig.size_usdc;
                         // 入场是限价 ask-1¢ 挂单，maker 角色，免 trading fee
                         double fee = calc_fee(shares, sig.entry_price, /*is_taker=*/false, cfg.fees);
 
                         polymarket::Position pos;
                         pos.id = "P" + std::to_string(next_position_id++);
                         pos.side = sig.side;
+                        pos.regime = sig.regime;
                         pos.token_id = sig.token_id;
                         pos.condition_id = sig.condition_id;
                         pos.market_question = sig.market_question;
@@ -922,7 +923,7 @@ int main(int argc, char* argv[]) {
                         pos.entry_fee = fee;
                         pos.entry_time = now_ms();
                         pos.minutes_remaining_at_entry = btc.minutes_remaining;
-                        pos.tp_levels = strategy.compute_tp_levels(sig.entry_price);
+                        pos.tp_levels = strategy.compute_tp_levels(sig.entry_price, sig.regime);
 
                         // Analytics: MFE/MAE 初始化
                         pos.max_price = sig.entry_price;
@@ -1011,7 +1012,7 @@ int main(int argc, char* argv[]) {
                                 pos.size_usdc   = real_shares * real_entry;
                                 // 重算 V2 maker fee（=0）+ TP/MFE 基线，确保后续止盈与 stop 都按真实成本评估
                                 pos.entry_fee   = calc_fee(real_shares, real_entry, /*is_taker=*/false, cfg.fees);
-                                pos.tp_levels   = strategy.compute_tp_levels(real_entry);
+                                pos.tp_levels   = strategy.compute_tp_levels(real_entry, pos.regime);
                                 pos.max_price   = real_entry;
                                 pos.min_price   = real_entry;
                                 pos.mfe_at_5min  = real_entry;
@@ -1034,7 +1035,7 @@ int main(int argc, char* argv[]) {
                         risk.add_position();
                         risk.deduct_balance(size + fee);  // 动态余额：扣除成本+买入手续费
 
-                        spdlog::info("OPEN [{}] {} {} @ {:.3f} | ${:.2f} ({} shares) | fee=${:.2f} | balance=${:.2f}",
+                        spdlog::info("OPEN [{}] {} {} @ {:.3f} | ${:.2f} ({:.4f} shares) | fee=${:.2f} | balance=${:.2f}",
                                      cfg.strategy.mode, pos.id,
                                      (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
                                      pos.entry_price, size, shares, fee, display_balance());
@@ -1267,6 +1268,7 @@ int main(int argc, char* argv[]) {
 
                     // §三 止损后本场不再交易（价格止损 / 时间止损 / 移动止盈回撤 / 死水早退都算止损出场）
                     if (exit_sig.reason == "stop_price" || exit_sig.reason == "stop_time" ||
+                        exit_sig.reason == "stop_btc" ||
                         exit_sig.reason == "trailing_stop" || exit_sig.reason == "dead_water_exit") {
                         risk.set_candle_stopped();
                         spdlog::warn("Candle stopped: {} triggered, no more trades this candle",

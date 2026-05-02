@@ -10,13 +10,17 @@ namespace polymarket {
 
 // 交易方向
 enum class Side { UP, DOWN, NONE };
+enum class StrategyRegime { NONE, TREND, REVERSAL };
 
 // 入场信号
 struct EntrySignal {
     bool valid = false;
     Side side = Side::NONE;
+    StrategyRegime regime = StrategyRegime::NONE;
     double entry_price = 0;       // 建议入场价（ask 价下方 0.5-1¢）
     double market_ask = 0;        // 当前 ask 价
+    double size_usdc = 0;         // 目标投入金额
+    double shares = 0;            // 目标买入份数
     std::string market_question;
     std::string token_id;
     std::string condition_id;
@@ -35,6 +39,7 @@ struct TakeProfitLevel {
 struct Position {
     std::string id;               // 唯一ID
     Side side = Side::NONE;
+    StrategyRegime regime = StrategyRegime::NONE;
     std::string token_id;
     std::string condition_id;
     std::string market_question;
@@ -94,6 +99,7 @@ public:
 
     // 计算止盈档位
     std::vector<TakeProfitLevel> compute_tp_levels(double entry_price);
+    std::vector<TakeProfitLevel> compute_tp_levels(double entry_price, StrategyRegime regime);
 
     // 评估是否应该退出
     ExitSignal evaluate_exit(
@@ -113,6 +119,11 @@ private:
     double max_entry_price(int minutes_remaining) const;
 
     AppConfig cfg_;
+    std::string last_condition_id_;
+    double abs_dev_prev2_ = 0;
+    double abs_dev_prev1_ = 0;
+    bool has_dev_prev2_ = false;
+    bool has_dev_prev1_ = false;
 };
 
 }  // namespace polymarket

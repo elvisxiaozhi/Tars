@@ -15,6 +15,14 @@ double Strategy::max_entry_price(int minutes_remaining) const {
     return 0;  // 不入场
 }
 
+static const char* regime_name(StrategyRegime regime) {
+    switch (regime) {
+        case StrategyRegime::TREND: return "trend";
+        case StrategyRegime::REVERSAL: return "reversal";
+        default: return "none";
+    }
+}
+
 // 计算费后回本价：在 sell_price 卖出时，扣除买卖双向手续费后刚好不亏
 // 手续费公式：shares × 0.05 × p × (1-p)
 // 买入成本/share = entry_price + 0.05 × entry_price × (1 - entry_price)
@@ -43,35 +51,74 @@ EntrySignal Strategy::evaluate_entry(
     sig.condition_id = condition_id;
     sig.market_question = question;
 
-    // §一.1 时间窗口：剩余时间 > 20 分钟
-    // 从 30→20 的依据：4-26 早间数据显示 BTC 波动集中在蜡烛末段，30 阈值屏蔽了 100% 的甜区机会
-    // 20 min 仍能承接 TP0（contract +20¢ 在 BTC 走方向时 5-10min 可达），但 TP1/TP2 命中率会降
-    if (minutes_remaining <= 20) {
-        sig.reject_reason = "time_too_short: " + std::to_string(minutes_remaining) + "min left";
+    double abs_dev = std::abs(btc.deviation_pct);
+    if (condition_id != last_condition_id_) {
+        last_condition_id_ = condition_id;
+        abs_dev_prev1_ = abs_dev;
+        abs_dev_prev2_ = abs_dev;
+        has_dev_prev1_ = true;
+        has_dev_prev2_ = false;
+        sig.reject_reason = "regime_warmup";
         return sig;
     }
 
-    double max_price = max_entry_price(minutes_remaining);
-    if (max_price <= 0) {
-        sig.reject_reason = "no_entry_window";
+    bool has_slope = has_dev_prev1_ && has_dev_prev2_;
+    constexpr double kSlopeEps = 0.005;  // percentage points, filters one-tick noise
+    bool expanding = has_slope &&
+        (abs_dev > abs_dev_prev1_ + kSlopeEps) &&
+        (abs_dev_prev1_ > abs_dev_prev2_ + kSlopeEps);
+    bool contracting = has_slope &&
+        (abs_dev + kSlopeEps < abs_dev_prev1_) &&
+        (abs_dev_prev1_ + kSlopeEps < abs_dev_prev2_);
+
+    // Update slope state before returning so rejected ticks still build history.
+    abs_dev_prev2_ = abs_dev_prev1_;
+    abs_dev_prev1_ = abs_dev;
+    has_dev_prev2_ = has_dev_prev1_;
+    has_dev_prev1_ = true;
+
+    double vol_ratio = (btc.avg_24h_vol > 1e-9) ? btc.current_1h_vol / btc.avg_24h_vol : 0.0;
+    if (!has_slope) {
+        sig.reject_reason = "regime_warmup";
         return sig;
     }
 
-    // 方向选择：选择更便宜的一方买入
     Side candidate_side = Side::NONE;
     double candidate_ask = 0;
     std::string candidate_token;
+    StrategyRegime regime = StrategyRegime::NONE;
+    double size_usdc = 0;
 
-    if (up_ask > 0 && (down_ask <= 0 || up_ask <= down_ask)) {
-        candidate_side = Side::UP;
-        candidate_ask = up_ask;
-        candidate_token = up_token_id;
-    } else if (down_ask > 0) {
-        candidate_side = Side::DOWN;
-        candidate_ask = down_ask;
-        candidate_token = down_token_id;
+    // Trend mode: BTC deviation expands with enough volatility; buy the favored side.
+    if (abs_dev >= 0.18 && expanding && vol_ratio >= 0.8 &&
+        minutes_remaining >= 35 && minutes_remaining <= 45) {
+        candidate_side = btc.deviation_pct > 0 ? Side::UP : Side::DOWN;
+        candidate_ask = candidate_side == Side::UP ? up_ask : down_ask;
+        candidate_token = candidate_side == Side::UP ? up_token_id : down_token_id;
+        regime = StrategyRegime::TREND;
+        size_usdc = (abs_dev >= 0.25 && vol_ratio >= 1.0) ? 2.5 : 2.25;
+        if (candidate_ask < 0.50 || candidate_ask > 0.75) {
+            sig.reject_reason = "trend_price_window: ask=" + std::to_string(candidate_ask);
+            return sig;
+        }
+    // Reversal mode: BTC deviation is extreme but contracting; buy the cheap contrarian side.
+    } else if (abs_dev >= 0.25 && contracting && vol_ratio <= 0.8 &&
+               minutes_remaining >= 30 && minutes_remaining <= 38) {
+        candidate_side = btc.deviation_pct > 0 ? Side::DOWN : Side::UP;
+        candidate_ask = candidate_side == Side::UP ? up_ask : down_ask;
+        candidate_token = candidate_side == Side::UP ? up_token_id : down_token_id;
+        regime = StrategyRegime::REVERSAL;
+        size_usdc = abs_dev >= 0.35 ? 2.5 : 2.25;
+        if (candidate_ask > 0.30) {
+            sig.reject_reason = "reversal_ask_too_high: ask=" + std::to_string(candidate_ask);
+            return sig;
+        }
     } else {
-        sig.reject_reason = "no_valid_ask";
+        sig.reject_reason = "no_regime: abs_dev=" + std::to_string(abs_dev) +
+            " expanding=" + std::to_string(expanding) +
+            " contracting=" + std::to_string(contracting) +
+            " vol_ratio=" + std::to_string(vol_ratio) +
+            " min_left=" + std::to_string(minutes_remaining);
         return sig;
     }
 
@@ -81,38 +128,49 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
 
-    if (candidate_ask > max_price) {
-        sig.reject_reason = "ask_too_high: " +
-            std::to_string(candidate_ask) + " > max " + std::to_string(max_price);
-        return sig;
-    }
-
-    // §九.1 红线：不追涨买入超过30¢的合约
-    if (candidate_ask > 0.30) {
-        sig.reject_reason = "red_line_30c: ask=" + std::to_string(candidate_ask);
+    if (size_usdc <= 0) {
+        sig.reject_reason = "invalid_size";
         return sig;
     }
 
     // 信号有效
     sig.valid = true;
     sig.side = candidate_side;
+    sig.regime = regime;
     sig.market_ask = candidate_ask;
     // §二：在当前价下方1¢挂限价买单
     sig.entry_price = candidate_ask - 0.01;
     if (sig.entry_price < 0.01) sig.entry_price = 0.01;
+    sig.size_usdc = size_usdc;
+    sig.shares = size_usdc / sig.entry_price;
     sig.token_id = candidate_token;
 
-    spdlog::info("SIGNAL: {} {} @ {:.3f} (ask={:.3f}, max={:.3f}, BTC dev={:+.2f}%)",
+    spdlog::info("SIGNAL [{}]: {} {} @ {:.3f} (ask={:.3f}, size=${:.2f}, BTC dev={:+.2f}%, vol_ratio={:.2f})",
+                 regime_name(regime),
                  (sig.side == Side::UP ? "UP" : "DOWN"),
-                 question, sig.entry_price, candidate_ask, max_price,
-                 btc.deviation_pct);
+                 question, sig.entry_price, candidate_ask, sig.size_usdc,
+                 btc.deviation_pct, vol_ratio);
 
     return sig;
 }
 
 std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price) {
+    return compute_tp_levels(entry_price, StrategyRegime::REVERSAL);
+}
+
+std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price, StrategyRegime regime) {
     // §四 止盈规则（三档减仓，中间档锁住 MFE 浮盈）
     std::vector<TakeProfitLevel> levels;
+
+    if (regime == StrategyRegime::TREND) {
+        // Trend entries are higher-priced; use two larger exits so each live FOK
+        // sell remains above Polymarket's practical minimum order size.
+        levels.push_back({0, std::min(0.90, entry_price + 0.08), 0.50, false});
+        levels.push_back({1, std::min(0.92, entry_price + 0.15), 1.00, false});
+        spdlog::debug("Trend TP levels for entry={:.3f}: TP0={:.3f}(50%) TP1={:.3f}(rest)",
+                      entry_price, levels[0].trigger_price, levels[1].trigger_price);
+        return levels;
+    }
 
     // TP0：45¢ → 卖出30%（锁住中间浮盈，防止涨后全回吐）
     levels.push_back({0, 0.45, 0.30, false});
@@ -136,6 +194,77 @@ ExitSignal Strategy::evaluate_exit(
     int minutes_remaining) {
 
     ExitSignal exit;
+    auto now_chrono = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    int64_t elapsed_sec = (now_chrono - pos.entry_time) / 1000;
+    double mfe = pos.max_price - pos.entry_price;
+
+    if (pos.regime == StrategyRegime::TREND) {
+        if (current_contract_price <= pos.entry_price - 0.10) {
+            exit.should_exit = true;
+            exit.reason = "stop_price";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("TREND STOP: {} entry={:.3f} now={:.3f}",
+                         pos.market_question, pos.entry_price, current_contract_price);
+            return exit;
+        }
+
+        bool dev_crossed_zero =
+            (pos.side == Side::UP && btc.deviation_pct <= 0) ||
+            (pos.side == Side::DOWN && btc.deviation_pct >= 0);
+        if (dev_crossed_zero) {
+            exit.should_exit = true;
+            exit.reason = "stop_btc";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("TREND DEV CROSS: {} side={} dev={:+.3f}% entry={:.3f} now={:.3f}",
+                         pos.market_question, pos.side == Side::UP ? "UP" : "DOWN",
+                         btc.deviation_pct, pos.entry_price, current_contract_price);
+            return exit;
+        }
+
+        if (elapsed_sec >= 300 && mfe < 0.03) {
+            exit.should_exit = true;
+            exit.reason = "dead_water_exit";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("TREND DEAD WATER: {} elapsed={}s mfe_gain={:+.3f} entry={:.3f} now={:.3f}",
+                         pos.market_question, elapsed_sec, mfe, pos.entry_price, current_contract_price);
+            return exit;
+        }
+
+        if (mfe >= 0.15) {
+            double trailing_stop = std::max(pos.entry_price + 0.06, pos.max_price - 0.05);
+            if (current_contract_price <= trailing_stop) {
+                exit.should_exit = true;
+                exit.reason = "trailing_stop";
+                exit.exit_price = current_contract_price;
+                exit.use_market_order = true;
+                spdlog::warn("TREND TRAILING (peak-5c): {} entry={:.3f} peak={:.3f} now={:.3f} stop={:.3f}",
+                             pos.market_question, pos.entry_price, pos.max_price,
+                             current_contract_price, trailing_stop);
+                return exit;
+            }
+        } else if (mfe >= 0.08) {
+            double trailing_stop = std::max(pos.entry_price + 0.02, pos.max_price - 0.06);
+            if (current_contract_price <= trailing_stop) {
+                exit.should_exit = true;
+                exit.reason = "trailing_stop";
+                exit.exit_price = current_contract_price;
+                exit.use_market_order = true;
+                spdlog::warn("TREND TRAILING (peak-6c): {} entry={:.3f} peak={:.3f} now={:.3f} stop={:.3f}",
+                             pos.market_question, pos.entry_price, pos.max_price,
+                             current_contract_price, trailing_stop);
+                return exit;
+            }
+        }
+
+        if (minutes_remaining <= 10) {
+            return evaluate_last_10min(pos, current_contract_price, minutes_remaining);
+        }
+        return exit;
+    }
 
     // §五.1 价格止损：从入场价下跌 ≥ 30%
     // Step 2.25：阈值从 -50% 收紧到 -30%。
@@ -161,10 +290,23 @@ ExitSignal Strategy::evaluate_exit(
     //     · 18:10 case：7m00s 涨到 0.43（mfe +20¢） → 8min 窗口能救
     //     · 13:11 case：18+ min 才反弹 → 8min 仍救不了，接受 -$0.36 损失
     //   救命 case（04-29、04-30 15:25）多扛 3 分钟，最坏多损 ~$0.2/笔。
-    auto now_chrono = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    int64_t elapsed_sec = (now_chrono - pos.entry_time) / 1000;
     double mfe_gain = pos.max_price - pos.entry_price;
+    double entry_dev = (pos.btc_price_at_entry - pos.btc_strike_at_entry)
+        / pos.btc_strike_at_entry * 100.0;
+    bool same_dev_side = (entry_dev >= 0 && btc.deviation_pct >= 0) ||
+                         (entry_dev <= 0 && btc.deviation_pct <= 0);
+    bool dev_expanded_again = same_dev_side &&
+        std::abs(btc.deviation_pct) > std::abs(entry_dev) + 0.03;
+    if (dev_expanded_again && current_contract_price <= pos.entry_price - 0.07) {
+        exit.should_exit = true;
+        exit.reason = "stop_btc";
+        exit.exit_price = current_contract_price;
+        exit.use_market_order = true;
+        spdlog::warn("REVERSAL DEV EXPAND STOP: {} entry_dev={:+.3f}% now_dev={:+.3f}% entry={:.3f} now={:.3f}",
+                     pos.market_question, entry_dev, btc.deviation_pct,
+                     pos.entry_price, current_contract_price);
+        return exit;
+    }
     // Step 2.25：dead_water 加 price floor，避免亏损 -10~-30% 时被 dead_water 误退出
     //   实测 5 笔 dead_water 中 2 笔触发时 current 已 -37/-38%，这种深亏应让
     //   stop_price 接管而非 dead_water"接受任意亏损"。floor=entry × 0.85（亏 ≤15%）
@@ -182,7 +324,6 @@ ExitSignal Strategy::evaluate_exit(
 
     // §五.2 移动止盈（Trailing Stop）：基于 MFE 动态提升止损线
     // Step 2.20：阈值从 +25/+15 降到 +15/+10，捕获低入场价（$0.10-$0.20）的相对涨幅
-    double mfe = pos.max_price - pos.entry_price;
     if (mfe >= 0.15) {
         // MFE ≥ +15¢：peak-based 止损 = max(peak - 15¢, entry + 10¢)
         // 回吐超过峰值 15¢ 即离场；同时保底至少 +10¢ 利润

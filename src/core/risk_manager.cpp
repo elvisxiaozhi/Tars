@@ -18,6 +18,11 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
         return false;
     }
 
+    if (candle_traded_) {
+        reject_reason = "candle_traded: one entry already used this candle";
+        return false;
+    }
+
     // §三 同时持仓上限（单仓制）
     if (open_positions_ >= max_concurrent_) {
         reject_reason = "max_concurrent: " + std::to_string(open_positions_) +
@@ -25,8 +30,8 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
         return false;
     }
 
-    // 余额检查
-    double cost = fixed_shares_ * sig.entry_price;
+    // 余额检查：regime strategy sets target USDC size dynamically.
+    double cost = sig.size_usdc > 0 ? sig.size_usdc : fixed_shares_ * sig.entry_price;
     if (cost > account_balance_) {
         reject_reason = "insufficient_balance: need $" + std::to_string(cost) +
                         " but have $" + std::to_string(account_balance_);

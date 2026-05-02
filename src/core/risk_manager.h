@@ -29,7 +29,7 @@ public:
     bool is_candle_stopped() const { return candle_stopped_; }
 
     // 新 K线 开始时重置
-    void reset_candle() { candle_stopped_ = false; }
+    void reset_candle() { candle_stopped_ = false; candle_traded_ = false; }
 
     // 重置每日统计
     void reset_daily();
@@ -46,7 +46,7 @@ public:
     int open_position_count() const { return open_positions_; }
 
     // 仓位计数
-    void add_position() { open_positions_++; }
+    void add_position() { open_positions_++; candle_traded_ = true; }
     void remove_position() { if (open_positions_ > 0) open_positions_--; }
 
 private:
@@ -60,6 +60,7 @@ private:
     int daily_trades_ = 0;
     double daily_pnl_ = 0;
     bool candle_stopped_ = false;  // 本场 K线 已止损，禁止再交易
+    bool candle_traded_ = false;   // 本场 K线 已开过仓，禁止重复初始开仓
 };
 
 }  // namespace polymarket
