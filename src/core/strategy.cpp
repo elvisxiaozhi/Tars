@@ -137,9 +137,13 @@ ExitSignal Strategy::evaluate_exit(
 
     ExitSignal exit;
 
-    // §五.1 价格止损：从入场价下跌 ≥ 50%（优先于时间止损，防止跳空超额亏损）
+    // §五.1 价格止损：从入场价下跌 ≥ 30%
+    // Step 2.25：阈值从 -50% 收紧到 -30%。
+    //   依据：5/1 LIVE 4 笔 stop_price 实际触发时跌幅 -52~-89%（轮询 10s + Polymarket
+    //   token 价断崖式下跌，跌穿 -50% 时已经 -89%）。改 -30% 让止损提早触发，即便
+    //   lag 也不会到 -50%+。
     double loss_pct = (pos.entry_price - current_contract_price) / pos.entry_price;
-    if (loss_pct >= 0.50) {
+    if (loss_pct >= 0.30) {
         exit.should_exit = true;
         exit.reason = "stop_price";
         exit.exit_price = current_contract_price;
@@ -161,7 +165,11 @@ ExitSignal Strategy::evaluate_exit(
         std::chrono::system_clock::now().time_since_epoch()).count();
     int64_t elapsed_sec = (now_chrono - pos.entry_time) / 1000;
     double mfe_gain = pos.max_price - pos.entry_price;
-    if (elapsed_sec >= 480 && mfe_gain < 0.02) {
+    // Step 2.25：dead_water 加 price floor，避免亏损 -10~-30% 时被 dead_water 误退出
+    //   实测 5 笔 dead_water 中 2 笔触发时 current 已 -37/-38%，这种深亏应让
+    //   stop_price 接管而非 dead_water"接受任意亏损"。floor=entry × 0.85（亏 ≤15%）
+    bool shallow_loss = (current_contract_price >= pos.entry_price * 0.85);
+    if (elapsed_sec >= 480 && mfe_gain < 0.02 && shallow_loss) {
         exit.should_exit = true;
         exit.reason = "dead_water_exit";
         exit.exit_price = current_contract_price;

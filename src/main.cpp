@@ -1349,7 +1349,7 @@ int main(int argc, char* argv[]) {
             if (mins <= 10) {
                 sleep_sec = 5;
             } else if (!positions.empty()) {
-                sleep_sec = 10;
+                sleep_sec = 5;   // Step 2.25：持仓时 10s→5s，缩短 stop_price 触发 lag
             } else {
                 sleep_sec = 15;
             }
