@@ -30,6 +30,34 @@ struct StrategyConfig {
     std::string mode = "dry_run";    // "dry_run" or "live"
     double account_balance = 1000.0;
     int poll_interval_sec = 30;      // 策略循环间隔
+    std::vector<std::string> crypto_symbols = {"BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "HYPE"};
+    int max_global_trades_per_hour = 2;
+    int max_global_open_positions = 2;
+    int max_quiet_trades_per_hour = 2;
+};
+
+struct CoinStrategyConfig {
+    std::string coin = "BTC";
+    std::string binance_symbol = "BTCUSDT";
+    std::string hourly_slug_prefix = "bitcoin-up-or-down";
+    bool live_enabled = false;
+
+    double trend_abs_dev = 0.18;
+    double trend_vol_ratio = 0.80;
+    double trend_size_usdc = 2.25;
+    double trend_strong_size_usdc = 2.50;
+
+    double reversal_abs_dev = 0.25;
+    double reversal_vol_ratio = 0.80;
+    double reversal_size_usdc = 2.25;
+    double reversal_strong_size_usdc = 2.50;
+
+    double quiet_min_dev = 0.04;
+    double quiet_max_dev = 0.12;
+    double quiet_vol_ratio = 0.60;
+    double quiet_max_entry = 0.28;
+    double quiet_size_usdc = 1.25;
+    double max_spread = 0.04;
 };
 
 struct RiskConfig {
@@ -92,7 +120,10 @@ struct AppConfig {
     NetworkConfig network;
     FeeConfig fees;
     PolygonConfig polygon;
+    std::vector<CoinStrategyConfig> coins;
 };
+
+CoinStrategyConfig default_coin_config(const std::string& coin);
 
 // 从 JSON 文件加载配置
 AppConfig load_config(const std::string& path);

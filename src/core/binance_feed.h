@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <map>
 #include <vector>
 
 #include "net/http_client.h"
@@ -18,6 +19,7 @@ struct BtcCandle {
 };
 
 struct BtcMarketData {
+    std::string symbol = "BTC";
     double current_price = 0;
     double strike_price = 0;       // 当前1h K线的 open
     double current_1h_vol = 0;     // 当前1h波动率 (high-low)/open
@@ -36,17 +38,23 @@ public:
 
     // 拉取最新 BTC 市场数据（价格 + K线 + 波动率）
     BtcMarketData fetch();
+    BtcMarketData fetch(const std::string& coin, const std::string& binance_symbol);
 
     // 获取最近一次 fetch 的数据
     const BtcMarketData& latest() const { return latest_; }
 
 private:
-    double fetch_price();
-    std::vector<BtcCandle> fetch_klines(int limit = 25);
-    BtcMarketData compute(double price, const std::vector<BtcCandle>& klines);
+    double fetch_price(const std::string& binance_symbol);
+    std::vector<BtcCandle> fetch_klines(const std::string& binance_symbol, int limit = 25);
+    BtcMarketData compute(const std::string& coin, double price, const std::vector<BtcCandle>& klines);
 
     net::HttpClient http_;
     BtcMarketData latest_;
+    struct KlineCache {
+        std::vector<BtcCandle> klines;
+        int64_t fetched_at_ms = 0;
+    };
+    std::map<std::string, KlineCache> kline_cache_;
     static constexpr const char* BINANCE_API = "https://api.binance.com";
 };
 

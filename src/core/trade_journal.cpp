@@ -37,6 +37,8 @@ TradeJournal::TradeJournal(const std::string& path) : path_(path) {
             r.id                          = j.value("id", "");
             // mode 字段：老记录无此字段 → 默认 "dry_run"（4-28 V2 升级前全是模拟）
             r.mode                        = j.value("mode", std::string{"dry_run"});
+            r.coin                        = j.value("coin", std::string{"BTC"});
+            r.regime                      = j.value("regime", std::string{});
             r.market_question             = j.value("market", "");
             r.side                        = j.value("side", "");
             r.entry_time                  = j.value("entry_time", int64_t{0});
@@ -99,6 +101,8 @@ void TradeJournal::record(const TradeRecord& trade) {
     json j;
     j["id"] = trade.id;
     j["mode"] = trade.mode;
+    j["coin"] = trade.coin;
+    j["regime"] = trade.regime;
     j["market"] = trade.market_question;
     j["side"] = trade.side;
     j["entry_time"] = trade.entry_time;
@@ -162,16 +166,16 @@ void TradeJournal::print_summary() const {
                        ? records_.size() - session_start_index_ : 0;
     if (new_count > 0) {
         spdlog::info("=== This session: {} new record(s) ===", new_count);
-        spdlog::info("{:<45} {:>5} {:>8} {:>8} {:>16} {:>10} {}",
-                     "Market", "Side", "Entry", "Exit", "Reason", "P&L", "Mode");
+        spdlog::info("{:<45} {:>5} {:>5} {:>8} {:>8} {:>16} {:>10} {}",
+                     "Market", "Coin", "Side", "Entry", "Exit", "Reason", "P&L", "Mode");
         spdlog::info("{}", std::string(100, '-'));
         for (size_t i = session_start_index_; i < records_.size(); ++i) {
             const auto& t = records_[i];
             std::string q = t.market_question;
             if (q.size() > 45) q = q.substr(0, 42) + "...";
             std::string m = t.mode.empty() ? "dry_run" : t.mode;
-            spdlog::info("{:<45} {:>5} {:>8.3f} {:>8.3f} {:>16} {:>+10.2f} [{}]",
-                         q, t.side, t.entry_price, t.exit_price,
+            spdlog::info("{:<45} {:>5} {:>5} {:>8.3f} {:>8.3f} {:>16} {:>+10.2f} [{}]",
+                         q, t.coin, t.side, t.entry_price, t.exit_price,
                          t.exit_reason, t.realized_pnl,
                          m == "live" ? "LIVE" : "DRY");
         }

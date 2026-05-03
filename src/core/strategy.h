@@ -10,13 +10,14 @@ namespace polymarket {
 
 // 交易方向
 enum class Side { UP, DOWN, NONE };
-enum class StrategyRegime { NONE, TREND, REVERSAL };
+enum class StrategyRegime { NONE, TREND, REVERSAL, QUIET_REVERSION };
 
 // 入场信号
 struct EntrySignal {
     bool valid = false;
     Side side = Side::NONE;
     StrategyRegime regime = StrategyRegime::NONE;
+    std::string coin = "BTC";
     double entry_price = 0;       // 建议入场价（ask 价下方 0.5-1¢）
     double market_ask = 0;        // 当前 ask 价
     double size_usdc = 0;         // 目标投入金额
@@ -40,6 +41,7 @@ struct Position {
     std::string id;               // 唯一ID
     Side side = Side::NONE;
     StrategyRegime regime = StrategyRegime::NONE;
+    std::string coin = "BTC";
     std::string token_id;
     std::string condition_id;
     std::string market_question;
@@ -87,7 +89,7 @@ struct ExitSignal {
 
 class Strategy {
 public:
-    explicit Strategy(const AppConfig& cfg);
+    explicit Strategy(const AppConfig& cfg, std::string coin = "BTC");
 
     // 评估入场条件，返回信号
     EntrySignal evaluate_entry(
@@ -115,10 +117,9 @@ public:
         int minutes_remaining);
 
 private:
-    // 根据剩余时间返回最大入场价
-    double max_entry_price(int minutes_remaining) const;
-
     AppConfig cfg_;
+    std::string coin_;
+    CoinStrategyConfig params_;
     std::string last_condition_id_;
     double abs_dev_prev2_ = 0;
     double abs_dev_prev1_ = 0;

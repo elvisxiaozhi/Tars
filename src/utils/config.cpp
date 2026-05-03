@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
+#include <cctype>
 
 #include <json.hpp>
 #include <spdlog/spdlog.h>
@@ -31,6 +32,88 @@ static int jint(const json& j, const std::string& key, int def = 0) {
 static bool jbool(const json& j, const std::string& key, bool def = false) {
     if (j.contains(key) && j[key].is_boolean()) return j[key].get<bool>();
     return def;
+}
+
+static std::string upper(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+}
+
+CoinStrategyConfig default_coin_config(const std::string& coin_in) {
+    std::string coin = upper(coin_in);
+    CoinStrategyConfig c;
+    c.coin = coin;
+    c.live_enabled = (coin == "BTC");
+    if (coin == "ETH") {
+        c.binance_symbol = "ETHUSDT";
+        c.hourly_slug_prefix = "ethereum-up-or-down";
+        c.trend_abs_dev = 0.22;
+        c.trend_vol_ratio = 0.85;
+        c.trend_size_usdc = 2.25;
+        c.trend_strong_size_usdc = 2.50;
+        c.reversal_abs_dev = 0.30;
+        c.reversal_vol_ratio = 0.85;
+        c.reversal_size_usdc = 2.00;
+        c.reversal_strong_size_usdc = 2.25;
+        c.quiet_min_dev = 0.06;
+        c.quiet_max_dev = 0.16;
+        c.quiet_vol_ratio = 0.65;
+        c.quiet_max_entry = 0.27;
+        c.quiet_size_usdc = 1.00;
+    } else if (coin == "SOL") {
+        c.binance_symbol = "SOLUSDT";
+        c.hourly_slug_prefix = "solana-up-or-down";
+        c.trend_abs_dev = 0.28;
+        c.trend_vol_ratio = 0.90;
+        c.trend_size_usdc = 1.75;
+        c.trend_strong_size_usdc = 2.00;
+        c.reversal_abs_dev = 0.38;
+        c.reversal_vol_ratio = 0.90;
+        c.reversal_size_usdc = 1.50;
+        c.reversal_strong_size_usdc = 1.75;
+        c.quiet_min_dev = 0.08;
+        c.quiet_max_dev = 0.22;
+        c.quiet_vol_ratio = 0.70;
+        c.quiet_max_entry = 0.25;
+        c.quiet_size_usdc = 0.75;
+    } else if (coin == "XRP") {
+        c.binance_symbol = "XRPUSDT";
+        c.hourly_slug_prefix = "xrp-up-or-down";
+        c.live_enabled = false;
+        c.trend_abs_dev = 0.35;
+        c.reversal_abs_dev = 0.45;
+        c.quiet_min_dev = 0.10;
+        c.quiet_max_dev = 0.25;
+        c.quiet_size_usdc = 0.50;
+    } else if (coin == "DOGE") {
+        c.binance_symbol = "DOGEUSDT";
+        c.hourly_slug_prefix = "dogecoin-up-or-down";
+        c.live_enabled = false;
+        c.trend_abs_dev = 0.40;
+        c.reversal_abs_dev = 0.50;
+        c.quiet_min_dev = 0.12;
+        c.quiet_max_dev = 0.30;
+        c.quiet_size_usdc = 0.50;
+    } else if (coin == "BNB") {
+        c.binance_symbol = "BNBUSDT";
+        c.hourly_slug_prefix = "bnb-up-or-down";
+        c.live_enabled = false;
+        c.trend_abs_dev = 0.25;
+        c.reversal_abs_dev = 0.35;
+        c.quiet_min_dev = 0.07;
+        c.quiet_max_dev = 0.18;
+        c.quiet_size_usdc = 0.50;
+    } else if (coin == "HYPE") {
+        c.binance_symbol = "HYPEUSDT";
+        c.hourly_slug_prefix = "hype-up-or-down";
+        c.live_enabled = false;
+        c.trend_abs_dev = 0.45;
+        c.reversal_abs_dev = 0.60;
+        c.quiet_min_dev = 0.15;
+        c.quiet_max_dev = 0.35;
+        c.quiet_size_usdc = 0.50;
+    }
+    return c;
 }
 
 AppConfig load_config(const std::string& path) {
@@ -65,6 +148,15 @@ AppConfig load_config(const std::string& path) {
         cfg.strategy.mode = jstr(s, "mode", "dry_run");
         cfg.strategy.account_balance = jdbl(s, "account_balance", 1000.0);
         cfg.strategy.poll_interval_sec = jint(s, "poll_interval_sec", 30);
+        cfg.strategy.max_global_trades_per_hour = jint(s, "max_global_trades_per_hour", 2);
+        cfg.strategy.max_global_open_positions = jint(s, "max_global_open_positions", 2);
+        cfg.strategy.max_quiet_trades_per_hour = jint(s, "max_quiet_trades_per_hour", 2);
+        if (s.contains("crypto_symbols") && s["crypto_symbols"].is_array()) {
+            cfg.strategy.crypto_symbols.clear();
+            for (const auto& t : s["crypto_symbols"]) {
+                if (t.is_string()) cfg.strategy.crypto_symbols.push_back(upper(t.get<std::string>()));
+            }
+        }
         if (s.contains("arb_types") && s["arb_types"].is_array()) {
             for (const auto& t : s["arb_types"]) {
                 if (t.is_string()) cfg.strategy.arb_types.push_back(t.get<std::string>());
@@ -136,6 +228,45 @@ AppConfig load_config(const std::string& path) {
             "https://1rpc.io/matic"
         };
     }
+
+    cfg.coins.clear();
+    for (const auto& sym : cfg.strategy.crypto_symbols) {
+        cfg.coins.push_back(default_coin_config(sym));
+    }
+    if (root.contains("coins") && root["coins"].is_array()) {
+        for (const auto& cj : root["coins"]) {
+            std::string coin = upper(jstr(cj, "coin", ""));
+            if (coin.empty()) continue;
+            CoinStrategyConfig cc = default_coin_config(coin);
+            cc.binance_symbol = jstr(cj, "binance_symbol", cc.binance_symbol);
+            cc.hourly_slug_prefix = jstr(cj, "hourly_slug_prefix", cc.hourly_slug_prefix);
+            cc.live_enabled = jbool(cj, "live_enabled", cc.live_enabled);
+            cc.trend_abs_dev = jdbl(cj, "trend_abs_dev", cc.trend_abs_dev);
+            cc.trend_vol_ratio = jdbl(cj, "trend_vol_ratio", cc.trend_vol_ratio);
+            cc.trend_size_usdc = jdbl(cj, "trend_size_usdc", cc.trend_size_usdc);
+            cc.trend_strong_size_usdc = jdbl(cj, "trend_strong_size_usdc", cc.trend_strong_size_usdc);
+            cc.reversal_abs_dev = jdbl(cj, "reversal_abs_dev", cc.reversal_abs_dev);
+            cc.reversal_vol_ratio = jdbl(cj, "reversal_vol_ratio", cc.reversal_vol_ratio);
+            cc.reversal_size_usdc = jdbl(cj, "reversal_size_usdc", cc.reversal_size_usdc);
+            cc.reversal_strong_size_usdc = jdbl(cj, "reversal_strong_size_usdc", cc.reversal_strong_size_usdc);
+            cc.quiet_min_dev = jdbl(cj, "quiet_min_dev", cc.quiet_min_dev);
+            cc.quiet_max_dev = jdbl(cj, "quiet_max_dev", cc.quiet_max_dev);
+            cc.quiet_vol_ratio = jdbl(cj, "quiet_vol_ratio", cc.quiet_vol_ratio);
+            cc.quiet_max_entry = jdbl(cj, "quiet_max_entry", cc.quiet_max_entry);
+            cc.quiet_size_usdc = jdbl(cj, "quiet_size_usdc", cc.quiet_size_usdc);
+            cc.max_spread = jdbl(cj, "max_spread", cc.max_spread);
+            bool found = false;
+            for (auto& existing : cfg.coins) {
+                if (existing.coin == coin) {
+                    existing = cc;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) cfg.coins.push_back(cc);
+        }
+    }
+    if (cfg.coins.empty()) cfg.coins.push_back(default_coin_config("BTC"));
 
     return cfg;
 }

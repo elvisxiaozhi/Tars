@@ -5,28 +5,43 @@
 namespace polymarket {
 
 RiskManager::RiskManager(const AppConfig& cfg)
-    : account_balance_(cfg.strategy.account_balance)
+    : cfg_(cfg)
+    , account_balance_(cfg.strategy.account_balance)
     , fixed_shares_(10.0)          // 固定 10 shares：30/30/40 切成整数 3/3/4，配市价出场满足 Polymarket 最小订单约束
-    , max_concurrent_(1)           // 单仓制：最多 1 个持仓
+    , max_concurrent_(cfg.strategy.max_global_open_positions)
 {}
 
 bool RiskManager::can_open_position(const EntrySignal& sig,
                                      std::string& reject_reason) const {
-    // §三 本场止损后禁止再交易
-    if (candle_stopped_) {
-        reject_reason = "candle_stopped: already stop-lossed this candle";
+    const auto state_it = coin_state_.find(sig.coin);
+    CoinRiskState cs = state_it != coin_state_.end() ? state_it->second : CoinRiskState{};
+
+    if (cs.candle_stopped) {
+        reject_reason = "candle_stopped: " + sig.coin + " already stopped this candle";
         return false;
     }
 
-    if (candle_traded_) {
-        reject_reason = "candle_traded: one entry already used this candle";
+    if (cs.candle_traded) {
+        reject_reason = "candle_traded: " + sig.coin + " one entry already used this candle";
         return false;
     }
 
-    // §三 同时持仓上限（单仓制）
     if (open_positions_ >= max_concurrent_) {
         reject_reason = "max_concurrent: " + std::to_string(open_positions_) +
                         "/" + std::to_string(max_concurrent_);
+        return false;
+    }
+
+    if (global_trades_this_hour_ >= cfg_.strategy.max_global_trades_per_hour) {
+        reject_reason = "global_hour_trades: " + std::to_string(global_trades_this_hour_) +
+                        "/" + std::to_string(cfg_.strategy.max_global_trades_per_hour);
+        return false;
+    }
+
+    if (sig.regime == StrategyRegime::QUIET_REVERSION &&
+        quiet_trades_this_hour_ >= cfg_.strategy.max_quiet_trades_per_hour) {
+        reject_reason = "quiet_hour_trades: " + std::to_string(quiet_trades_this_hour_) +
+                        "/" + std::to_string(cfg_.strategy.max_quiet_trades_per_hour);
         return false;
     }
 
@@ -39,6 +54,24 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
     }
 
     return true;
+}
+
+void RiskManager::reset_candle(const std::string& coin) {
+    coin_state_[coin] = CoinRiskState{};
+}
+
+void RiskManager::reset_global_hour() {
+    global_trades_this_hour_ = 0;
+    quiet_trades_this_hour_ = 0;
+}
+
+void RiskManager::add_position(const std::string& coin, StrategyRegime regime) {
+    open_positions_++;
+    auto& cs = coin_state_[coin];
+    cs.candle_traded = true;
+    cs.trades_this_hour++;
+    global_trades_this_hour_++;
+    if (regime == StrategyRegime::QUIET_REVERSION) quiet_trades_this_hour_++;
 }
 
 double RiskManager::compute_position_size() const {
@@ -72,6 +105,9 @@ void RiskManager::reset_daily() {
     daily_pnl_ = 0;
     daily_trades_ = 0;
     candle_stopped_ = false;
+    coin_state_.clear();
+    global_trades_this_hour_ = 0;
+    quiet_trades_this_hour_ = 0;
     spdlog::info("RISK: daily stats reset");
 }
 

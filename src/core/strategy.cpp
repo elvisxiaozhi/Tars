@@ -2,23 +2,27 @@
 
 #include <chrono>
 #include <cmath>
+#include <utility>
 
 #include <spdlog/spdlog.h>
 
 namespace polymarket {
 
-Strategy::Strategy(const AppConfig& cfg) : cfg_(cfg) {}
-
-double Strategy::max_entry_price(int minutes_remaining) const {
-    // §一：剩余30分钟以上，ask < 30¢
-    if (minutes_remaining > 30) return 0.30;
-    return 0;  // 不入场
+Strategy::Strategy(const AppConfig& cfg, std::string coin)
+    : cfg_(cfg), coin_(std::move(coin)), params_(default_coin_config(coin_)) {
+    for (const auto& c : cfg_.coins) {
+        if (c.coin == coin_) {
+            params_ = c;
+            break;
+        }
+    }
 }
 
 static const char* regime_name(StrategyRegime regime) {
     switch (regime) {
         case StrategyRegime::TREND: return "trend";
         case StrategyRegime::REVERSAL: return "reversal";
+        case StrategyRegime::QUIET_REVERSION: return "quiet_reversion";
         default: return "none";
     }
 }
@@ -50,6 +54,7 @@ EntrySignal Strategy::evaluate_entry(
     EntrySignal sig;
     sig.condition_id = condition_id;
     sig.market_question = question;
+    sig.coin = coin_;
 
     double abs_dev = std::abs(btc.deviation_pct);
     if (condition_id != last_condition_id_) {
@@ -89,28 +94,51 @@ EntrySignal Strategy::evaluate_entry(
     StrategyRegime regime = StrategyRegime::NONE;
     double size_usdc = 0;
 
-    // Trend mode: BTC deviation expands with enough volatility; buy the favored side.
-    if (abs_dev >= 0.18 && expanding && vol_ratio >= 0.8 &&
+    // Trend mode: deviation expands with enough volatility; buy the favored side.
+    if (abs_dev >= params_.trend_abs_dev && expanding && vol_ratio >= params_.trend_vol_ratio &&
         minutes_remaining >= 35 && minutes_remaining <= 45) {
         candidate_side = btc.deviation_pct > 0 ? Side::UP : Side::DOWN;
         candidate_ask = candidate_side == Side::UP ? up_ask : down_ask;
         candidate_token = candidate_side == Side::UP ? up_token_id : down_token_id;
         regime = StrategyRegime::TREND;
-        size_usdc = (abs_dev >= 0.25 && vol_ratio >= 1.0) ? 2.5 : 2.25;
+        size_usdc = (abs_dev >= params_.trend_abs_dev + 0.07 && vol_ratio >= 1.0)
+            ? params_.trend_strong_size_usdc : params_.trend_size_usdc;
         if (candidate_ask < 0.50 || candidate_ask > 0.75) {
             sig.reject_reason = "trend_price_window: ask=" + std::to_string(candidate_ask);
             return sig;
         }
-    // Reversal mode: BTC deviation is extreme but contracting; buy the cheap contrarian side.
-    } else if (abs_dev >= 0.25 && contracting && vol_ratio <= 0.8 &&
+    // Reversal mode: deviation is extreme but contracting; buy the cheap contrarian side.
+    } else if (abs_dev >= params_.reversal_abs_dev && contracting && vol_ratio <= params_.reversal_vol_ratio &&
                minutes_remaining >= 30 && minutes_remaining <= 38) {
         candidate_side = btc.deviation_pct > 0 ? Side::DOWN : Side::UP;
         candidate_ask = candidate_side == Side::UP ? up_ask : down_ask;
         candidate_token = candidate_side == Side::UP ? up_token_id : down_token_id;
         regime = StrategyRegime::REVERSAL;
-        size_usdc = abs_dev >= 0.35 ? 2.5 : 2.25;
+        size_usdc = abs_dev >= params_.reversal_abs_dev + 0.10
+            ? params_.reversal_strong_size_usdc : params_.reversal_size_usdc;
         if (candidate_ask > 0.30) {
             sig.reject_reason = "reversal_ask_too_high: ask=" + std::to_string(candidate_ask);
+            return sig;
+        }
+    // Quiet reversion: low-volatility near-strike chop; small size on the cheap side.
+    } else if (abs_dev >= params_.quiet_min_dev && abs_dev <= params_.quiet_max_dev &&
+               vol_ratio <= params_.quiet_vol_ratio &&
+               minutes_remaining >= 25 && minutes_remaining <= 35) {
+        candidate_side = up_ask <= down_ask ? Side::UP : Side::DOWN;
+        candidate_ask = candidate_side == Side::UP ? up_ask : down_ask;
+        candidate_token = candidate_side == Side::UP ? up_token_id : down_token_id;
+        regime = StrategyRegime::QUIET_REVERSION;
+        size_usdc = params_.quiet_size_usdc;
+        double spread = 0.0;
+        if (up_ask > 0 && down_ask > 0) {
+            spread = std::abs((up_ask + down_ask) - 1.0);
+        }
+        if (candidate_ask > params_.quiet_max_entry) {
+            sig.reject_reason = "quiet_ask_too_high: ask=" + std::to_string(candidate_ask);
+            return sig;
+        }
+        if (spread > params_.max_spread) {
+            sig.reject_reason = "quiet_spread_wide: spread=" + std::to_string(spread);
             return sig;
         }
     } else {
@@ -137,6 +165,7 @@ EntrySignal Strategy::evaluate_entry(
     sig.valid = true;
     sig.side = candidate_side;
     sig.regime = regime;
+    sig.coin = coin_;
     sig.market_ask = candidate_ask;
     // §二：在当前价下方1¢挂限价买单
     sig.entry_price = candidate_ask - 0.01;
@@ -145,8 +174,8 @@ EntrySignal Strategy::evaluate_entry(
     sig.shares = size_usdc / sig.entry_price;
     sig.token_id = candidate_token;
 
-    spdlog::info("SIGNAL [{}]: {} {} @ {:.3f} (ask={:.3f}, size=${:.2f}, BTC dev={:+.2f}%, vol_ratio={:.2f})",
-                 regime_name(regime),
+    spdlog::info("SIGNAL [{}:{}]: {} {} @ {:.3f} (ask={:.3f}, size=${:.2f}, dev={:+.2f}%, vol_ratio={:.2f})",
+                 coin_, regime_name(regime),
                  (sig.side == Side::UP ? "UP" : "DOWN"),
                  question, sig.entry_price, candidate_ask, sig.size_usdc,
                  btc.deviation_pct, vol_ratio);
@@ -169,6 +198,14 @@ std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price, Str
         levels.push_back({1, std::min(0.92, entry_price + 0.15), 1.00, false});
         spdlog::debug("Trend TP levels for entry={:.3f}: TP0={:.3f}(50%) TP1={:.3f}(rest)",
                       entry_price, levels[0].trigger_price, levels[1].trigger_price);
+        return levels;
+    }
+
+    if (regime == StrategyRegime::QUIET_REVERSION) {
+        levels.push_back({0, 0.42, 0.50, false});
+        levels.push_back({1, 0.62, 1.00, false});
+        spdlog::debug("Quiet TP levels for entry={:.3f}: TP0=0.420(50%) TP1=0.620(rest)",
+                      entry_price);
         return levels;
     }
 
@@ -262,6 +299,39 @@ ExitSignal Strategy::evaluate_exit(
 
         if (minutes_remaining <= 10) {
             return evaluate_last_10min(pos, current_contract_price, minutes_remaining);
+        }
+        return exit;
+    }
+
+    if (pos.regime == StrategyRegime::QUIET_REVERSION) {
+        double abs_dev = std::abs(btc.deviation_pct);
+        constexpr double kQuietStopTickEps = 0.001;
+        if (current_contract_price <= pos.entry_price - 0.07 + kQuietStopTickEps) {
+            exit.should_exit = true;
+            exit.reason = "stop_price";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("QUIET STOP: {} entry={:.3f} now={:.3f}",
+                         pos.market_question, pos.entry_price, current_contract_price);
+            return exit;
+        }
+        if (abs_dev > params_.quiet_max_dev + 0.05) {
+            exit.should_exit = true;
+            exit.reason = "stop_btc";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("QUIET DEV BREAK: {} dev={:+.3f}% entry={:.3f} now={:.3f}",
+                         pos.market_question, btc.deviation_pct, pos.entry_price, current_contract_price);
+            return exit;
+        }
+        if (minutes_remaining <= 12 && pos.max_price < 0.42) {
+            exit.should_exit = true;
+            exit.reason = "stop_time";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("QUIET TIME STOP: {} {}min left entry={:.3f} now={:.3f}",
+                         pos.market_question, minutes_remaining, pos.entry_price, current_contract_price);
+            return exit;
         }
         return exit;
     }

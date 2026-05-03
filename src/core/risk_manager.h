@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <map>
 #include <vector>
 
 #include "core/strategy.h"
@@ -26,10 +27,13 @@ public:
 
     // 标记本场（本小时 K线）已止损，禁止再交易
     void set_candle_stopped() { candle_stopped_ = true; }
+    void set_candle_stopped(const std::string& coin) { coin_state_[coin].candle_stopped = true; }
     bool is_candle_stopped() const { return candle_stopped_; }
 
     // 新 K线 开始时重置
     void reset_candle() { candle_stopped_ = false; candle_traded_ = false; }
+    void reset_candle(const std::string& coin);
+    void reset_global_hour();
 
     // 重置每日统计
     void reset_daily();
@@ -47,9 +51,11 @@ public:
 
     // 仓位计数
     void add_position() { open_positions_++; candle_traded_ = true; }
+    void add_position(const std::string& coin, StrategyRegime regime);
     void remove_position() { if (open_positions_ > 0) open_positions_--; }
 
 private:
+    AppConfig cfg_;
     double account_balance_;
     double fixed_shares_;          // 固定下单量 5 shares
     int max_concurrent_;           // 最多同时 1 个（单仓制）
@@ -61,6 +67,15 @@ private:
     double daily_pnl_ = 0;
     bool candle_stopped_ = false;  // 本场 K线 已止损，禁止再交易
     bool candle_traded_ = false;   // 本场 K线 已开过仓，禁止重复初始开仓
+
+    struct CoinRiskState {
+        bool candle_stopped = false;
+        bool candle_traded = false;
+        int trades_this_hour = 0;
+    };
+    mutable std::map<std::string, CoinRiskState> coin_state_;
+    int global_trades_this_hour_ = 0;
+    int quiet_trades_this_hour_ = 0;
 };
 
 }  // namespace polymarket

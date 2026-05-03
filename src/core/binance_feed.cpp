@@ -12,10 +12,15 @@ namespace polymarket {
 using json = nlohmann::json;
 
 BinanceFeed::BinanceFeed(const std::string& proxy_url)
-    : http_(10, proxy_url) {}
+    : http_(4, proxy_url) {}
 
-double BinanceFeed::fetch_price() {
-    std::string url = std::string(BINANCE_API) + "/api/v3/ticker/price?symbol=BTCUSDT";
+static int64_t now_ms_local() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+double BinanceFeed::fetch_price(const std::string& binance_symbol) {
+    std::string url = std::string(BINANCE_API) + "/api/v3/ticker/price?symbol=" + binance_symbol;
     auto resp = http_.get(url);
     if (resp.status_code != 200) {
         throw std::runtime_error("Binance price fetch failed: status=" +
@@ -25,9 +30,9 @@ double BinanceFeed::fetch_price() {
     return std::stod(j["price"].get<std::string>());
 }
 
-std::vector<BtcCandle> BinanceFeed::fetch_klines(int limit) {
+std::vector<BtcCandle> BinanceFeed::fetch_klines(const std::string& binance_symbol, int limit) {
     std::string url = std::string(BINANCE_API) +
-                      "/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=" +
+                      "/api/v3/klines?symbol=" + binance_symbol + "&interval=1h&limit=" +
                       std::to_string(limit);
     auto resp = http_.get(url);
     if (resp.status_code != 200) {
@@ -51,8 +56,9 @@ std::vector<BtcCandle> BinanceFeed::fetch_klines(int limit) {
     return candles;
 }
 
-BtcMarketData BinanceFeed::compute(double price, const std::vector<BtcCandle>& klines) {
+BtcMarketData BinanceFeed::compute(const std::string& coin, double price, const std::vector<BtcCandle>& klines) {
     BtcMarketData data;
+    data.symbol = coin;
     data.current_price = price;
 
     if (klines.empty()) return data;
@@ -99,12 +105,28 @@ BtcMarketData BinanceFeed::compute(double price, const std::vector<BtcCandle>& k
 }
 
 BtcMarketData BinanceFeed::fetch() {
-    auto price = fetch_price();
-    auto klines = fetch_klines(25);
-    latest_ = compute(price, klines);
+    return fetch("BTC", "BTCUSDT");
+}
 
-    spdlog::info("BTC: ${:.2f} | strike: ${:.2f} | dev: {:+.2f}% | vol: {:.4f} (avg: {:.4f}) | {}min left",
-                 latest_.current_price, latest_.strike_price,
+BtcMarketData BinanceFeed::fetch(const std::string& coin, const std::string& binance_symbol) {
+    auto price = fetch_price(binance_symbol);
+    auto now = now_ms_local();
+    auto& cache = kline_cache_[binance_symbol];
+    bool need_klines = cache.klines.empty() || (now - cache.fetched_at_ms) >= 60000;
+    if (need_klines) {
+        try {
+            cache.klines = fetch_klines(binance_symbol, 25);
+            cache.fetched_at_ms = now;
+        } catch (const std::exception& e) {
+            if (cache.klines.empty()) throw;
+            spdlog::warn("{} klines refresh failed, using cached candles: {}", coin, e.what());
+        }
+    }
+    auto klines = cache.klines;
+    latest_ = compute(coin, price, klines);
+
+    spdlog::info("{}: ${:.4f} | strike: ${:.4f} | dev: {:+.2f}% | vol: {:.4f} (avg: {:.4f}) | {}min left",
+                 coin, latest_.current_price, latest_.strike_price,
                  latest_.deviation_pct, latest_.current_1h_vol,
                  latest_.avg_24h_vol, latest_.minutes_remaining);
 

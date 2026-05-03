@@ -13,14 +13,28 @@
         "mode": "dry_run",
         "account_balance": 20.0,
         "poll_interval_sec": 5,
+        "crypto_symbols": ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "HYPE"],
+        "max_global_trades_per_hour": 2,
+        "max_global_open_positions": 2,
+        "max_quiet_trades_per_hour": 2,
         "min_net_profit_pct": 0.5,
         "max_trade_size_usdc": 100.0,
         "arb_types": ["complement", "multi_outcome"],
         "min_liquidity_usdc": 500.0,
         "min_volume_24h": 1000.0,
         "max_markets_to_scan": 100,
-        "market_filter": "btc-updown"
+        "market_filter": "crypto-hourly"
     },
+
+    "coins": [
+        {"coin": "BTC", "live_enabled": true},
+        {"coin": "ETH", "live_enabled": false},
+        {"coin": "SOL", "live_enabled": false},
+        {"coin": "XRP", "live_enabled": false},
+        {"coin": "DOGE", "live_enabled": false},
+        {"coin": "BNB", "live_enabled": false},
+        {"coin": "HYPE", "live_enabled": false}
+    ],
 
     "risk": {
         "max_position_per_market": 500.0,

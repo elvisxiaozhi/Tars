@@ -10,7 +10,7 @@ inline const std::string DASHBOARD_HTML = R"html(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Polymarket BTC 1h Bot</title>
+<title>Polymarket Crypto 1h Bot</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; background: #0a0e17; color: #e0e6ed; padding: 20px; }
@@ -70,7 +70,7 @@ inline const std::string DASHBOARD_HTML = R"html(
 <body>
 <div class="header">
   <div>
-    <h1>Polymarket BTC 1h Bot</h1>
+    <h1>Polymarket Crypto 1h Bot</h1>
     <span class="uptime" id="uptime">--</span>
   </div>
   <div style="display:flex;align-items:center;gap:12px;">
@@ -88,7 +88,7 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div class="metric">
     <div class="metric-label">Balance</div>
     <div class="metric-value neutral" id="account-balance">--</div>
-    <div class="metric-sub">BTC <span id="btc-price">--</span></div>
+    <div class="metric-sub">Primary <span id="btc-price">--</span></div>
   </div>
   <div class="metric">
     <div class="metric-label">Position Cost</div>
@@ -114,7 +114,7 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div class="metric">
     <div class="metric-label">Volatility</div>
     <div class="metric-value" id="volatility">--</div>
-    <div class="metric-sub">BTC 1h</div>
+    <div class="metric-sub">primary 1h</div>
   </div>
   <div class="metric">
     <div class="metric-label">Remaining</div>
@@ -128,13 +128,19 @@ inline const std::string DASHBOARD_HTML = R"html(
   </div>
 </div>
 
-<!-- 行情行：当前 market + BTC dev + UP/DN bid·ask  -->
+<!-- 行情行：当前 market + dev + UP/DN bid·ask  -->
 <div style="font-size:0.75em;color:#7d8590;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:18px;align-items:center;">
   <span id="market-name" style="color:#58a6ff;font-weight:bold;">--</span>
-  <span>BTC dev <span id="btc-dev">--</span></span>
+  <span>dev <span id="btc-dev">--</span></span>
   <span>UP <span class="positive" id="up-bid">--</span>/<span class="positive" id="up-ask">--</span></span>
   <span>DN <span class="negative" id="down-bid">--</span>/<span class="negative" id="down-ask">--</span></span>
+  <span>WS <span id="clob-ws">--</span></span>
   <span style="color:#484f58;font-size:0.85em;">(bid/ask)</span>
+</div>
+
+<div class="section">
+  <div class="section-title">Markets</div>
+  <div id="markets-container"></div>
 </div>
 
 <!-- Open Positions section 仅在有持仓时显示（P1-4）-->
@@ -158,6 +164,8 @@ inline const std::string DASHBOARD_HTML = R"html(
         <th>Time</th>
         <th>Mode</th>
         <th>ID</th>
+        <th>Coin</th>
+        <th>Regime</th>
         <th>Side</th>
         <th>Entry</th>
         <th>Exit</th>
@@ -173,7 +181,7 @@ inline const std::string DASHBOARD_HTML = R"html(
       </tr>
     </thead>
     <tbody id="trades-body">
-      <tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
+      <tr><td colspan="17" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
     </tbody>
   </table>
 </details>
@@ -403,6 +411,31 @@ async function refresh() {
     document.getElementById('up-ask').textContent   = fmtPrice(status.up_ask);
     document.getElementById('down-bid').textContent = fmtPrice(status.down_bid);
     document.getElementById('down-ask').textContent = fmtPrice(status.down_ask);
+    const wsEl = document.getElementById('clob-ws');
+    if (wsEl) {
+      wsEl.textContent = (status.clob_ws_connected ? 'on' : 'off') + '/' + (status.clob_ws_subscribed || 0);
+      wsEl.className = status.clob_ws_connected ? 'positive' : 'negative';
+    }
+
+    const marketsContainer = document.getElementById('markets-container');
+    if (marketsContainer && status.markets && status.markets.length > 0) {
+      let mhtml = '<table><thead><tr><th>Coin</th><th>Market</th><th>Dev</th><th>Remaining</th><th>UP Bid/Ask</th><th>DN Bid/Ask</th></tr></thead><tbody>';
+      for (const m of status.markets) {
+        const dev = m.deviation_pct || 0;
+        mhtml += '<tr>';
+        mhtml += '<td style="font-weight:bold;color:#58a6ff;">' + (m.coin || '--') + '</td>';
+        mhtml += '<td>' + (m.question || '--') + '</td>';
+        mhtml += '<td class="' + (dev >= 0 ? 'positive' : 'negative') + '">' + formatPct(dev) + '</td>';
+        mhtml += '<td>' + (m.minutes_remaining ?? '--') + 'min</td>';
+        mhtml += '<td><span class="positive">' + fmtPrice(m.up_bid) + '</span>/<span class="positive">' + fmtPrice(m.up_ask) + '</span></td>';
+        mhtml += '<td><span class="negative">' + fmtPrice(m.down_bid) + '</span>/<span class="negative">' + fmtPrice(m.down_ask) + '</span></td>';
+        mhtml += '</tr>';
+      }
+      mhtml += '</tbody></table>';
+      marketsContainer.innerHTML = mhtml;
+    } else if (marketsContainer) {
+      marketsContainer.innerHTML = '<div class="positions-empty">No active markets</div>';
+    }
 
     document.getElementById('total-cost').textContent = '$' + status.total_cost.toFixed(2);
     const upnlEl = document.getElementById('unrealized-pnl');
@@ -422,11 +455,13 @@ async function refresh() {
     const posSection   = document.getElementById('open-positions-section');
     const posContainer = document.getElementById('positions-container');
     if (status.positions && status.positions.length > 0) {
-      let html = '<table><thead><tr><th>ID</th><th>Side</th><th>Entry</th><th>Current</th><th>Shares</th><th>Unrealized P&L</th><th>TP Progress</th><th>MFE</th><th>MAE</th></tr></thead><tbody>';
+      let html = '<table><thead><tr><th>ID</th><th>Coin</th><th>Regime</th><th>Side</th><th>Entry</th><th>Current</th><th>Shares</th><th>Unrealized P&L</th><th>TP Progress</th><th>MFE</th><th>MAE</th></tr></thead><tbody>';
       for (const p of status.positions) {
         const upnl = (p.current_price - p.entry_price) * p.shares * p.remaining_pct;
         html += '<tr>';
         html += '<td>' + p.id + '</td>';
+        html += '<td style="font-weight:bold;color:#58a6ff;">' + (p.coin || 'BTC') + '</td>';
+        html += '<td>' + (p.regime || '') + '</td>';
         html += '<td class="side-' + p.side.toLowerCase() + '">' + p.side + '</td>';
         html += '<td>' + p.entry_price.toFixed(3) + '</td>';
         html += '<td>' + p.current_price.toFixed(3) + '</td>';
@@ -484,6 +519,8 @@ async function refresh() {
       html += '<td><span class="mode mode-' + (tm === 'live' ? 'live' : 'dry') + '">' +
               (tm === 'live' ? 'LIVE' : 'DRY') + '</span></td>';
       html += '<td>' + t.id + '</td>';
+      html += '<td style="font-weight:bold;color:#58a6ff;">' + (t.coin || 'BTC') + '</td>';
+      html += '<td>' + (t.regime || '') + '</td>';
       html += '<td class="side-' + t.side.toLowerCase() + '">' + t.side + '</td>';
       html += '<td>' + t.entry_price.toFixed(3) + '</td>';
       html += '<td>' + t.exit_price.toFixed(3) + '</td>';

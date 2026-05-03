@@ -56,6 +56,8 @@ set(SOURCES
     src/net/http_client.cpp
     src/net/ws_client.cpp
     src/utils/config.cpp
+    src/core/quote_cache.cpp
+    src/core/clob_ws_feed.cpp
     src/core/market_feed.cpp
     src/core/binance_feed.cpp
     src/core/strategy.cpp
