@@ -178,6 +178,10 @@ struct SharedState {
     double daily_pnl = 0;
     bool clob_ws_connected = false;
     int clob_ws_subscribed = 0;
+    int loaded_market_count = 0;
+    int entry_window_market_count = 0;
+    int tradable_market_count = 0;
+    int held_market_count = 0;
     // 当前活跃市场的 UP/DOWN quotes（dashboard 显示）
     double up_bid = 0, up_ask = 0;
     double down_bid = 0, down_ask = 0;
@@ -363,6 +367,10 @@ int main(int argc, char* argv[]) {
         j["daily_pnl"] = state.daily_pnl;
         j["clob_ws_connected"] = state.clob_ws_connected;
         j["clob_ws_subscribed"] = state.clob_ws_subscribed;
+        j["loaded_market_count"] = state.loaded_market_count;
+        j["entry_window_market_count"] = state.entry_window_market_count;
+        j["tradable_market_count"] = state.tradable_market_count;
+        j["held_market_count"] = state.held_market_count;
         j["account_balance"] = display_balance();
         // 当前活跃市场的 UP/DOWN quotes（dashboard metric 显示）
         j["up_bid"]   = state.up_bid;
@@ -977,6 +985,14 @@ int main(int argc, char* argv[]) {
             const int64_t quote_max_age_ms = live_trader ? 5000 : 10000;
             market_feed.apply_cached_quotes(quote_cache, now_ms(), quote_max_age_ms);
             if (market_feed.market_count() == 0) {
+                {
+                    std::lock_guard<std::mutex> lock(state.mu);
+                    state.loaded_market_count = 0;
+                    state.entry_window_market_count = 0;
+                    state.tradable_market_count = 0;
+                    state.held_market_count = 0;
+                    state.markets = json::array();
+                }
                 spdlog::info("#{} | No active markets, waiting 30s...", state.tick_count);
                 for (int i = 0; i < 30 && g_running; i++)
                     std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -994,6 +1010,10 @@ int main(int argc, char* argv[]) {
             {
                 std::lock_guard<std::mutex> lock(state.mu);
                 state.markets = json::array();
+                state.loaded_market_count = static_cast<int>(market_feed.market_count());
+                state.entry_window_market_count = 0;
+                state.tradable_market_count = 0;
+                state.held_market_count = 0;
             }
 
             // 遍历市场，刷新订单簿，评估信号
@@ -1018,6 +1038,14 @@ int main(int argc, char* argv[]) {
                     }
                 }
                 bool entry_window = md.minutes_remaining >= 25 && md.minutes_remaining <= 45;
+                if (entry_window) {
+                    std::lock_guard<std::mutex> lock(state.mu);
+                    state.entry_window_market_count++;
+                }
+                if (has_open_position) {
+                    std::lock_guard<std::mutex> lock(state.mu);
+                    state.held_market_count++;
+                }
                 if (!entry_window && !has_open_position) {
                     continue;
                 }
@@ -1080,6 +1108,7 @@ int main(int argc, char* argv[]) {
                     row["deviation_pct"] = md.deviation_pct;
                     row["minutes_remaining"] = md.minutes_remaining;
                     state.markets.push_back(row);
+                    state.tradable_market_count = static_cast<int>(state.markets.size());
                 }
 
                 spdlog::debug("Market [{}]: {} | Up: {:.3f}/{:.3f} | Down: {:.3f}/{:.3f}",

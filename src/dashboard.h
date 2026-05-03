@@ -406,7 +406,15 @@ async function refresh() {
 
     // 当前 market + UP/DN quotes
     const fmtPrice = v => (v && v > 0) ? v.toFixed(3) : '--';
-    document.getElementById('market-name').textContent = status.market_question || '(no active market)';
+    const loadedMarkets = status.loaded_market_count || 0;
+    const entryMarkets = status.entry_window_market_count || 0;
+    const tradableMarkets = status.tradable_market_count || 0;
+    const heldMarkets = status.held_market_count || 0;
+    let marketLabel = status.market_question;
+    if (!marketLabel) {
+      marketLabel = loadedMarkets > 0 ? '(no market in entry window)' : '(no market loaded)';
+    }
+    document.getElementById('market-name').textContent = marketLabel;
     document.getElementById('up-bid').textContent   = fmtPrice(status.up_bid);
     document.getElementById('up-ask').textContent   = fmtPrice(status.up_ask);
     document.getElementById('down-bid').textContent = fmtPrice(status.down_bid);
@@ -434,7 +442,18 @@ async function refresh() {
       mhtml += '</tbody></table>';
       marketsContainer.innerHTML = mhtml;
     } else if (marketsContainer) {
-      marketsContainer.innerHTML = '<div class="positions-empty">No active markets</div>';
+      let reason = 'No market loaded';
+      if (loadedMarkets > 0) {
+        reason = 'No market in entry window';
+        if (entryMarkets > 0 && tradableMarkets === 0) reason = 'Markets in entry window, quotes not ready';
+        if (heldMarkets > 0) reason = 'Held market quotes not ready';
+      }
+      marketsContainer.innerHTML =
+        '<div class="positions-empty">' + reason +
+        '<div style="font-size:0.85em;margin-top:6px;color:#7d8590;">loaded ' + loadedMarkets +
+        ' · entry window ' + entryMarkets +
+        ' · displayed ' + tradableMarkets +
+        ' · held ' + heldMarkets + '</div></div>';
     }
 
     document.getElementById('total-cost').textContent = '$' + status.total_cost.toFixed(2);
