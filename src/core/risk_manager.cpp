@@ -5,21 +5,22 @@
 namespace polymarket {
 
 RiskManager::RiskManager(const AppConfig& cfg)
-    : account_balance_(cfg.strategy.account_balance)
+    : live_mode_(cfg.strategy.mode == "live")
+    , account_balance_(cfg.strategy.account_balance)
     , fixed_shares_(10.0)          // 固定 10 shares：30/30/40 切成整数 3/3/4，配市价出场满足 Polymarket 最小订单约束
     , max_concurrent_(1)           // 单仓制：最多 1 个持仓
 {}
 
 bool RiskManager::can_open_position(const EntrySignal& sig,
                                      std::string& reject_reason) const {
-    // §三 本场止损后禁止再交易
-    if (candle_stopped_) {
+    // Live mode keeps the original single-position risk gates.
+    // Dry run is allowed to collect every qualifying signal for analysis.
+    if (live_mode_ && candle_stopped_) {
         reject_reason = "candle_stopped: already stop-lossed this candle";
         return false;
     }
 
-    // §三 同时持仓上限（单仓制）
-    if (open_positions_ >= max_concurrent_) {
+    if (live_mode_ && open_positions_ >= max_concurrent_) {
         reject_reason = "max_concurrent: " + std::to_string(open_positions_) +
                         "/" + std::to_string(max_concurrent_);
         return false;
@@ -27,7 +28,7 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
 
     // 余额检查：new low-cost branch sizes each trade at roughly $1.
     double cost = sig.size_usdc > 0 ? sig.size_usdc : fixed_shares_ * sig.entry_price;
-    if (cost > account_balance_) {
+    if (live_mode_ && cost > account_balance_) {
         reject_reason = "insufficient_balance: need $" + std::to_string(cost) +
                         " but have $" + std::to_string(account_balance_);
         return false;

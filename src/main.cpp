@@ -1017,6 +1017,8 @@ int main(int argc, char* argv[]) {
                 state.held_market_count = 0;
             }
 
+            std::set<std::string> dry_opened_tokens_this_tick;
+
             // 遍历市场，刷新订单簿，评估信号
             for (const auto& [cid, entry] : market_feed.markets()) {
                 if (!g_running) break;
@@ -1061,7 +1063,7 @@ int main(int argc, char* argv[]) {
                 bool down_fresh = !quotes.down_token_id.empty() &&
                     quote_cache.is_fresh(quotes.down_token_id, quote_now, quote_max_age_ms);
                 bool need_rest_quote = false;
-                if (has_open_position) {
+                if (live_trader && has_open_position) {
                     for (const auto& token_id : position_tokens) {
                         if (!quote_cache.is_fresh(token_id, quote_now, quote_max_age_ms)) {
                             need_rest_quote = true;
@@ -1073,7 +1075,7 @@ int main(int argc, char* argv[]) {
                 }
 
                 if (need_rest_quote) {
-                    bool rest_ok = has_open_position
+                    bool rest_ok = live_trader && has_open_position
                         ? market_feed.refresh_order_book(cid, position_tokens)
                         : market_feed.refresh_order_book(cid);
                     if (!rest_ok) {
@@ -1085,8 +1087,9 @@ int main(int argc, char* argv[]) {
                     quotes = extract_quotes(*updated);
                 }
 
-                if (!has_open_position && updated->best_prices.size() < 2) continue;
-                if (!has_open_position && (quotes.up_ask <= 0 || quotes.down_ask <= 0)) continue;
+                if ((!live_trader || !has_open_position) && updated->best_prices.size() < 2) continue;
+                if ((!live_trader || !has_open_position) &&
+                    (quotes.up_ask <= 0 || quotes.down_ask <= 0)) continue;
 
                 last_quotes[coin] = {quotes.up_bid, quotes.up_ask, quotes.down_bid,
                                      quotes.down_ask, entry.market.question};
@@ -1117,7 +1120,7 @@ int main(int argc, char* argv[]) {
                               quotes.up_bid, quotes.up_ask,
                               quotes.down_bid, quotes.down_ask);
 
-                if (has_open_position) {
+                if (live_trader && has_open_position) {
                     continue;
                 }
 
@@ -1138,6 +1141,10 @@ int main(int argc, char* argv[]) {
                     md.minutes_remaining);
 
                 if (sig.valid) {
+                    if (!live_trader && dry_opened_tokens_this_tick.count(sig.token_id) > 0) {
+                        reject_agg.add("dry_duplicate_token_this_tick:" + coin, md.deviation_pct);
+                        continue;
+                    }
                     if (sig.regime == polymarket::StrategyRegime::QUIET_REVERSION) {
                         double token_spread = sig.side == polymarket::Side::UP
                             ? quotes.up_ask - quotes.up_bid
@@ -1305,6 +1312,9 @@ int main(int argc, char* argv[]) {
                         }
 
                         positions.push_back(pos);
+                        if (!live_trader) {
+                            dry_opened_tokens_this_tick.insert(pos.token_id);
+                        }
                         risk.add_position(pos.coin, pos.regime);
                         risk.deduct_balance(size + fee);  // 动态余额：扣除成本+买入手续费
 

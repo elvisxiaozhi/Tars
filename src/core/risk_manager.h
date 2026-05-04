@@ -54,6 +54,7 @@ public:
     void remove_position() { if (open_positions_ > 0) open_positions_--; }
 
 private:
+    bool live_mode_;
     double account_balance_;
     double fixed_shares_;          // 固定下单量 5 shares
     int max_concurrent_;           // 最多同时 1 个（单仓制）
