@@ -134,7 +134,13 @@ inline const std::string DASHBOARD_HTML = R"html(
   <span>BTC dev <span id="btc-dev">--</span></span>
   <span>UP <span class="positive" id="up-bid">--</span>/<span class="positive" id="up-ask">--</span></span>
   <span>DN <span class="negative" id="down-bid">--</span>/<span class="negative" id="down-ask">--</span></span>
+  <span>WS <span id="clob-ws">--</span></span>
   <span style="color:#484f58;font-size:0.85em;">(bid/ask)</span>
+</div>
+
+<div class="section">
+  <div class="section-title">Markets</div>
+  <div id="markets-container"></div>
 </div>
 
 <!-- Open Positions section 仅在有持仓时显示（P1-4）-->
@@ -142,6 +148,22 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div class="section-title">Open Positions</div>
   <div id="positions-container"></div>
 </div>
+
+<details class="section" id="experiment-details" open>
+  <summary class="section-title" style="cursor:pointer;list-style:none;">
+    <span>Experiment</span>
+    <span id="exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+  </summary>
+  <div class="stats-grid" style="margin-top:8px;">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="exp-trades-count">--</div></div>
+  </div>
+  <div id="exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="exp-positions" style="margin-top:12px;"></div>
+  <div id="exp-trades" style="margin-top:12px;"></div>
+</details>
 
 <details class="section" id="trade-history-details">
   <summary class="section-title" style="display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none;">
@@ -390,11 +412,13 @@ function renderSparkline(svgId, values) {
 }
 
 async function refresh() {
-  let [status, trades, stats, analytics] = await Promise.all([
+  let [status, trades, stats, analytics, expStatus, expTrades] = await Promise.all([
     fetchJSON('/api/status'),
     fetchJSON('/api/trades'),
     fetchJSON('/api/stats'),
-    fetchJSON('/api/analytics')
+    fetchJSON('/api/analytics'),
+    fetchJSON('/api/experiment/status'),
+    fetchJSON('/api/experiment/trades')
   ]);
 
   if (status) {
@@ -415,6 +439,35 @@ async function refresh() {
     document.getElementById('up-ask').textContent   = fmtPrice(status.up_ask);
     document.getElementById('down-bid').textContent = fmtPrice(status.down_bid);
     document.getElementById('down-ask').textContent = fmtPrice(status.down_ask);
+    const wsEl = document.getElementById('clob-ws');
+    if (wsEl) {
+      wsEl.textContent = (status.clob_ws_connected ? 'on' : 'off') + '/' + (status.clob_ws_subscribed || 0);
+      wsEl.className = status.clob_ws_connected ? 'positive' : 'negative';
+    }
+
+    const marketsContainer = document.getElementById('markets-container');
+    if (marketsContainer && status.markets && status.markets.length > 0) {
+      let mhtml = '<table><thead><tr><th>Coin</th><th>Market</th><th>Dev</th><th>Remaining</th><th>UP Bid/Ask</th><th>DN Bid/Ask</th></tr></thead><tbody>';
+      for (const m of status.markets) {
+        const dev = m.deviation_pct || 0;
+        mhtml += '<tr>';
+        mhtml += '<td style="font-weight:bold;color:#58a6ff;">' + (m.coin || '--') + '</td>';
+        mhtml += '<td>' + (m.question || '--') + '</td>';
+        mhtml += '<td class="' + (dev >= 0 ? 'positive' : 'negative') + '">' + formatPct(dev) + '</td>';
+        mhtml += '<td>' + (m.minutes_remaining ?? '--') + 'min</td>';
+        mhtml += '<td><span class="positive">' + fmtPrice(m.up_bid) + '</span>/<span class="positive">' + fmtPrice(m.up_ask) + '</span></td>';
+        mhtml += '<td><span class="negative">' + fmtPrice(m.down_bid) + '</span>/<span class="negative">' + fmtPrice(m.down_ask) + '</span></td>';
+        mhtml += '</tr>';
+      }
+      mhtml += '</tbody></table>';
+      marketsContainer.innerHTML = mhtml;
+    } else if (marketsContainer) {
+      let reason = 'No market loaded';
+      if ((status.loaded_market_count || 0) > 0) {
+        reason = 'No market in entry window or quotes not ready';
+      }
+      marketsContainer.innerHTML = '<div class="positions-empty">' + reason + '</div>';
+    }
 
     document.getElementById('total-cost').textContent = '$' + status.total_cost.toFixed(2);
     const upnlEl = document.getElementById('unrealized-pnl');
@@ -454,6 +507,65 @@ async function refresh() {
       if (posSection) posSection.style.display = '';
     } else {
       if (posSection) posSection.style.display = 'none';
+    }
+  }
+
+  if (expStatus) {
+    const expSummary = document.getElementById('exp-summary');
+    if (expSummary) expSummary.textContent = expStatus.enabled ? (expStatus.strategy || 'regime') : 'disabled';
+    document.getElementById('exp-balance').textContent = '$' + Number(expStatus.balance || 0).toFixed(2);
+    const expPnl = document.getElementById('exp-pnl');
+    expPnl.textContent = formatPnl(expStatus.realized_pnl || 0);
+    expPnl.className = 'stat-value ' + pnlClass(expStatus.realized_pnl || 0);
+    document.getElementById('exp-open').textContent = expStatus.open_positions || 0;
+    document.getElementById('exp-trades-count').textContent = expStatus.total_trades || 0;
+
+    const regimeEl = document.getElementById('exp-regime-stats');
+    if (regimeEl) {
+      let html = '<table><thead><tr><th>Regime</th><th>Trades</th><th>Win Rate</th><th>P&L</th></tr></thead><tbody>';
+      const stats = expStatus.regime_stats || {};
+      const keys = Object.keys(stats);
+      if (keys.length === 0) {
+        html += '<tr><td colspan="4" style="text-align:center;color:#7d8590;">No experiment trades yet</td></tr>';
+      } else {
+        for (const k of keys) {
+          const s = stats[k] || {};
+          html += '<tr><td>' + k + '</td><td>' + (s.trades || 0) + '</td><td>' + Number(s.win_rate || 0).toFixed(1) + '%</td><td class="' + pnlClass(s.pnl || 0) + '">' + formatPnl(s.pnl || 0) + '</td></tr>';
+        }
+      }
+      html += '</tbody></table>';
+      regimeEl.innerHTML = html;
+    }
+
+    const expPosEl = document.getElementById('exp-positions');
+    if (expPosEl) {
+      const positions = expStatus.positions || [];
+      if (positions.length === 0) {
+        expPosEl.innerHTML = '<div class="positions-empty">No experiment positions</div>';
+      } else {
+        let html = '<table><thead><tr><th>ID</th><th>Coin</th><th>Regime</th><th>Side</th><th>Entry</th><th>Current</th><th>Remaining</th><th>MFE</th></tr></thead><tbody>';
+        for (const p of positions) {
+          html += '<tr><td>' + p.id + '</td><td>' + p.coin + '</td><td>' + p.regime + '</td><td class="side-' + String(p.side).toLowerCase() + '">' + p.side + '</td><td>' + Number(p.entry_price || 0).toFixed(3) + '</td><td>' + Number(p.current_price || 0).toFixed(3) + '</td><td>' + Number((p.remaining_pct || 0) * 100).toFixed(0) + '%</td><td class="positive">+' + Number(((p.max_price || 0) - (p.entry_price || 0)) * 100).toFixed(1) + 'c</td></tr>';
+        }
+        html += '</tbody></table>';
+        expPosEl.innerHTML = html;
+      }
+    }
+  }
+
+  if (expTrades) {
+    const expTradesEl = document.getElementById('exp-trades');
+    if (expTradesEl) {
+      let html = '<table><thead><tr><th>Time</th><th>Coin</th><th>Regime</th><th>Side</th><th>Entry</th><th>Exit</th><th>Reason</th><th>P&L</th></tr></thead><tbody>';
+      if (expTrades.length === 0) {
+        html += '<tr><td colspan="8" style="text-align:center;color:#7d8590;">No experiment trades yet</td></tr>';
+      } else {
+        for (const t of expTrades.slice().reverse().slice(0, 30)) {
+          html += '<tr><td>' + formatTime(t.exit_time || t.entry_time) + '</td><td>' + (t.coin || '--') + '</td><td>' + (t.regime || '') + '</td><td class="side-' + String(t.side).toLowerCase() + '">' + t.side + '</td><td>' + Number(t.entry_price || 0).toFixed(3) + '</td><td>' + Number(t.exit_price || 0).toFixed(3) + '</td><td>' + (t.exit_reason || '') + '</td><td class="' + pnlClass(t.pnl || 0) + '">' + formatPnl(t.pnl || 0) + '</td></tr>';
+        }
+      }
+      html += '</tbody></table>';
+      expTradesEl.innerHTML = html;
     }
   }
 

@@ -16,6 +16,7 @@
 
 #include "core/binance_feed.h"
 #include "core/clob_ws_feed.h"
+#include "core/experiment_engine.h"
 #include "core/market_feed.h"
 #include "core/quote_cache.h"
 #include "core/risk_manager.h"
@@ -336,6 +337,7 @@ int main(int argc, char* argv[]) {
     }
     polymarket::RiskManager risk(cfg);
     polymarket::TradeJournal journal("./logs/trades.jsonl");
+    polymarket::ExperimentEngine experiment(cfg);
 
     // 显示用 balance：LIVE 模式取真实 vault cash；dry_run 取虚拟 risk balance
     auto display_balance = [&]() {
@@ -848,6 +850,14 @@ int main(int argc, char* argv[]) {
         return j.dump();
     });
 
+    api.on_experiment_status([&]() -> std::string {
+        return experiment.status_json();
+    });
+
+    api.on_experiment_trades([&]() -> std::string {
+        return experiment.trades_json();
+    });
+
     // POST /api/shutdown — 优雅停止 bot（前端"Stop Bot"按钮触发）
     // 设 g_running=false → 主循环退出 → emergency_close_all 兜底 → 进程退出
     api.on_shutdown([&]() -> std::string {
@@ -951,6 +961,7 @@ int main(int argc, char* argv[]) {
                 if (last_it != last_candle_open_by_coin.end() &&
                     last_it->second != md.candle_open_time) {
                     risk.reset_candle(result.coin);
+                    experiment.reset_candle(result.coin);
                     spdlog::info("New candle [{}]: reset per-coin/global hour trade flags",
                                  result.coin);
                 }
@@ -962,6 +973,7 @@ int main(int argc, char* argv[]) {
             if (last_global_candle_open != 0 && newest_candle_open != 0 &&
                 newest_candle_open != last_global_candle_open) {
                 risk.reset_global_hour();
+                experiment.reset_global_hour();
                 spdlog::info("New global hour: reset global trade counters");
             }
             if (newest_candle_open != 0) {
@@ -1142,6 +1154,15 @@ int main(int argc, char* argv[]) {
                               coin, entry.market.question,
                               quotes.up_bid, quotes.up_ask,
                               quotes.down_bid, quotes.down_ask);
+
+                polymarket::ExperimentQuotes exp_quotes;
+                exp_quotes.up_bid = quotes.up_bid;
+                exp_quotes.up_ask = quotes.up_ask;
+                exp_quotes.down_bid = quotes.down_bid;
+                exp_quotes.down_ask = quotes.down_ask;
+                exp_quotes.up_token_id = quotes.up_token_id;
+                exp_quotes.down_token_id = quotes.down_token_id;
+                experiment.on_market(coin, md, entry, exp_quotes, now_ms());
 
                 if (live_trader && has_open_position) {
                     continue;
@@ -1651,6 +1672,7 @@ int main(int argc, char* argv[]) {
                 std::remove_if(positions.begin(), positions.end(),
                                [](const polymarket::Position& p) { return p.closed; }),
                 positions.end());
+            experiment.prune_closed();
 
             // 同步持仓到共享状态
             {

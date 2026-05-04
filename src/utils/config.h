@@ -85,6 +85,12 @@ struct NetworkConfig {
     int api_port = 9090;    // 内嵌 dashboard HTTP 端口
 };
 
+struct ExperimentConfig {
+    bool enabled = true;
+    std::string strategy = "regime";
+    double initial_balance = 20.0;
+};
+
 // Polygon 链上读取所需参数（live 模式必填）
 // 合约地址 = Polymarket 主网地址（截至 2026-04，硬编码默认值，配置可覆盖）
 struct PolygonConfig {
@@ -120,6 +126,7 @@ struct AppConfig {
     NetworkConfig network;
     FeeConfig fees;
     PolygonConfig polygon;
+    ExperimentConfig experiment;
     std::vector<CoinStrategyConfig> coins;
 };
 

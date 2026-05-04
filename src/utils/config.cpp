@@ -205,6 +205,14 @@ AppConfig load_config(const std::string& path) {
         cfg.fees.gas_per_tx_usdc = jdbl(fe, "gas_per_tx_usdc", 0.0);
     }
 
+    // experiment: isolated paper-only strategy simulator
+    if (root.contains("experiment")) {
+        auto& ex = root["experiment"];
+        cfg.experiment.enabled = jbool(ex, "enabled", cfg.experiment.enabled);
+        cfg.experiment.strategy = jstr(ex, "strategy", cfg.experiment.strategy);
+        cfg.experiment.initial_balance = jdbl(ex, "initial_balance", cfg.experiment.initial_balance);
+    }
+
     // polygon (live 模式必填；rpc_urls 默认填一组公开免费节点；合约地址用 struct 默认值)
     if (root.contains("polygon")) {
         auto& pg = root["polygon"];

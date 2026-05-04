@@ -61,6 +61,7 @@ set(SOURCES
     src/core/clob_ws_feed.cpp
     src/core/quote_cache.cpp
     src/core/strategy.cpp
+    src/core/experiment_engine.cpp
     src/core/risk_manager.cpp
     src/core/trade_journal.cpp
     src/core/live_trader.cpp

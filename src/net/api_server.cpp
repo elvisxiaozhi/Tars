@@ -18,6 +18,8 @@ struct ApiServer::Impl {
     ApiDataCallback trades_cb;
     ApiDataCallback stats_cb;
     ApiDataCallback analytics_cb;
+    ApiDataCallback experiment_status_cb;
+    ApiDataCallback experiment_trades_cb;
     ApiDataCallback shutdown_cb;
     std::string dashboard_html;
 
@@ -40,6 +42,12 @@ struct ApiServer::Impl {
         }
         if (target == "/api/analytics" && analytics_cb) {
             return make_response(http::status::ok, analytics_cb(), "application/json");
+        }
+        if (target == "/api/experiment/status" && experiment_status_cb) {
+            return make_response(http::status::ok, experiment_status_cb(), "application/json");
+        }
+        if (target == "/api/experiment/trades" && experiment_trades_cb) {
+            return make_response(http::status::ok, experiment_trades_cb(), "application/json");
         }
         if (target == "/api/shutdown" && shutdown_cb) {
             // 仅接受 POST/DELETE，避免 GET 误触发（如浏览器预取）
@@ -89,6 +97,8 @@ void ApiServer::on_status(ApiDataCallback cb) { impl_->status_cb = std::move(cb)
 void ApiServer::on_trades(ApiDataCallback cb) { impl_->trades_cb = std::move(cb); }
 void ApiServer::on_stats(ApiDataCallback cb) { impl_->stats_cb = std::move(cb); }
 void ApiServer::on_analytics(ApiDataCallback cb) { impl_->analytics_cb = std::move(cb); }
+void ApiServer::on_experiment_status(ApiDataCallback cb) { impl_->experiment_status_cb = std::move(cb); }
+void ApiServer::on_experiment_trades(ApiDataCallback cb) { impl_->experiment_trades_cb = std::move(cb); }
 void ApiServer::on_shutdown(ApiDataCallback cb) { impl_->shutdown_cb = std::move(cb); }
 void ApiServer::set_dashboard_html(const std::string& html) { impl_->dashboard_html = html; }
 

@@ -19,7 +19,14 @@
         "min_liquidity_usdc": 500.0,
         "min_volume_24h": 1000.0,
         "max_markets_to_scan": 100,
-        "market_filter": "btc-updown"
+        "market_filter": "btc-updown",
+        "crypto_symbols": ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB"]
+    },
+
+    "experiment": {
+        "enabled": true,
+        "strategy": "regime",
+        "initial_balance": 20.0
     },
 
     "risk": {
