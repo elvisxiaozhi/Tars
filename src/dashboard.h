@@ -42,6 +42,16 @@ inline const std::string DASHBOARD_HTML = R"html(
   details[open] > summary > span:first-child::before { content: '▾ '; }
   details:not([open]) > summary > span:first-child::before { content: '▸ '; }
   .positions-empty { color: #7d8590; padding: 20px; text-align: center; }
+  .summary-strip { font-size:0.75em; color:#7d8590; margin-bottom:16px; display:flex; flex-wrap:wrap; gap:18px; align-items:center; }
+  .reason-badge { display:inline-block; padding:2px 8px; border-radius:4px; background:#1e2d3d; color:#e0e6ed; font-size:0.9em; white-space:nowrap; }
+  .reason-profit { background:#14351f; color:#56d364; }
+  .reason-risk { background:#3a1a1a; color:#f85149; }
+  .reason-protect { background:#332b13; color:#d29922; }
+  .trade-detail-row td { background:#0d1117; padding:0 12px 12px 12px; }
+  .trade-detail { margin-top:6px; border:1px solid #1e2d3d; border-radius:6px; overflow:hidden; }
+  .trade-detail summary { cursor:pointer; color:#58a6ff; padding:8px 10px; list-style:none; user-select:none; }
+  .trade-detail summary::-webkit-details-marker { display:none; }
+  .trade-detail[open] summary { border-bottom:1px solid #1e2d3d; }
   .uptime { font-size: 0.8em; color: #7d8590; }
   .refresh { font-size: 0.7em; color: #484f58; }
   .pnl-bar { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
@@ -128,8 +138,9 @@ inline const std::string DASHBOARD_HTML = R"html(
   </div>
 </div>
 
-<!-- 行情行：当前 market + BTC dev + UP/DN bid·ask  -->
-<div style="font-size:0.75em;color:#7d8590;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:18px;align-items:center;">
+<!-- 主市场快照：只保留主交易市场的快速状态，多币种明细在 Markets 表 -->
+<div class="summary-strip">
+  <span style="color:#484f58;">Primary</span>
   <span id="market-name" style="color:#58a6ff;font-weight:bold;">--</span>
   <span>BTC dev <span id="btc-dev">--</span></span>
   <span>UP <span class="positive" id="up-bid">--</span>/<span class="positive" id="up-ask">--</span></span>
@@ -149,22 +160,6 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div id="positions-container"></div>
 </div>
 
-<details class="section" id="experiment-details" open>
-  <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>Experiment</span>
-    <span id="exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
-  </summary>
-  <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="exp-trades-count">--</div></div>
-  </div>
-  <div id="exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="exp-positions" style="margin-top:12px;"></div>
-  <div id="exp-trades" style="margin-top:12px;"></div>
-</details>
-
 <details class="section" id="trade-history-details">
   <summary class="section-title" style="display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none;">
     <span style="user-select:none;">Trade History</span>
@@ -178,7 +173,6 @@ inline const std::string DASHBOARD_HTML = R"html(
     <thead>
       <tr>
         <th>Time</th>
-        <th>Mode</th>
         <th>Coin</th>
         <th>ID</th>
         <th>Side</th>
@@ -196,7 +190,7 @@ inline const std::string DASHBOARD_HTML = R"html(
       </tr>
     </thead>
     <tbody id="trades-body">
-      <tr><td colspan="16" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
+      <tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
     </tbody>
   </table>
 </details>
@@ -300,6 +294,22 @@ inline const std::string DASHBOARD_HTML = R"html(
   </details>
 </details>
 
+<details class="section" id="experiment-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;">
+    <span>Experiment</span>
+    <span id="exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+  </summary>
+  <div class="stats-grid" style="margin-top:8px;">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="exp-trades-count">--</div></div>
+  </div>
+  <div id="exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="exp-positions" style="margin-top:12px;"></div>
+  <div id="exp-trades" style="margin-top:12px;"></div>
+</details>
+
 <script>
 const API_BASE = '';
 const REFRESH_MS = 5000;
@@ -341,6 +351,7 @@ document.addEventListener('DOMContentLoaded', () => {
   persistDetails('ad-distribution',       false);
   persistDetails('ad-direction',          false);
   persistDetails('ad-buckets',            false);
+  persistDetails('experiment-details',    false);
 
   // Stop Bot 按钮
   const stopBtn = document.getElementById('stop-bot-btn');
@@ -378,6 +389,67 @@ function inferCoin(t) {
   if (m.includes('bnb')) return 'BNB';
   if (m.includes('hype')) return 'HYPE';
   return 'BTC';
+}
+function normalizeTradeId(id) {
+  return String(id || '--').replace(/-TP\d+$/i, '');
+}
+function reasonInfo(reason) {
+  const r = String(reason || '').toLowerCase();
+  const map = {
+    tp0: ['第一档止盈', 'reason-profit'],
+    tp1: ['第二档止盈', 'reason-profit'],
+    tp2: ['最终止盈', 'reason-profit'],
+    tp_filled: ['止盈成交', 'reason-profit'],
+    stop_price: ['价格止损', 'reason-risk'],
+    stop_btc: ['方向反转止损', 'reason-risk'],
+    stop_time: ['临近结算撤退', 'reason-risk'],
+    expired: ['到期结算', 'reason-protect'],
+    trailing_stop: ['移动止盈回撤', 'reason-protect'],
+    dead_water_exit: ['长时间无利润退出', 'reason-protect'],
+    emergency_close: ['紧急平仓', 'reason-risk'],
+    manual_close: ['手动平仓', 'reason-protect'],
+    partial_exit: ['分批卖出', 'reason-profit']
+  };
+  return map[r] || [reason || '--', ''];
+}
+function renderReason(reason) {
+  const [label, cls] = reasonInfo(reason);
+  return '<span class="reason-badge ' + cls + '" title="' + (reason || '') + '">' + label + '</span>';
+}
+function summarizeTradeGroup(items) {
+  const sorted = items.slice().sort((a, b) => (a.exit_time || 0) - (b.exit_time || 0));
+  const first = sorted[0] || {};
+  const shares = sorted.reduce((s, t) => s + (t.shares || 0), 0);
+  const cost = sorted.reduce((s, t) => s + ((t.shares || 0) * (t.entry_price || 0)), 0);
+  const revenue = sorted.reduce((s, t) => s + ((t.shares || 0) * (t.exit_price || 0)), 0);
+  const fee = sorted.reduce((s, t) => s + (t.fee || 0), 0);
+  const pnl = sorted.reduce((s, t) => s + (t.pnl || 0), 0);
+  const avgEntry = shares > 0 ? cost / shares : (first.entry_price || 0);
+  const avgExit = shares > 0 ? revenue / shares : (first.exit_price || 0);
+  const maxPrice = Math.max(...sorted.map(t => t.max_price || t.entry_price || 0));
+  const minPrice = Math.min(...sorted.map(t => t.min_price || t.entry_price || 0));
+  const start = first.entry_time || sorted[0]?.exit_time || 0;
+  const end = sorted[sorted.length - 1]?.exit_time || start;
+  const reasons = [...new Set(sorted.map(t => t.exit_reason || '').filter(Boolean))];
+  return {
+    id: normalizeTradeId(first.id),
+    coin: inferCoin(first),
+    side: first.side || '--',
+    entry_price: avgEntry,
+    exit_price: avgExit,
+    shares,
+    cost,
+    revenue,
+    fee,
+    pnl,
+    max_price: maxPrice,
+    min_price: minPrice,
+    entry_time: start,
+    exit_time: end,
+    hold_duration_sec: Math.max(0, Math.floor((end - start) / 1000)),
+    exit_reason: reasons.length === 1 ? reasons[0] : 'partial_exit',
+    items: sorted
+  };
 }
 function formatTime(ms) {
   if (!ms) return '--';
@@ -487,12 +559,15 @@ async function refresh() {
     const posSection   = document.getElementById('open-positions-section');
     const posContainer = document.getElementById('positions-container');
     if (status.positions && status.positions.length > 0) {
-      let html = '<table><thead><tr><th>ID</th><th>Side</th><th>Entry</th><th>Current</th><th>Shares</th><th>Unrealized P&L</th><th>TP Progress</th><th>MFE</th><th>MAE</th></tr></thead><tbody>';
+      let html = '<table><thead><tr><th>ID</th><th>Coin</th><th>Outcome</th><th>Regime</th><th>Entry</th><th>Current</th><th>Shares</th><th>Unrealized P&L</th><th>TP Progress</th><th>MFE</th><th>MAE</th></tr></thead><tbody>';
       for (const p of status.positions) {
         const upnl = (p.current_price - p.entry_price) * p.shares * p.remaining_pct;
+        const coin = p.coin || inferCoin(p);
         html += '<tr>';
         html += '<td>' + p.id + '</td>';
-        html += '<td class="side-' + p.side.toLowerCase() + '">' + p.side + '</td>';
+        html += '<td style="font-weight:bold;color:#58a6ff;">' + coin + '</td>';
+        html += '<td class="side-' + p.side.toLowerCase() + '">' + coin + ' ' + p.side + '</td>';
+        html += '<td>' + (p.regime || '--') + '</td>';
         html += '<td>' + p.entry_price.toFixed(3) + '</td>';
         html += '<td>' + p.current_price.toFixed(3) + '</td>';
         html += '<td>' + p.shares.toFixed(0) + '</td>';
@@ -561,7 +636,7 @@ async function refresh() {
         html += '<tr><td colspan="8" style="text-align:center;color:#7d8590;">No experiment trades yet</td></tr>';
       } else {
         for (const t of expTrades.slice().reverse().slice(0, 30)) {
-          html += '<tr><td>' + formatTime(t.exit_time || t.entry_time) + '</td><td>' + (t.coin || '--') + '</td><td>' + (t.regime || '') + '</td><td class="side-' + String(t.side).toLowerCase() + '">' + t.side + '</td><td>' + Number(t.entry_price || 0).toFixed(3) + '</td><td>' + Number(t.exit_price || 0).toFixed(3) + '</td><td>' + (t.exit_reason || '') + '</td><td class="' + pnlClass(t.pnl || 0) + '">' + formatPnl(t.pnl || 0) + '</td></tr>';
+          html += '<tr><td>' + formatTime(t.exit_time || t.entry_time) + '</td><td>' + (t.coin || '--') + '</td><td>' + (t.regime || '') + '</td><td class="side-' + String(t.side).toLowerCase() + '">' + t.side + '</td><td>' + Number(t.entry_price || 0).toFixed(3) + '</td><td>' + Number(t.exit_price || 0).toFixed(3) + '</td><td>' + renderReason(t.exit_reason) + '</td><td class="' + pnlClass(t.pnl || 0) + '">' + formatPnl(t.pnl || 0) + '</td></tr>';
         }
       }
       html += '</tbody></table>';
@@ -591,7 +666,6 @@ async function refresh() {
       ? trades
       : trades.filter(t => (t.mode || 'dry_run') === currentFilter);
     const thCount = document.getElementById('th-count');
-    if (thCount) thCount.textContent = '(' + filtered.length + ' trades)';
 
     // P&L mini sparkline（cum P&L 按 exit_time 排序）
     let cum = 0;
@@ -599,24 +673,36 @@ async function refresh() {
       .sort((a, b) => (a.exit_time || 0) - (b.exit_time || 0))
       .map(t => (cum += (t.pnl || 0)));
     renderSparkline('pnl-spark', sparkData);
-    for (const t of filtered.slice().reverse()) {
-      const cost = t.shares * t.entry_price;
-      const revenue = t.shares * t.exit_price;
-      const tm = t.mode || 'dry_run';
+
+    const groupedMap = new Map();
+    for (const t of filtered) {
+      const key = normalizeTradeId(t.id);
+      if (!groupedMap.has(key)) groupedMap.set(key, []);
+      groupedMap.get(key).push(t);
+    }
+    const groups = Array.from(groupedMap.values())
+      .map(summarizeTradeGroup)
+      .sort((a, b) => (b.exit_time || 0) - (a.exit_time || 0));
+    if (thCount) thCount.textContent = '(' + groups.length + ' entries / ' + filtered.length + ' exits)';
+
+    if (groups.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades for current filter</td></tr>';
+    }
+
+    for (const t of groups) {
+      const splitCount = t.items.length;
       html += '<tr>';
       html += '<td>' + formatTime(t.exit_time || t.entry_time) + '</td>';
-      html += '<td><span class="mode mode-' + (tm === 'live' ? 'live' : 'dry') + '">' +
-              (tm === 'live' ? 'LIVE' : 'DRY') + '</span></td>';
-      html += '<td>' + inferCoin(t) + '</td>';
-      html += '<td>' + t.id + '</td>';
-      html += '<td class="side-' + t.side.toLowerCase() + '">' + t.side + '</td>';
+      html += '<td>' + t.coin + '</td>';
+      html += '<td>' + t.id + (splitCount > 1 ? ' <span style="color:#7d8590;">(' + splitCount + ' exits)</span>' : '') + '</td>';
+      html += '<td class="side-' + String(t.side).toLowerCase() + '">' + t.side + '</td>';
       html += '<td>' + t.entry_price.toFixed(3) + '</td>';
       html += '<td>' + t.exit_price.toFixed(3) + '</td>';
       html += '<td>' + t.shares.toFixed(1) + '</td>';
-      html += '<td>$' + cost.toFixed(3) + '</td>';
-      html += '<td>$' + revenue.toFixed(3) + '</td>';
-      html += '<td>$' + (t.fee || 0).toFixed(4) + '</td>';
-      html += '<td>' + t.exit_reason + '</td>';
+      html += '<td>$' + t.cost.toFixed(3) + '</td>';
+      html += '<td>$' + t.revenue.toFixed(3) + '</td>';
+      html += '<td>$' + t.fee.toFixed(4) + '</td>';
+      html += '<td>' + renderReason(t.exit_reason) + '</td>';
       html += '<td class="' + pnlClass(t.pnl) + '">' + formatPnl(t.pnl) + '</td>';
       const mfe = ((t.max_price||0) - t.entry_price) * 100;
       const mae = (t.entry_price - (t.min_price||t.entry_price)) * 100;
@@ -625,8 +711,32 @@ async function refresh() {
       const dur = t.hold_duration_sec || 0;
       html += '<td>' + Math.floor(dur/60) + 'm' + (dur%60) + 's</td>';
       html += '</tr>';
+      if (splitCount > 1) {
+        html += '<tr class="trade-detail-row"><td colspan="15">';
+        html += '<details class="trade-detail"><summary>查看分批卖出明细</summary>';
+        html += '<table><thead><tr><th>Time</th><th>Exit</th><th>Shares</th><th>Revenue</th><th>Fee</th><th>Reason</th><th>P&L</th></tr></thead><tbody>';
+        for (const part of t.items) {
+          const partRevenue = (part.shares || 0) * (part.exit_price || 0);
+          html += '<tr>';
+          html += '<td>' + formatTime(part.exit_time || part.entry_time) + '</td>';
+          html += '<td>' + Number(part.exit_price || 0).toFixed(3) + '</td>';
+          html += '<td>' + Number(part.shares || 0).toFixed(1) + '</td>';
+          html += '<td>$' + partRevenue.toFixed(3) + '</td>';
+          html += '<td>$' + Number(part.fee || 0).toFixed(4) + '</td>';
+          html += '<td>' + renderReason(part.exit_reason) + '</td>';
+          html += '<td class="' + pnlClass(part.pnl || 0) + '">' + formatPnl(part.pnl || 0) + '</td>';
+          html += '</tr>';
+        }
+        html += '</tbody></table></details></td></tr>';
+      }
     }
-    tbody.innerHTML = html;
+    if (groups.length > 0) tbody.innerHTML = html;
+  } else {
+    const tbody = document.getElementById('trades-body');
+    const thCount = document.getElementById('th-count');
+    if (thCount) thCount.textContent = '(0 trades)';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>';
+    renderSparkline('pnl-spark', []);
   }
 
   // Analytics section — 根据 currentFilter 选数据源
@@ -675,8 +785,9 @@ async function refresh() {
     for (const [r, c] of Object.entries(reasons).sort((a,b)=>b[1]-a[1])) {
       const pct = (c/totalR*100).toFixed(0);
       const color = reasonColors[r] || '#7d8590';
+      const [reasonLabel] = reasonInfo(r);
       erhtml += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">';
-      erhtml += '<span style="font-size:0.8em;width:80px;color:#e0e6ed;">'+r+'</span>';
+      erhtml += '<span style="font-size:0.8em;width:120px;color:#e0e6ed;" title="'+r+'">'+reasonLabel+'</span>';
       erhtml += '<div style="flex:1;height:16px;background:#1e2d3d;border-radius:3px;overflow:hidden;">';
       erhtml += '<div style="width:'+pct+'%;height:100%;background:'+color+';"></div></div>';
       erhtml += '<span style="font-size:0.75em;color:#7d8590;width:50px;">'+c+' ('+pct+'%)</span>';
