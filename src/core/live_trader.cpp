@@ -497,10 +497,10 @@ double parse_available_balance_from_error(const std::string& error) {
 // 通用 V2 下单 helper —— BUY 和 SELL 共享。差异：
 //   BUY:  side=0, makerAmount = shares × price（出 pUSD）, takerAmount = shares
 //   SELL: side=1, makerAmount = shares（出 shares）,        takerAmount = shares × price
-// is_taker=true 时未改 orderType（仍 GTC）；FOK 路径留给后续根据 server 行为再加。
 OrderResult LiveTrader::send_v2_order(
     const std::string& token_id, double price, double shares,
-    bool is_buy, bool is_taker, const std::string& tag)
+    bool is_buy, bool is_taker, const std::string& tag,
+    bool allow_partial_fill)
 {
     if (!clob_authenticated_)
         throw std::runtime_error("send_v2_order: ensure_clob_authenticated first");
@@ -532,8 +532,8 @@ OrderResult LiveTrader::send_v2_order(
                                   static_cast<uint64_t>(cfg_.polymarket.chain_id));
     std::string order_json = polyorder_to_json(order, s);
 
-    // FOK = 即时成交否则取消（用于 market 出场 / 止损）；GTC = 挂单等吃
-    const char* order_type = is_taker ? "FOK" : "GTC";
+    // FAK = 即时尽量成交并取消剩余（partial TP）；FOK = 即时全成交否则取消（止损/应急退出）。
+    const char* order_type = is_taker ? (allow_partial_fill ? "FAK" : "FOK") : "GTC";
 
     std::string body =
         "{\"order\":" + order_json +
@@ -619,7 +619,8 @@ OrderResult LiveTrader::place_entry_order(const EntrySignal& sig, double shares)
 
 OrderResult LiveTrader::place_exit_order(const Position& pos, double shares,
                                          double price, bool is_taker,
-                                         const std::string& reason) {
+                                         const std::string& reason,
+                                         bool allow_partial_fill) {
     double safe_shares = safe_sell_shares(shares);
     if (safe_shares <= 0) {
         OrderResult r;
@@ -633,7 +634,8 @@ OrderResult LiveTrader::place_exit_order(const Position& pos, double shares,
     }
 
     auto first = send_v2_order(pos.token_id, price, safe_shares,
-                               /*is_buy=*/false, is_taker, "exit:" + reason);
+                               /*is_buy=*/false, is_taker, "exit:" + reason,
+                               allow_partial_fill);
     if (first.success) {
         if (first.filled_shares <= 0) first.filled_shares = safe_shares;
         return first;
@@ -648,7 +650,8 @@ OrderResult LiveTrader::place_exit_order(const Position& pos, double shares,
     spdlog::warn("LIVE SELL retry [{}]: server_balance={:.6f}, retry_shares={:.6f}",
                  reason, server_balance, retry_shares);
     auto retry = send_v2_order(pos.token_id, price, retry_shares,
-                               /*is_buy=*/false, is_taker, "exit:" + reason + ":retry");
+                               /*is_buy=*/false, is_taker, "exit:" + reason + ":retry",
+                               allow_partial_fill);
     if (retry.success && retry.filled_shares <= 0) retry.filled_shares = retry_shares;
     return retry;
 }

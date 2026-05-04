@@ -124,14 +124,15 @@ std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price) {
 }
 
 std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price, StrategyRegime) {
-    // §四 止盈规则（三档减仓，中间档锁住 MFE 浮盈）
+    // §四 止盈规则：先锁利润，再保留趋势尾仓
     std::vector<TakeProfitLevel> levels;
 
-    // With ~$1 positions, partial TP orders are often below Polymarket's
-    // practical minimum. Use the original first target, but sell all at TP0.
-    levels.push_back({0, 0.45, 1.00, false});
+    levels.push_back({0, 0.45, 0.50, false});  // TP0: sell 50% of remaining
+    levels.push_back({1, 0.70, 0.50, false});  // TP1: sell 50% of remaining
+    levels.push_back({2, 0.88, 1.00, false});  // TP2: sell all remaining
 
-    spdlog::debug("TP levels for entry={:.3f}: TP0=0.450(100%)", entry_price);
+    spdlog::debug("TP levels for entry={:.3f}: TP0=0.450(50%) TP1=0.700(50% rem) TP2=0.880(100% rem)",
+                  entry_price);
 
     return levels;
 }

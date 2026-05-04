@@ -1062,7 +1062,7 @@ int main(int argc, char* argv[]) {
                         position_tokens.insert(p.token_id);
                     }
                 }
-                bool entry_window = md.minutes_remaining >= 25 && md.minutes_remaining <= 45;
+                bool entry_window = md.minutes_remaining > 20;
                 if (entry_window) {
                     std::lock_guard<std::mutex> lock(state.mu);
                     state.entry_window_market_count++;
@@ -1072,6 +1072,7 @@ int main(int argc, char* argv[]) {
                     state.held_market_count++;
                 }
                 if (!entry_window && !has_open_position) {
+                    reject_agg.add("time_too_short_loop:" + coin, md.deviation_pct);
                     continue;
                 }
 
@@ -1448,8 +1449,8 @@ int main(int argc, char* argv[]) {
                     if (current_price >= tp.trigger_price) {
                         double sell_shares = pos.shares * tp.sell_pct * pos.shares_remaining_pct;
 
-                        // R-V2.6 + P1 fix: LIVE FOK SELL 用 floor 0.01（不是 strategy.current_price）
-                        // 因为 strategy 给的价格可能高于 best_bid，FOK 会 kill；用 0.01 让 server 按对手最佳 bid 全成交。
+                        // LIVE partial TP uses FAK at a 0.01 floor: fill immediately
+                        // against available bids, cancel any leftover, and account by real fill.
                         // paper P&L 仍按 current_price 算（与 dry_run 一致），LIVE 实际成交价可能稍低。
                         double real_exit_price = current_price;
                         double real_sell_shares = sell_shares;
@@ -1457,14 +1458,15 @@ int main(int argc, char* argv[]) {
                             try {
                                 auto r = live_trader->place_exit_order(
                                     pos, sell_shares, /*price=*/0.01,
-                                    /*is_taker=*/true, "tp" + std::to_string(tp.tier));
+                                    /*is_taker=*/true, "tp" + std::to_string(tp.tier),
+                                    /*allow_partial_fill=*/true);
                                 if (!r.success) {
                                     spdlog::error("LIVE TP{} SELL rejected: {} (retry next tick)",
                                                  tp.tier, r.error);
                                     continue;
                                 }
                                 spdlog::info("LIVE TP{} SELL ok order_id={}", tp.tier, r.order_id);
-                                // R-V2.7-P1: 真实成交价（FOK floor 0.01 → server 按 best_bid 成交，价格远高于 floor）
+                                // R-V2.7-P1: 真实成交价（floor 0.01 → server 按 best_bid 成交，价格远高于 floor）
                                 if (r.filled_shares > 0) {
                                     real_sell_shares = r.filled_shares;
                                     if (r.filled_avg_price > 0) real_exit_price = r.filled_avg_price;
@@ -1487,7 +1489,9 @@ int main(int argc, char* argv[]) {
                         double entry_fee_portion = calc_fee(real_sell_shares, pos.entry_price, /*is_taker=*/false, cfg.fees);
                         double pnl = sell_value - cost_basis - exit_fee - entry_fee_portion;
 
-                        pos.shares_remaining_pct -= tp.sell_pct * pos.shares_remaining_pct;
+                        double remaining_before = pos.shares * pos.shares_remaining_pct;
+                        double remaining_after = std::max(0.0, remaining_before - real_sell_shares);
+                        pos.shares_remaining_pct = pos.shares > 0 ? remaining_after / pos.shares : 0.0;
                         pos.realized_pnl += pnl;
                         risk.add_balance(sell_value - exit_fee);  // 动态余额：回收卖出收入
 

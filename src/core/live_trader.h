@@ -117,7 +117,8 @@ public:
     // ===== 下单（R7 / R8）=====
     OrderResult place_entry_order(const EntrySignal& sig, double shares);
     OrderResult place_exit_order(const Position& pos, double shares, double price,
-                                 bool is_taker, const std::string& reason);
+                                 bool is_taker, const std::string& reason,
+                                 bool allow_partial_fill = false);
 
     // ===== 启动对账 + 应急平仓（R9-V2）=====
     // GET /data/orders 列出 user 当前未平仓订单（含状态/已成交量），供 main loop
@@ -132,7 +133,8 @@ private:
     // V2 通用下单 helper —— BUY/SELL 共享（is_buy 决定 side 与 maker/taker amount swap）
     OrderResult send_v2_order(
         const std::string& token_id, double price, double shares,
-        bool is_buy, bool is_taker, const std::string& tag);
+        bool is_buy, bool is_taker, const std::string& tag,
+        bool allow_partial_fill = false);
 
     const AppConfig& cfg_;
 
