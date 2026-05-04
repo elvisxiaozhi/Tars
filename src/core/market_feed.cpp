@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <set>
 #include <thread>
 
 #include <json.hpp>
@@ -16,7 +17,12 @@ using json = nlohmann::json;
 namespace jh = json_helpers;
 
 MarketFeed::MarketFeed(const AppConfig& cfg)
-    : cfg_(cfg), http_(10, cfg.network.proxy_url) {}
+    : cfg_(cfg), http_(3, cfg.network.proxy_url) {}
+
+static int64_t now_ms_local() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
 
 void MarketFeed::fetch_markets() {
     if (!cfg_.strategy.market_filter.empty()) {
@@ -27,6 +33,14 @@ void MarketFeed::fetch_markets() {
         markets_.clear();
         fetch_from_clob();
         scan_prices();
+    }
+}
+
+void MarketFeed::fetch_markets(const std::vector<CoinStrategyConfig>& coins) {
+    if (!coins.empty()) {
+        fetch_from_gamma(coins);
+    } else {
+        fetch_markets();
     }
 }
 
@@ -71,7 +85,7 @@ void MarketFeed::fetch_from_clob() {
 
 // 构造当前小时的 BTC Up/Down event slug
 // 格式: bitcoin-up-or-down-{month}-{day}-{year}-{hour}{am/pm}-et
-static std::string build_btc_hourly_slug(int offset_hours = 0) {
+static std::string build_hourly_slug(const std::string& prefix, int offset_hours = 0) {
     auto now = std::chrono::system_clock::now() +
                std::chrono::hours(offset_hours);
     auto tt = std::chrono::system_clock::to_time_t(now);
@@ -91,10 +105,14 @@ static std::string build_btc_hourly_slug(int offset_hours = 0) {
     std::string ampm = (et_tm.tm_hour < 12) ? "am" : "pm";
 
     char buf[128];
-    snprintf(buf, sizeof(buf), "bitcoin-up-or-down-%s-%d-%d-%d%s-et",
-             months[et_tm.tm_mon], et_tm.tm_mday,
+    snprintf(buf, sizeof(buf), "%s-%s-%d-%d-%d%s-et",
+             prefix.c_str(), months[et_tm.tm_mon], et_tm.tm_mday,
              et_tm.tm_year + 1900, hour12, ampm.c_str());
     return buf;
+}
+
+static std::string build_btc_hourly_slug(int offset_hours = 0) {
+    return build_hourly_slug("bitcoin-up-or-down", offset_hours);
 }
 
 void MarketFeed::fetch_from_gamma() {
@@ -147,6 +165,98 @@ void MarketFeed::fetch_from_gamma() {
     auto current_slug = build_btc_hourly_slug(0);
     for (auto it = markets_.begin(); it != markets_.end(); ) {
         if (it->second.market.closed || it->second.market.market_slug != current_slug) {
+            spdlog::info("  removing market: {}", it->second.market.question);
+            it = markets_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (new_count > 0) {
+        spdlog::info("Markets: {} new, {} total", new_count, markets_.size());
+    }
+}
+
+void MarketFeed::fetch_from_gamma(const std::vector<CoinStrategyConfig>& coins) {
+    int new_count = 0;
+    std::vector<std::string> current_slugs;
+
+    for (const auto& coin : coins) {
+        auto slug = build_hourly_slug(coin.hourly_slug_prefix, 0);
+        current_slugs.push_back(slug);
+
+        bool already_loaded = false;
+        for (const auto& [cid, entry] : markets_) {
+            if (entry.market.market_slug == slug) {
+                already_loaded = true;
+                break;
+            }
+        }
+        if (already_loaded) continue;
+        auto now = now_ms_local();
+        auto retry_it = gamma_retry_after_ms_.find(slug);
+        if (retry_it != gamma_retry_after_ms_.end() && retry_it->second > now) {
+            spdlog::debug("Gamma retry cooling down [{}]: {}", coin.coin, slug);
+            continue;
+        }
+
+        std::string url = cfg_.polymarket.gamma_api_url + "/events?slug=" + slug;
+        spdlog::info("Querying gamma [{}]: {}", coin.coin, slug);
+        net::HttpResponse resp;
+        try {
+            resp = http_.get(url);
+        } catch (const std::exception& e) {
+            gamma_retry_after_ms_[slug] = now + 60000;
+            spdlog::warn("Gamma fetch failed for {} {}: {} (retry in 60s)",
+                         coin.coin, slug, e.what());
+            continue;
+        }
+        if (resp.status_code != 200) {
+            gamma_retry_after_ms_[slug] = now + 60000;
+            spdlog::warn("Gamma fetch status={} for {} {}", resp.status_code, coin.coin, slug);
+            continue;
+        }
+        gamma_retry_after_ms_.erase(slug);
+
+        auto j = json::parse(resp.body);
+        if (!j.is_array() || j.empty()) {
+            gamma_retry_after_ms_[slug] = now + 60000;
+            continue;
+        }
+
+        int slug_new_count = 0;
+        for (const auto& event : j) {
+            if (!event.contains("markets") || !event["markets"].is_array()) continue;
+            for (const auto& mj : event["markets"]) {
+                auto m = jh::parse_gamma_market(mj);
+                if (!m.active || m.closed) continue;
+                if (m.tokens.size() < 2) continue;
+
+                spdlog::info("  new market [{}]: {} (tokens: {})",
+                             coin.coin, m.question, m.tokens.size());
+                MarketEntry entry;
+                entry.market = std::move(m);
+                markets_[entry.market.condition_id] = std::move(entry);
+                new_count++;
+                slug_new_count++;
+            }
+        }
+        if (slug_new_count == 0) {
+            gamma_retry_after_ms_[slug] = now + 60000;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    for (auto it = markets_.begin(); it != markets_.end(); ) {
+        bool keep = false;
+        for (const auto& slug : current_slugs) {
+            if (it->second.market.market_slug == slug) {
+                keep = true;
+                break;
+            }
+        }
+        if (it->second.market.closed || !keep) {
             spdlog::info("  removing market: {}", it->second.market.question);
             it = markets_.erase(it);
         } else {
@@ -303,12 +413,22 @@ int MarketFeed::fetch_order_books() {
 }
 
 bool MarketFeed::refresh_order_book(const std::string& condition_id) {
+    return refresh_order_book(condition_id, {});
+}
+
+bool MarketFeed::refresh_order_book(const std::string& condition_id,
+                                    const std::set<std::string>& token_ids) {
     auto it = markets_.find(condition_id);
     if (it == markets_.end()) return false;
     auto& entry = it->second;
 
     int success = 0;
+    int requested = 0;
     for (const auto& token : entry.market.tokens) {
+        if (!token_ids.empty() && token_ids.find(token.token_id) == token_ids.end()) {
+            continue;
+        }
+        requested++;
         try {
             std::string url = cfg_.polymarket.clob_rest_url +
                               "/book?token_id=" + token.token_id;
@@ -324,9 +444,34 @@ bool MarketFeed::refresh_order_book(const std::string& condition_id) {
         } catch (const std::exception& e) {
             spdlog::debug("Order book refresh error: {}", e.what());
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    return success == static_cast<int>(entry.market.tokens.size());
+    return requested > 0 && success == requested;
+}
+
+void MarketFeed::apply_cached_quotes(const QuoteCache& cache, int64_t now_ms,
+                                     int64_t max_age_ms) {
+    for (auto& [_, entry] : markets_) {
+        for (const auto& token : entry.market.tokens) {
+            QuoteSnapshot snap;
+            if (!cache.get(token.token_id, snap)) continue;
+            if (snap.updated_ms <= 0 || now_ms - snap.updated_ms > max_age_ms) continue;
+            entry.best_prices[token.token_id] = snap.best;
+            if (snap.has_book) {
+                entry.order_books[token.token_id] = snap.book;
+            }
+        }
+    }
+}
+
+std::set<std::string> MarketFeed::active_token_ids() const {
+    std::set<std::string> ids;
+    for (const auto& [_, entry] : markets_) {
+        for (const auto& token : entry.market.tokens) {
+            if (!token.token_id.empty()) ids.insert(token.token_id);
+        }
+    }
+    return ids;
 }
 
 const MarketEntry* MarketFeed::get_market(const std::string& condition_id) const {

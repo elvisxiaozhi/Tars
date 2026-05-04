@@ -2,12 +2,16 @@
 
 #include <chrono>
 #include <cmath>
+#include <utility>
 
 #include <spdlog/spdlog.h>
 
 namespace polymarket {
 
 Strategy::Strategy(const AppConfig& cfg) : cfg_(cfg) {}
+
+Strategy::Strategy(const AppConfig& cfg, std::string coin)
+    : cfg_(cfg), coin_(std::move(coin)) {}
 
 double Strategy::max_entry_price(int minutes_remaining) const {
     // §一：剩余30分钟以上，ask < 30¢
@@ -42,6 +46,8 @@ EntrySignal Strategy::evaluate_entry(
     EntrySignal sig;
     sig.condition_id = condition_id;
     sig.market_question = question;
+    sig.coin = coin_;
+    sig.regime = StrategyRegime::LEGACY_CHEAP;
 
     // §一.1 时间窗口：剩余时间 > 20 分钟
     // 从 30→20 的依据：4-26 早间数据显示 BTC 波动集中在蜡烛末段，30 阈值屏蔽了 100% 的甜区机会
@@ -100,31 +106,32 @@ EntrySignal Strategy::evaluate_entry(
     // §二：在当前价下方1¢挂限价买单
     sig.entry_price = candidate_ask - 0.01;
     if (sig.entry_price < 0.01) sig.entry_price = 0.01;
+    sig.size_usdc = 1.00;
+    sig.shares = sig.size_usdc / sig.entry_price;
     sig.token_id = candidate_token;
 
-    spdlog::info("SIGNAL: {} {} @ {:.3f} (ask={:.3f}, max={:.3f}, BTC dev={:+.2f}%)",
+    spdlog::info("SIGNAL [{}]: {} {} @ {:.3f} (ask={:.3f}, max={:.3f}, size=${:.2f}, dev={:+.2f}%)",
+                 coin_,
                  (sig.side == Side::UP ? "UP" : "DOWN"),
-                 question, sig.entry_price, candidate_ask, max_price,
+                 question, sig.entry_price, candidate_ask, max_price, sig.size_usdc,
                  btc.deviation_pct);
 
     return sig;
 }
 
 std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price) {
+    return compute_tp_levels(entry_price, StrategyRegime::LEGACY_CHEAP);
+}
+
+std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price, StrategyRegime) {
     // §四 止盈规则（三档减仓，中间档锁住 MFE 浮盈）
     std::vector<TakeProfitLevel> levels;
 
-    // TP0：45¢ → 卖出30%（锁住中间浮盈，防止涨后全回吐）
-    levels.push_back({0, 0.45, 0.30, false});
+    // With ~$1 positions, partial TP orders are often below Polymarket's
+    // practical minimum. Use the original first target, but sell all at TP0.
+    levels.push_back({0, 0.45, 1.00, false});
 
-    // TP1：70¢ → 卖出剩余的 ~43%（即原始的 30%）
-    levels.push_back({1, 0.70, 3.0 / 7.0, false});
-
-    // TP2：90¢ → 全部卖出
-    levels.push_back({2, 0.90, 1.00, false});
-
-    spdlog::debug("TP levels for entry={:.3f}: TP0=0.450(30%) TP1=0.700(30%) TP2=0.900(rest)",
-                  entry_price);
+    spdlog::debug("TP levels for entry={:.3f}: TP0=0.450(100%)", entry_price);
 
     return levels;
 }

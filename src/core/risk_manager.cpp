@@ -25,8 +25,8 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
         return false;
     }
 
-    // 余额检查
-    double cost = fixed_shares_ * sig.entry_price;
+    // 余额检查：new low-cost branch sizes each trade at roughly $1.
+    double cost = sig.size_usdc > 0 ? sig.size_usdc : fixed_shares_ * sig.entry_price;
     if (cost > account_balance_) {
         reject_reason = "insufficient_balance: need $" + std::to_string(cost) +
                         " but have $" + std::to_string(account_balance_);
@@ -37,7 +37,7 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
 }
 
 double RiskManager::compute_position_size() const {
-    // §三 固定 10 shares
+    // Kept for compatibility; entry sizing now uses EntrySignal::shares.
     return fixed_shares_;
 }
 

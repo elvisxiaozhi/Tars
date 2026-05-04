@@ -26,10 +26,13 @@ public:
 
     // 标记本场（本小时 K线）已止损，禁止再交易
     void set_candle_stopped() { candle_stopped_ = true; }
+    void set_candle_stopped(const std::string&) { set_candle_stopped(); }
     bool is_candle_stopped() const { return candle_stopped_; }
 
     // 新 K线 开始时重置
     void reset_candle() { candle_stopped_ = false; }
+    void reset_candle(const std::string&) { reset_candle(); }
+    void reset_global_hour() {}
 
     // 重置每日统计
     void reset_daily();
@@ -47,6 +50,7 @@ public:
 
     // 仓位计数
     void add_position() { open_positions_++; }
+    void add_position(const std::string&, StrategyRegime) { add_position(); }
     void remove_position() { if (open_positions_ > 0) open_positions_--; }
 
 private:

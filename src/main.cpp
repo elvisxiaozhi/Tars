@@ -2,15 +2,20 @@
 #include <csignal>
 #include <ctime>
 #include <filesystem>
+#include <future>
 #include <map>
 #include <mutex>
+#include <set>
 #include <thread>
 
 #include <json.hpp>
+#include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 
 #include "core/binance_feed.h"
+#include "core/clob_ws_feed.h"
 #include "core/market_feed.h"
+#include "core/quote_cache.h"
 #include "core/risk_manager.h"
 #include "core/live_trader.h"
 #include "core/strategy.h"
@@ -49,6 +54,16 @@ struct UpDownQuotes {
     double up_bid = 0, down_bid = 0;
     std::string up_token_id, down_token_id;
 };
+
+static const char* regime_name(polymarket::StrategyRegime regime) {
+    switch (regime) {
+        case polymarket::StrategyRegime::LEGACY_CHEAP: return "legacy_cheap";
+        case polymarket::StrategyRegime::TREND: return "trend";
+        case polymarket::StrategyRegime::REVERSAL: return "reversal";
+        case polymarket::StrategyRegime::QUIET_REVERSION: return "quiet_reversion";
+        default: return "none";
+    }
+}
 
 static UpDownQuotes extract_quotes(const polymarket::MarketEntry& entry) {
     UpDownQuotes q;
@@ -123,6 +138,8 @@ static void fill_analytics(polymarket::TradeRecord& rec,
                            const polymarket::BtcMarketData& btc,
                            const std::string& mode) {
     rec.mode = mode;
+    rec.coin = pos.coin;
+    rec.regime = regime_name(pos.regime);
     rec.max_price = pos.max_price;
     rec.min_price = (pos.min_price > 1e8) ? pos.entry_price : pos.min_price;
     rec.btc_price_at_exit = btc.current_price;
@@ -156,13 +173,21 @@ struct SharedState {
     int tick_count = 0;
     int64_t start_time = 0;
     polymarket::BtcMarketData btc;
+    std::map<std::string, polymarket::BtcMarketData> coins;
     std::vector<polymarket::Position> positions;
     int consecutive_losses = 0;
     double daily_pnl = 0;
+    bool clob_ws_connected = false;
+    int clob_ws_subscribed = 0;
+    int loaded_market_count = 0;
+    int entry_window_market_count = 0;
+    int tradable_market_count = 0;
+    int held_market_count = 0;
     // 当前活跃市场的 UP/DOWN quotes（dashboard 显示）
     double up_bid = 0, up_ask = 0;
     double down_bid = 0, down_ask = 0;
     std::string market_question;
+    json markets = json::array();
 };
 
 static int next_position_id = 1;
@@ -292,9 +317,21 @@ int main(int argc, char* argv[]) {
     }
 
     // 初始化模块
-    polymarket::BinanceFeed binance(cfg.network.proxy_url);
+    std::map<std::string, std::unique_ptr<polymarket::BinanceFeed>> binance_feeds;
+    for (const auto& coin : cfg.coins) {
+        binance_feeds[coin.coin] = std::make_unique<polymarket::BinanceFeed>(cfg.network.proxy_url);
+    }
     polymarket::MarketFeed market_feed(cfg);
-    polymarket::Strategy strategy(cfg);
+    polymarket::QuoteCache quote_cache;
+    polymarket::ClobWsFeed clob_ws(cfg.polymarket.clob_ws_url,
+                                   cfg.network.proxy_url, quote_cache);
+    clob_ws.start();
+    std::map<std::string, polymarket::Strategy> strategies;
+    std::map<std::string, polymarket::CoinStrategyConfig> coin_cfg;
+    for (const auto& coin : cfg.coins) {
+        strategies.emplace(coin.coin, polymarket::Strategy(cfg, coin.coin));
+        coin_cfg[coin.coin] = coin;
+    }
     polymarket::RiskManager risk(cfg);
     polymarket::TradeJournal journal("./logs/trades.jsonl");
 
@@ -329,6 +366,12 @@ int main(int argc, char* argv[]) {
         j["open_positions"] = static_cast<int>(state.positions.size());
         j["consecutive_losses"] = state.consecutive_losses;
         j["daily_pnl"] = state.daily_pnl;
+        j["clob_ws_connected"] = state.clob_ws_connected;
+        j["clob_ws_subscribed"] = state.clob_ws_subscribed;
+        j["loaded_market_count"] = state.loaded_market_count;
+        j["entry_window_market_count"] = state.entry_window_market_count;
+        j["tradable_market_count"] = state.tradable_market_count;
+        j["held_market_count"] = state.held_market_count;
         j["account_balance"] = display_balance();
         // 当前活跃市场的 UP/DOWN quotes（dashboard metric 显示）
         j["up_bid"]   = state.up_bid;
@@ -336,6 +379,20 @@ int main(int argc, char* argv[]) {
         j["down_bid"] = state.down_bid;
         j["down_ask"] = state.down_ask;
         j["market_question"] = state.market_question;
+        j["markets"] = state.markets;
+        json coins_j = json::array();
+        for (const auto& [sym, md] : state.coins) {
+            json cj;
+            cj["coin"] = sym;
+            cj["price"] = md.current_price;
+            cj["strike"] = md.strike_price;
+            cj["deviation_pct"] = md.deviation_pct;
+            cj["current_vol"] = md.current_1h_vol;
+            cj["avg_vol"] = md.avg_24h_vol;
+            cj["minutes_remaining"] = md.minutes_remaining;
+            coins_j.push_back(cj);
+        }
+        j["coins"] = coins_j;
 
         // 计算持仓汇总：买入成本、未实现盈亏
         double total_cost = 0;
@@ -364,6 +421,8 @@ int main(int argc, char* argv[]) {
         for (const auto& p : state.positions) {
             json pj;
             pj["id"] = p.id;
+            pj["coin"] = p.coin;
+            pj["regime"] = regime_name(p.regime);
             pj["side"] = (p.side == polymarket::Side::UP) ? "UP" : "DOWN";
             pj["entry_price"] = p.entry_price;
             pj["current_price"] = p.current_price;
@@ -387,6 +446,8 @@ int main(int argc, char* argv[]) {
             json j;
             j["id"] = t.id;
             j["mode"] = t.mode.empty() ? "dry_run" : t.mode;  // 老记录默认 dry_run
+            j["coin"] = t.coin.empty() ? "BTC" : t.coin;
+            j["regime"] = t.regime;
             j["market"] = t.market_question;
             j["side"] = t.side;
             j["entry_time"] = t.entry_time;
@@ -824,57 +885,211 @@ int main(int argc, char* argv[]) {
     reject_agg.last_flush_ms = now_ms();
 
     // === 策略主循环 ===
-    double last_up_ask = 0, last_down_ask = 0;
-    std::string last_market_slug;  // 跟踪市场切换，检测新 K线
+    struct LastQuote {
+        double up_bid = 0, up_ask = 0, down_bid = 0, down_ask = 0;
+        std::string question;
+    };
+    std::map<std::string, LastQuote> last_quotes;
+    std::map<std::string, int64_t> last_candle_open_by_coin;
+    std::map<std::string, int64_t> binance_retry_after_ms;
+    int64_t last_global_candle_open = 0;
     while (g_running) {
         try {
             // R-V2.7: LIVE 模式每 5min 刷一次真实 cash（节流，避免 rate limit）
             if (live_trader) live_trader->refresh_balance_if_stale(5 * 60 * 1000);
 
-            auto btc = binance.fetch();
+            std::map<std::string, polymarket::BtcMarketData> market_data;
+            int64_t newest_candle_open = 0;
+            struct CoinFetchResult {
+                std::string coin;
+                bool ok = false;
+                polymarket::BtcMarketData data;
+                std::string error;
+            };
+            std::vector<std::future<CoinFetchResult>> feed_futures;
+            int64_t feed_now = now_ms();
+            for (const auto& coin : cfg.coins) {
+                auto retry_it = binance_retry_after_ms.find(coin.coin);
+                if (retry_it != binance_retry_after_ms.end() && retry_it->second > feed_now) {
+                    spdlog::debug("{} feed cooling down after previous error", coin.coin);
+                    continue;
+                }
+                auto feed_it = binance_feeds.find(coin.coin);
+                if (feed_it == binance_feeds.end()) continue;
+                auto* feed = feed_it->second.get();
+                feed_futures.push_back(std::async(std::launch::async, [feed, coin]() {
+                    CoinFetchResult result;
+                    result.coin = coin.coin;
+                    try {
+                        result.data = feed->fetch(coin.coin, coin.binance_symbol);
+                        result.ok = true;
+                    } catch (const std::exception& e) {
+                        result.error = e.what();
+                    }
+                    return result;
+                }));
+            }
+            for (auto& fut : feed_futures) {
+                auto result = fut.get();
+                if (!result.ok) {
+                    spdlog::warn("{} feed error: {}", result.coin, result.error);
+                    int64_t cooldown_ms = result.error.find("status=400") != std::string::npos
+                        ? 5 * 60 * 1000
+                        : 30 * 1000;
+                    binance_retry_after_ms[result.coin] = now_ms() + cooldown_ms;
+                    continue;
+                }
+                const auto& md = result.data;
+                market_data[result.coin] = md;
+                binance_retry_after_ms.erase(result.coin);
+                if (md.candle_open_time > newest_candle_open) {
+                    newest_candle_open = md.candle_open_time;
+                }
+                auto last_it = last_candle_open_by_coin.find(result.coin);
+                if (last_it != last_candle_open_by_coin.end() &&
+                    last_it->second != md.candle_open_time) {
+                    risk.reset_candle(result.coin);
+                    spdlog::info("New candle [{}]: reset per-coin/global hour trade flags",
+                                 result.coin);
+                }
+                last_candle_open_by_coin[result.coin] = md.candle_open_time;
+            }
+            if (market_data.empty()) {
+                throw std::runtime_error("no coin market data fetched");
+            }
+            if (last_global_candle_open != 0 && newest_candle_open != 0 &&
+                newest_candle_open != last_global_candle_open) {
+                risk.reset_global_hour();
+                spdlog::info("New global hour: reset global trade counters");
+            }
+            if (newest_candle_open != 0) {
+                last_global_candle_open = newest_candle_open;
+            }
+            auto btc_it = market_data.find("BTC");
+            auto btc = btc_it != market_data.end() ? btc_it->second : market_data.begin()->second;
 
             // 更新共享状态
             {
                 std::lock_guard<std::mutex> lock(state.mu);
                 state.btc = btc;
+                state.coins = market_data;
                 state.tick_count++;
                 state.consecutive_losses = risk.consecutive_losses();
                 state.daily_pnl = risk.daily_pnl();
+                state.clob_ws_connected = clob_ws.connected();
+                state.clob_ws_subscribed = static_cast<int>(clob_ws.subscribed_count());
             }
 
-            market_feed.fetch_markets();
+            market_feed.fetch_markets(cfg.coins);
+            auto active_token_ids = market_feed.active_token_ids();
+            clob_ws.update_subscriptions(active_token_ids);
+            const int64_t quote_max_age_ms = live_trader ? 5000 : 10000;
+            market_feed.apply_cached_quotes(quote_cache, now_ms(), quote_max_age_ms);
             if (market_feed.market_count() == 0) {
+                {
+                    std::lock_guard<std::mutex> lock(state.mu);
+                    state.loaded_market_count = 0;
+                    state.entry_window_market_count = 0;
+                    state.tradable_market_count = 0;
+                    state.held_market_count = 0;
+                    state.markets = json::array();
+                }
                 spdlog::info("#{} | No active markets, waiting 30s...", state.tick_count);
                 for (int i = 0; i < 30 && g_running; i++)
                     std::this_thread::sleep_for(std::chrono::seconds(1));
                 continue;
             }
 
-            // 检测 K线 切换（市场 slug 变了 = 新一小时）
-            for (const auto& [cid, entry] : market_feed.markets()) {
-                if (last_market_slug != entry.market.market_slug) {
-                    if (!last_market_slug.empty()) {
-                        risk.reset_candle();
-                        spdlog::info("New candle: {} → reset stop flag", entry.market.market_slug);
+            auto coin_for_market = [&](const polymarket::MarketEntry& entry) -> std::string {
+                for (const auto& coin : cfg.coins) {
+                    if (entry.market.market_slug.rfind(coin.hourly_slug_prefix, 0) == 0) {
+                        return coin.coin;
                     }
-                    last_market_slug = entry.market.market_slug;
                 }
-                break;  // 只看第一个市场
+                return "BTC";
+            };
+            {
+                std::lock_guard<std::mutex> lock(state.mu);
+                state.markets = json::array();
+                state.loaded_market_count = static_cast<int>(market_feed.market_count());
+                state.entry_window_market_count = 0;
+                state.tradable_market_count = 0;
+                state.held_market_count = 0;
             }
 
             // 遍历市场，刷新订单簿，评估信号
             for (const auto& [cid, entry] : market_feed.markets()) {
                 if (!g_running) break;
+                std::string coin = coin_for_market(entry);
+                auto data_it = market_data.find(coin);
+                auto strat_it = strategies.find(coin);
+                auto cfg_it = coin_cfg.find(coin);
+                if (data_it == market_data.end() || strat_it == strategies.end() ||
+                    cfg_it == coin_cfg.end()) {
+                    continue;
+                }
+                const auto& md = data_it->second;
 
-                market_feed.refresh_order_book(cid);
+                bool has_open_position = false;
+                std::set<std::string> position_tokens;
+                for (const auto& p : positions) {
+                    if (!p.closed && p.condition_id == cid) {
+                        has_open_position = true;
+                        position_tokens.insert(p.token_id);
+                    }
+                }
+                bool entry_window = md.minutes_remaining >= 25 && md.minutes_remaining <= 45;
+                if (entry_window) {
+                    std::lock_guard<std::mutex> lock(state.mu);
+                    state.entry_window_market_count++;
+                }
+                if (has_open_position) {
+                    std::lock_guard<std::mutex> lock(state.mu);
+                    state.held_market_count++;
+                }
+                if (!entry_window && !has_open_position) {
+                    continue;
+                }
+
+                market_feed.apply_cached_quotes(quote_cache, now_ms(), quote_max_age_ms);
                 auto updated = market_feed.get_market(cid);
-                if (!updated || updated->best_prices.size() < 2) continue;
-
+                if (!updated) continue;
                 auto quotes = extract_quotes(*updated);
-                if (quotes.up_ask <= 0 && quotes.down_ask <= 0) continue;
+                auto quote_now = now_ms();
+                bool up_fresh = !quotes.up_token_id.empty() &&
+                    quote_cache.is_fresh(quotes.up_token_id, quote_now, quote_max_age_ms);
+                bool down_fresh = !quotes.down_token_id.empty() &&
+                    quote_cache.is_fresh(quotes.down_token_id, quote_now, quote_max_age_ms);
+                bool need_rest_quote = false;
+                if (has_open_position) {
+                    for (const auto& token_id : position_tokens) {
+                        if (!quote_cache.is_fresh(token_id, quote_now, quote_max_age_ms)) {
+                            need_rest_quote = true;
+                            break;
+                        }
+                    }
+                } else if (!up_fresh || !down_fresh || quotes.up_ask <= 0 || quotes.down_ask <= 0) {
+                    need_rest_quote = true;
+                }
 
-                last_up_ask = quotes.up_ask;
-                last_down_ask = quotes.down_ask;
+                if (need_rest_quote) {
+                    bool rest_ok = has_open_position
+                        ? market_feed.refresh_order_book(cid, position_tokens)
+                        : market_feed.refresh_order_book(cid);
+                    if (!rest_ok) {
+                        reject_agg.add("quote_stale:" + coin, md.deviation_pct);
+                        continue;
+                    }
+                    updated = market_feed.get_market(cid);
+                    if (!updated) continue;
+                    quotes = extract_quotes(*updated);
+                }
+
+                if (!has_open_position && updated->best_prices.size() < 2) continue;
+                if (!has_open_position && (quotes.up_ask <= 0 || quotes.down_ask <= 0)) continue;
+
+                last_quotes[coin] = {quotes.up_bid, quotes.up_ask, quotes.down_bid,
+                                     quotes.down_ask, entry.market.question};
 
                 // 同步当前 market quotes 到 SharedState（dashboard 显示用）
                 {
@@ -884,30 +1099,89 @@ int main(int argc, char* argv[]) {
                     state.down_bid        = quotes.down_bid;
                     state.down_ask        = quotes.down_ask;
                     state.market_question = entry.market.question;
+                    json row;
+                    row["coin"] = coin;
+                    row["question"] = entry.market.question;
+                    row["up_bid"] = quotes.up_bid;
+                    row["up_ask"] = quotes.up_ask;
+                    row["down_bid"] = quotes.down_bid;
+                    row["down_ask"] = quotes.down_ask;
+                    row["deviation_pct"] = md.deviation_pct;
+                    row["minutes_remaining"] = md.minutes_remaining;
+                    state.markets.push_back(row);
+                    state.tradable_market_count = static_cast<int>(state.markets.size());
                 }
 
-                spdlog::debug("Market: {} | Up: {:.3f}/{:.3f} | Down: {:.3f}/{:.3f}",
-                              entry.market.question,
+                spdlog::debug("Market [{}]: {} | Up: {:.3f}/{:.3f} | Down: {:.3f}/{:.3f}",
+                              coin, entry.market.question,
                               quotes.up_bid, quotes.up_ask,
                               quotes.down_bid, quotes.down_ask);
 
-                auto sig = strategy.evaluate_entry(
-                    btc, quotes.up_ask, quotes.down_ask,
+                if (has_open_position) {
+                    continue;
+                }
+
+                if (live_trader && coin != "BTC") {
+                    reject_agg.add("live_btc_only:" + coin, md.deviation_pct);
+                    continue;
+                }
+
+                if (live_trader && !cfg_it->second.live_enabled) {
+                    reject_agg.add("live_coin_disabled:" + coin, md.deviation_pct);
+                    continue;
+                }
+
+                auto sig = strat_it->second.evaluate_entry(
+                    md, quotes.up_ask, quotes.down_ask,
                     quotes.up_token_id, quotes.down_token_id,
                     cid, entry.market.question,
-                    btc.minutes_remaining);
+                    md.minutes_remaining);
 
                 if (sig.valid) {
+                    if (sig.regime == polymarket::StrategyRegime::QUIET_REVERSION) {
+                        double token_spread = sig.side == polymarket::Side::UP
+                            ? quotes.up_ask - quotes.up_bid
+                            : quotes.down_ask - quotes.down_bid;
+                        if (token_spread > cfg_it->second.max_spread) {
+                            reject_agg.add("quiet_token_spread_wide:" + coin, md.deviation_pct);
+                            continue;
+                        }
+                    }
                     std::string risk_reject;
                     if (risk.can_open_position(sig, risk_reject)) {
-                        double shares = risk.compute_position_size();  // 固定 5 shares
-                        double size = shares * sig.entry_price;
+                        if (live_trader) {
+                            bool rest_ok = market_feed.refresh_order_book(cid);
+                            updated = market_feed.get_market(cid);
+                            if (!rest_ok || !updated) {
+                                spdlog::warn("LIVE entry skipped [{}]: pre-order quote refresh failed",
+                                             coin);
+                                continue;
+                            }
+                            quotes = extract_quotes(*updated);
+                            auto fresh_sig = strat_it->second.evaluate_entry(
+                                md, quotes.up_ask, quotes.down_ask,
+                                quotes.up_token_id, quotes.down_token_id,
+                                cid, entry.market.question,
+                                md.minutes_remaining);
+                            if (!fresh_sig.valid || fresh_sig.side != sig.side ||
+                                fresh_sig.regime != sig.regime ||
+                                fresh_sig.token_id != sig.token_id) {
+                                spdlog::warn("LIVE entry skipped [{}]: signal changed after quote refresh",
+                                             coin);
+                                continue;
+                            }
+                            sig = fresh_sig;
+                        }
+                        double shares = sig.shares;
+                        double size = sig.size_usdc;
                         // 入场是限价 ask-1¢ 挂单，maker 角色，免 trading fee
                         double fee = calc_fee(shares, sig.entry_price, /*is_taker=*/false, cfg.fees);
 
                         polymarket::Position pos;
                         pos.id = "P" + std::to_string(next_position_id++);
                         pos.side = sig.side;
+                        pos.regime = sig.regime;
+                        pos.coin = sig.coin;
                         pos.token_id = sig.token_id;
                         pos.condition_id = sig.condition_id;
                         pos.market_question = sig.market_question;
@@ -915,14 +1189,14 @@ int main(int argc, char* argv[]) {
                         pos.current_price = sig.market_ask;
                         pos.size_usdc = size;
                         pos.shares = shares;
-                        pos.btc_price_at_entry = btc.current_price;
-                        pos.btc_strike_at_entry = btc.strike_price;
-                        pos.entry_vol = btc.current_1h_vol;
-                        pos.avg_vol = btc.avg_24h_vol;
+                        pos.btc_price_at_entry = md.current_price;
+                        pos.btc_strike_at_entry = md.strike_price;
+                        pos.entry_vol = md.current_1h_vol;
+                        pos.avg_vol = md.avg_24h_vol;
                         pos.entry_fee = fee;
                         pos.entry_time = now_ms();
-                        pos.minutes_remaining_at_entry = btc.minutes_remaining;
-                        pos.tp_levels = strategy.compute_tp_levels(sig.entry_price);
+                        pos.minutes_remaining_at_entry = md.minutes_remaining;
+                        pos.tp_levels = strat_it->second.compute_tp_levels(sig.entry_price, sig.regime);
 
                         // Analytics: MFE/MAE 初始化
                         pos.max_price = sig.entry_price;
@@ -1011,7 +1285,7 @@ int main(int argc, char* argv[]) {
                                 pos.size_usdc   = real_shares * real_entry;
                                 // 重算 V2 maker fee（=0）+ TP/MFE 基线，确保后续止盈与 stop 都按真实成本评估
                                 pos.entry_fee   = calc_fee(real_shares, real_entry, /*is_taker=*/false, cfg.fees);
-                                pos.tp_levels   = strategy.compute_tp_levels(real_entry);
+                                pos.tp_levels   = strat_it->second.compute_tp_levels(real_entry, pos.regime);
                                 pos.max_price   = real_entry;
                                 pos.min_price   = real_entry;
                                 pos.mfe_at_5min  = real_entry;
@@ -1031,24 +1305,29 @@ int main(int argc, char* argv[]) {
                         }
 
                         positions.push_back(pos);
-                        risk.add_position();
+                        risk.add_position(pos.coin, pos.regime);
                         risk.deduct_balance(size + fee);  // 动态余额：扣除成本+买入手续费
 
-                        spdlog::info("OPEN [{}] {} {} @ {:.3f} | ${:.2f} ({} shares) | fee=${:.2f} | balance=${:.2f}",
-                                     cfg.strategy.mode, pos.id,
+                        spdlog::info("OPEN [{}] {} [{}:{}] {} @ {:.3f} | ${:.2f} ({:.4f} shares) | fee=${:.2f} | balance=${:.2f}",
+                                     cfg.strategy.mode, pos.id, pos.coin, regime_name(pos.regime),
                                      (pos.side == polymarket::Side::UP ? "UP" : "DOWN"),
                                      pos.entry_price, size, shares, fee, display_balance());
                     } else {
-                        spdlog::debug("Signal blocked: {}", risk_reject);
+                        reject_agg.add(risk_reject, md.deviation_pct);
                     }
                 } else if (!sig.reject_reason.empty()) {
-                    reject_agg.add(sig.reject_reason, btc.deviation_pct);
+                    reject_agg.add(sig.reject_reason, md.deviation_pct);
                 }
             }
 
             // 管理现有持仓
             for (auto& pos : positions) {
                 if (pos.closed || !g_running) continue;
+                auto pos_data_it = market_data.find(pos.coin);
+                if (pos_data_it == market_data.end()) continue;
+                const auto& pos_md = pos_data_it->second;
+                auto pos_strategy_it = strategies.find(pos.coin);
+                if (pos_strategy_it == strategies.end()) continue;
 
                 auto updated = market_feed.get_market(pos.condition_id);
                 if (!updated) {
@@ -1095,7 +1374,7 @@ int main(int argc, char* argv[]) {
                     rec.exit_reason = "expired";
                     rec.realized_pnl = pnl;  // 只记本次卖出的 P&L，不是累积
                     rec.fee_paid = exit_fee + entry_fee_portion;
-                    fill_analytics(rec, pos, btc, cfg.strategy.mode);
+                    fill_analytics(rec, pos, pos_md, cfg.strategy.mode);
                     journal.record(rec);
                     continue;
                 }
@@ -1203,7 +1482,7 @@ int main(int argc, char* argv[]) {
                         tp_rec.exit_reason = "tp" + std::to_string(tp.tier);
                         tp_rec.realized_pnl = pnl;
                         tp_rec.fee_paid = exit_fee + entry_fee_portion;
-                        fill_analytics(tp_rec, pos, btc, cfg.strategy.mode);
+                        fill_analytics(tp_rec, pos, pos_md, cfg.strategy.mode);
                         journal.record(tp_rec);
                     }
                 }
@@ -1220,7 +1499,8 @@ int main(int argc, char* argv[]) {
                 }
 
                 // 检查止损
-                auto exit_sig = strategy.evaluate_exit(pos, current_price, btc, btc.minutes_remaining);
+                auto exit_sig = pos_strategy_it->second.evaluate_exit(
+                    pos, current_price, pos_md, pos_md.minutes_remaining);
                 if (exit_sig.should_exit) {
                     double remaining_shares = pos.shares * pos.shares_remaining_pct;
 
@@ -1267,10 +1547,11 @@ int main(int argc, char* argv[]) {
 
                     // §三 止损后本场不再交易（价格止损 / 时间止损 / 移动止盈回撤 / 死水早退都算止损出场）
                     if (exit_sig.reason == "stop_price" || exit_sig.reason == "stop_time" ||
+                        exit_sig.reason == "stop_btc" ||
                         exit_sig.reason == "trailing_stop" || exit_sig.reason == "dead_water_exit") {
-                        risk.set_candle_stopped();
-                        spdlog::warn("Candle stopped: {} triggered, no more trades this candle",
-                                     exit_sig.reason);
+                        risk.set_candle_stopped(pos.coin);
+                        spdlog::warn("Candle stopped [{}]: {} triggered, no more trades this candle",
+                                     pos.coin, exit_sig.reason);
                     }
 
                     if (pnl > 0) risk.record_profit(pnl);
@@ -1301,18 +1582,18 @@ int main(int argc, char* argv[]) {
                     rec.exit_reason = exit_sig.reason;
                     rec.realized_pnl = pnl;  // 只记本次卖出的 P&L，不是累积
                     rec.fee_paid = exit_fee + entry_fee_portion;
-                    fill_analytics(rec, pos, btc, cfg.strategy.mode);
+                    fill_analytics(rec, pos, pos_md, cfg.strategy.mode);
 
                     // §五.1b dead_water 埋点（Step 2.23）：触发瞬间的市场上下文
                     // 用于 20+ 笔后回归是否要加 BTC 方向 / vol 条件
                     if (exit_sig.reason == "dead_water_exit") {
-                        rec.dw_btc_dev_pct = btc.deviation_pct;
-                        rec.dw_vol_ratio   = (btc.avg_24h_vol > 1e-9)
-                                             ? (btc.current_1h_vol / btc.avg_24h_vol) : 0.0;
+                        rec.dw_btc_dev_pct = pos_md.deviation_pct;
+                        rec.dw_vol_ratio   = (pos_md.avg_24h_vol > 1e-9)
+                                             ? (pos_md.current_1h_vol / pos_md.avg_24h_vol) : 0.0;
                         // dev_favors：BTC dev 方向是否帮持仓方向获胜
                         // UP 仓位希望 BTC > strike (dev>0)；DOWN 仓位希望 BTC < strike (dev<0)
-                        rec.dw_dev_favors = (pos.side == polymarket::Side::UP && btc.deviation_pct > 0) ||
-                                            (pos.side == polymarket::Side::DOWN && btc.deviation_pct < 0);
+                        rec.dw_dev_favors = (pos.side == polymarket::Side::UP && pos_md.deviation_pct > 0) ||
+                                            (pos.side == polymarket::Side::DOWN && pos_md.deviation_pct < 0);
                         // 触发瞬间 spread（我方 token 的 ask - bid）
                         auto bp_it = updated->best_prices.find(pos.token_id);
                         if (bp_it != updated->best_prices.end()) {
@@ -1373,18 +1654,35 @@ int main(int argc, char* argv[]) {
 
             // 紧凑状态行
             if (positions.empty()) {
-                spdlog::info("#{} | {}min | BTC ${:.0f} {:+.2f}% | Up {:.2f} Dn {:.2f} | idle | ${:.2f} | {}s",
-                             state.tick_count, mins,
-                             state.btc.current_price, state.btc.deviation_pct,
-                             last_up_ask, last_down_ask,
+                std::string market_bits;
+                for (const auto& [coin, md] : state.coins) {
+                    auto qit = last_quotes.find(coin);
+                    if (!market_bits.empty()) market_bits += " | ";
+                    if (qit != last_quotes.end()) {
+                        market_bits += fmt::format("{} ${:.2f} {:+.2f}% U{:.2f}/D{:.2f}",
+                                                   coin, md.current_price, md.deviation_pct,
+                                                   qit->second.up_ask, qit->second.down_ask);
+                    } else {
+                        market_bits += fmt::format("{} ${:.2f} {:+.2f}%",
+                                                   coin, md.current_price, md.deviation_pct);
+                    }
+                }
+                spdlog::info("#{} | {}min | {} | idle | WS:{}:{} | ${:.2f} | {}s",
+                             state.tick_count, mins, market_bits,
+                             state.clob_ws_connected ? "on" : "off",
+                             state.clob_ws_subscribed,
                              display_balance(), sleep_sec);
             } else {
                 for (const auto& p : positions) {
                     double chg_pct = p.entry_price > 0 ? (p.current_price - p.entry_price) / p.entry_price * 100 : 0;
-                    spdlog::info("#{} | {}min | BTC ${:.0f} {:+.2f}% | {} {} {:.2f}->{:.2f} {:+.0f}% MFE:{:.2f} rem:{:.0f}% | ${:.2f} | {}s",
+                    auto md_it = state.coins.find(p.coin);
+                    double px = md_it != state.coins.end() ? md_it->second.current_price : 0;
+                    double dev = md_it != state.coins.end() ? md_it->second.deviation_pct : 0;
+                    spdlog::info("#{} | {}min | {} ${:.2f} {:+.2f}% | {} [{}:{}] {} {:.2f}->{:.2f} {:+.0f}% MFE:{:.2f} rem:{:.0f}% | ${:.2f} | {}s",
                                  state.tick_count, mins,
-                                 state.btc.current_price, state.btc.deviation_pct,
-                                 p.id, (p.side == polymarket::Side::UP ? "UP" : "DN"),
+                                 p.coin, px, dev,
+                                 p.id, p.coin, regime_name(p.regime),
+                                 (p.side == polymarket::Side::UP ? "UP" : "DN"),
                                  p.entry_price, p.current_price, chg_pct,
                                  p.max_price, p.shares_remaining_pct * 100,
                                  display_balance(), sleep_sec);
@@ -1410,6 +1708,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    clob_ws.stop();
     api.stop();
     journal.print_summary();
     spdlog::info("Done.");

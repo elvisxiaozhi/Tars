@@ -58,6 +58,8 @@ set(SOURCES
     src/utils/config.cpp
     src/core/market_feed.cpp
     src/core/binance_feed.cpp
+    src/core/clob_ws_feed.cpp
+    src/core/quote_cache.cpp
     src/core/strategy.cpp
     src/core/risk_manager.cpp
     src/core/trade_journal.cpp
