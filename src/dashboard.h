@@ -174,7 +174,7 @@ inline const std::string DASHBOARD_HTML = R"html(
       <tr>
         <th>Time</th>
         <th>Coin</th>
-        <th>ID</th>
+        <th>Period</th>
         <th>Side</th>
         <th>Entry</th>
         <th>Exit</th>
@@ -379,6 +379,11 @@ function formatPrice(v) { return v ? '$' + Number(v).toLocaleString('en-US', {mi
 function formatPct(v) { return v !== undefined ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '--'; }
 function formatPnl(v) { return (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2); }
 function pnlClass(v) { return v > 0 ? 'positive' : v < 0 ? 'negative' : 'neutral'; }
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
 function inferCoin(t) {
   if (t.coin) return String(t.coin).toUpperCase();
   const m = (t.market || '').toLowerCase();
@@ -392,6 +397,24 @@ function inferCoin(t) {
 }
 function normalizeTradeId(id) {
   return String(id || '--').replace(/-TP\d+$/i, '');
+}
+function tradePeriodKey(t) {
+  const coin = inferCoin(t);
+  const market = String(t.market || '').trim();
+  if (market) return coin + '|' + market;
+  const ts = t.entry_time || t.exit_time || 0;
+  const bucket = ts ? Math.floor(ts / 3600000) : normalizeTradeId(t.id);
+  return coin + '|hour|' + bucket;
+}
+function shortMarketLabel(market, fallbackTime) {
+  const text = String(market || '').trim();
+  if (!text) return fallbackTime ? formatTime(fallbackTime) : '--';
+  const cleaned = text
+    .replace(/^will\s+/i, '')
+    .replace(/\s+be\s+above\s+/i, ' > ')
+    .replace(/\s+on\s+/i, ' ')
+    .replace(/\?/g, '');
+  return cleaned.length > 38 ? cleaned.slice(0, 35) + '...' : cleaned;
 }
 function reasonInfo(reason) {
   const r = String(reason || '').toLowerCase();
@@ -419,6 +442,7 @@ function renderReason(reason) {
 function summarizeTradeGroup(items) {
   const sorted = items.slice().sort((a, b) => (a.exit_time || 0) - (b.exit_time || 0));
   const first = sorted[0] || {};
+  const coin = inferCoin(first);
   const shares = sorted.reduce((s, t) => s + (t.shares || 0), 0);
   const cost = sorted.reduce((s, t) => s + ((t.shares || 0) * (t.entry_price || 0)), 0);
   const revenue = sorted.reduce((s, t) => s + ((t.shares || 0) * (t.exit_price || 0)), 0);
@@ -431,10 +455,16 @@ function summarizeTradeGroup(items) {
   const start = first.entry_time || sorted[0]?.exit_time || 0;
   const end = sorted[sorted.length - 1]?.exit_time || start;
   const reasons = [...new Set(sorted.map(t => t.exit_reason || '').filter(Boolean))];
+  const sides = [...new Set(sorted.map(t => t.side || '').filter(Boolean))];
+  const market = first.market || '';
   return {
     id: normalizeTradeId(first.id),
-    coin: inferCoin(first),
-    side: first.side || '--',
+    label: sorted.length > 1
+      ? coin + ' · ' + shortMarketLabel(market, start) + ' · ' + sorted.length + ' sells'
+      : normalizeTradeId(first.id),
+    coin,
+    side: sides.length === 1 ? sides[0] : 'MIXED',
+    market,
     entry_price: avgEntry,
     exit_price: avgExit,
     shares,
@@ -676,7 +706,7 @@ async function refresh() {
 
     const groupedMap = new Map();
     for (const t of filtered) {
-      const key = normalizeTradeId(t.id);
+      const key = tradePeriodKey(t);
       if (!groupedMap.has(key)) groupedMap.set(key, []);
       groupedMap.get(key).push(t);
     }
@@ -694,7 +724,7 @@ async function refresh() {
       html += '<tr>';
       html += '<td>' + formatTime(t.exit_time || t.entry_time) + '</td>';
       html += '<td>' + t.coin + '</td>';
-      html += '<td>' + t.id + (splitCount > 1 ? ' <span style="color:#7d8590;">(' + splitCount + ' exits)</span>' : '') + '</td>';
+      html += '<td title="' + esc(t.market || t.id) + '">' + esc(t.label) + '</td>';
       html += '<td class="side-' + String(t.side).toLowerCase() + '">' + t.side + '</td>';
       html += '<td>' + t.entry_price.toFixed(3) + '</td>';
       html += '<td>' + t.exit_price.toFixed(3) + '</td>';
@@ -713,12 +743,15 @@ async function refresh() {
       html += '</tr>';
       if (splitCount > 1) {
         html += '<tr class="trade-detail-row"><td colspan="15">';
-        html += '<details class="trade-detail"><summary>查看分批卖出明细</summary>';
-        html += '<table><thead><tr><th>Time</th><th>Exit</th><th>Shares</th><th>Revenue</th><th>Fee</th><th>Reason</th><th>P&L</th></tr></thead><tbody>';
+        html += '<details class="trade-detail"><summary>展开 ' + t.coin + ' 当前时间段的 ' + splitCount + ' 笔卖出</summary>';
+        html += '<table><thead><tr><th>Time</th><th>ID</th><th>Side</th><th>Entry</th><th>Exit</th><th>Shares</th><th>Revenue</th><th>Fee</th><th>Reason</th><th>P&L</th></tr></thead><tbody>';
         for (const part of t.items) {
           const partRevenue = (part.shares || 0) * (part.exit_price || 0);
           html += '<tr>';
           html += '<td>' + formatTime(part.exit_time || part.entry_time) + '</td>';
+          html += '<td>' + normalizeTradeId(part.id) + '</td>';
+          html += '<td class="side-' + String(part.side || '').toLowerCase() + '">' + (part.side || '--') + '</td>';
+          html += '<td>' + Number(part.entry_price || 0).toFixed(3) + '</td>';
           html += '<td>' + Number(part.exit_price || 0).toFixed(3) + '</td>';
           html += '<td>' + Number(part.shares || 0).toFixed(1) + '</td>';
           html += '<td>$' + partRevenue.toFixed(3) + '</td>';
