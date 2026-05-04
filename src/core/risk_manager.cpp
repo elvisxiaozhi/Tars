@@ -13,13 +13,14 @@ RiskManager::RiskManager(const AppConfig& cfg)
 
 bool RiskManager::can_open_position(const EntrySignal& sig,
                                      std::string& reject_reason) const {
-    // Live mode keeps the original single-position risk gates.
-    // Dry run is allowed to collect every qualifying signal for analysis.
-    if (live_mode_ && candle_stopped_) {
+    // A stop exit pauses only that coin's current candle. Dry run still needs
+    // this gate to avoid repeatedly sampling the same failed setup.
+    if (candle_stopped_ || stopped_coins_.count(sig.coin) > 0) {
         reject_reason = "candle_stopped: already stop-lossed this candle";
         return false;
     }
 
+    // Live mode keeps the original global single-position risk gate.
     if (live_mode_ && open_positions_ >= max_concurrent_) {
         reject_reason = "max_concurrent: " + std::to_string(open_positions_) +
                         "/" + std::to_string(max_concurrent_);
@@ -35,6 +36,31 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
     }
 
     return true;
+}
+
+void RiskManager::set_candle_stopped(const std::string& coin) {
+    if (coin.empty()) {
+        candle_stopped_ = true;
+        return;
+    }
+    stopped_coins_.insert(coin);
+}
+
+bool RiskManager::is_candle_stopped(const std::string& coin) const {
+    return candle_stopped_ || stopped_coins_.count(coin) > 0;
+}
+
+void RiskManager::reset_candle(const std::string& coin) {
+    if (coin.empty()) {
+        reset_candle();
+        return;
+    }
+    stopped_coins_.erase(coin);
+}
+
+void RiskManager::reset_global_hour() {
+    candle_stopped_ = false;
+    stopped_coins_.clear();
 }
 
 double RiskManager::compute_position_size() const {
@@ -68,6 +94,7 @@ void RiskManager::reset_daily() {
     daily_pnl_ = 0;
     daily_trades_ = 0;
     candle_stopped_ = false;
+    stopped_coins_.clear();
     spdlog::info("RISK: daily stats reset");
 }
 

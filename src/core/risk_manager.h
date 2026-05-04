@@ -1,5 +1,6 @@
 #pragma once
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -26,13 +27,14 @@ public:
 
     // 标记本场（本小时 K线）已止损，禁止再交易
     void set_candle_stopped() { candle_stopped_ = true; }
-    void set_candle_stopped(const std::string&) { set_candle_stopped(); }
+    void set_candle_stopped(const std::string& coin);
     bool is_candle_stopped() const { return candle_stopped_; }
+    bool is_candle_stopped(const std::string& coin) const;
 
     // 新 K线 开始时重置
     void reset_candle() { candle_stopped_ = false; }
-    void reset_candle(const std::string&) { reset_candle(); }
-    void reset_global_hour() {}
+    void reset_candle(const std::string& coin);
+    void reset_global_hour();
 
     // 重置每日统计
     void reset_daily();
@@ -65,6 +67,7 @@ private:
     int daily_trades_ = 0;
     double daily_pnl_ = 0;
     bool candle_stopped_ = false;  // 本场 K线 已止损，禁止再交易
+    std::set<std::string> stopped_coins_;
 };
 
 }  // namespace polymarket
