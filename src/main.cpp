@@ -1,12 +1,14 @@
 #include <chrono>
 #include <csignal>
 #include <ctime>
+#include <algorithm>
 #include <filesystem>
 #include <future>
 #include <map>
 #include <mutex>
 #include <set>
 #include <thread>
+#include <vector>
 
 #include <json.hpp>
 #include <spdlog/fmt/fmt.h>
@@ -1017,11 +1019,27 @@ int main(int argc, char* argv[]) {
                 state.held_market_count = 0;
             }
 
-            std::set<std::string> dry_opened_tokens_this_tick;
+            std::set<std::string> opened_coins_this_tick;
 
             // 遍历市场，刷新订单簿，评估信号
+            std::vector<const polymarket::MarketEntry*> scan_markets;
+            scan_markets.reserve(market_feed.markets().size());
             for (const auto& [cid, entry] : market_feed.markets()) {
+                scan_markets.push_back(&entry);
+            }
+            std::sort(scan_markets.begin(), scan_markets.end(),
+                [&](const auto* a, const auto* b) {
+                    std::string ac = coin_for_market(*a);
+                    std::string bc = coin_for_market(*b);
+                    if (ac == "BTC" && bc != "BTC") return true;
+                    if (bc == "BTC" && ac != "BTC") return false;
+                    return ac < bc;
+                });
+
+            for (const auto* market_entry : scan_markets) {
                 if (!g_running) break;
+                const auto& entry = *market_entry;
+                const auto& cid = entry.market.condition_id;
                 std::string coin = coin_for_market(entry);
                 auto data_it = market_data.find(coin);
                 auto strat_it = strategies.find(coin);
@@ -1033,8 +1051,12 @@ int main(int argc, char* argv[]) {
                 const auto& md = data_it->second;
 
                 bool has_open_position = false;
+                bool has_open_position_for_coin = false;
                 std::set<std::string> position_tokens;
                 for (const auto& p : positions) {
+                    if (!p.closed && p.coin == coin) {
+                        has_open_position_for_coin = true;
+                    }
                     if (!p.closed && p.condition_id == cid) {
                         has_open_position = true;
                         position_tokens.insert(p.token_id);
@@ -1124,6 +1146,11 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
+                if (!live_trader && has_open_position_for_coin) {
+                    reject_agg.add("coin_position_open:" + coin, md.deviation_pct);
+                    continue;
+                }
+
                 if (live_trader && coin != "BTC") {
                     reject_agg.add("live_btc_only:" + coin, md.deviation_pct);
                     continue;
@@ -1141,8 +1168,8 @@ int main(int argc, char* argv[]) {
                     md.minutes_remaining);
 
                 if (sig.valid) {
-                    if (!live_trader && dry_opened_tokens_this_tick.count(sig.token_id) > 0) {
-                        reject_agg.add("dry_duplicate_token_this_tick:" + coin, md.deviation_pct);
+                    if (!live_trader && opened_coins_this_tick.count(coin) > 0) {
+                        reject_agg.add("coin_opened_this_tick:" + coin, md.deviation_pct);
                         continue;
                     }
                     if (sig.regime == polymarket::StrategyRegime::QUIET_REVERSION) {
@@ -1313,7 +1340,7 @@ int main(int argc, char* argv[]) {
 
                         positions.push_back(pos);
                         if (!live_trader) {
-                            dry_opened_tokens_this_tick.insert(pos.token_id);
+                            opened_coins_this_tick.insert(pos.coin);
                         }
                         risk.add_position(pos.coin, pos.regime);
                         risk.deduct_balance(size + fee);  // 动态余额：扣除成本+买入手续费
