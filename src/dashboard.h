@@ -157,6 +157,7 @@ inline const std::string DASHBOARD_HTML = R"html(
       <tr>
         <th>Time</th>
         <th>Mode</th>
+        <th>Coin</th>
         <th>ID</th>
         <th>Side</th>
         <th>Entry</th>
@@ -173,7 +174,7 @@ inline const std::string DASHBOARD_HTML = R"html(
       </tr>
     </thead>
     <tbody id="trades-body">
-      <tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
+      <tr><td colspan="16" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
     </tbody>
   </table>
 </details>
@@ -345,6 +346,17 @@ function formatPrice(v) { return v ? '$' + Number(v).toLocaleString('en-US', {mi
 function formatPct(v) { return v !== undefined ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '--'; }
 function formatPnl(v) { return (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2); }
 function pnlClass(v) { return v > 0 ? 'positive' : v < 0 ? 'negative' : 'neutral'; }
+function inferCoin(t) {
+  if (t.coin) return String(t.coin).toUpperCase();
+  const m = (t.market || '').toLowerCase();
+  if (m.includes('ethereum')) return 'ETH';
+  if (m.includes('solana')) return 'SOL';
+  if (m.includes('xrp')) return 'XRP';
+  if (m.includes('dogecoin')) return 'DOGE';
+  if (m.includes('bnb')) return 'BNB';
+  if (m.includes('hype')) return 'HYPE';
+  return 'BTC';
+}
 function formatTime(ms) {
   if (!ms) return '--';
   const d = new Date(ms);
@@ -483,6 +495,7 @@ async function refresh() {
       html += '<td>' + formatTime(t.exit_time || t.entry_time) + '</td>';
       html += '<td><span class="mode mode-' + (tm === 'live' ? 'live' : 'dry') + '">' +
               (tm === 'live' ? 'LIVE' : 'DRY') + '</span></td>';
+      html += '<td>' + inferCoin(t) + '</td>';
       html += '<td>' + t.id + '</td>';
       html += '<td class="side-' + t.side.toLowerCase() + '">' + t.side + '</td>';
       html += '<td>' + t.entry_price.toFixed(3) + '</td>';
