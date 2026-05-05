@@ -437,8 +437,50 @@ void ExperimentEngine::on_market(const std::string& coin,
     auto strat_it = strategies_.find(coin);
     if (strat_it == strategies_.end()) return;
 
+    auto close_expired = [&](Position& pos) {
+        bool won = (pos.side == Side::UP && md.current_price > pos.btc_strike_at_entry) ||
+                   (pos.side == Side::DOWN && md.current_price <= pos.btc_strike_at_entry);
+        double settlement_price = won ? 1.0 : 0.0;
+        double remaining_shares = pos.shares * pos.shares_remaining_pct;
+        double sell_value = remaining_shares * settlement_price;
+        double cost_basis = remaining_shares * pos.entry_price;
+        double pnl = sell_value - cost_basis;
+        pos.current_price = settlement_price;
+        pos.max_price = std::max(pos.max_price, settlement_price);
+        pos.min_price = std::min(pos.min_price, settlement_price);
+        pos.realized_pnl += pnl;
+        pos.closed = true;
+        pos.close_reason = "expired";
+        balance_ += sell_value;
+
+        TradeRecord rec;
+        rec.id = pos.id;
+        rec.mode = "experiment";
+        rec.coin = pos.coin;
+        rec.regime = regime_name_local(pos.regime);
+        rec.market_question = pos.market_question;
+        rec.side = side_name(pos.side);
+        rec.entry_time = pos.entry_time;
+        rec.exit_time = now_ms;
+        rec.minutes_remaining_at_entry = pos.minutes_remaining_at_entry;
+        rec.entry_price = pos.entry_price;
+        rec.exit_price = settlement_price;
+        rec.size_usdc = remaining_shares * pos.entry_price;
+        rec.shares = remaining_shares;
+        rec.exit_reason = "expired";
+        rec.realized_pnl = pnl;
+        rec.fee_paid = 0;
+        fill_record_analytics(rec, pos, md, now_ms);
+        record_trade(rec);
+    };
+
     for (auto& pos : positions_) {
-        if (pos.closed || pos.coin != coin || pos.condition_id != entry.market.condition_id) continue;
+        if (pos.closed || pos.coin != coin) continue;
+        bool stale_market = pos.condition_id != entry.market.condition_id;
+        if (stale_market || md.minutes_remaining <= 0) {
+            close_expired(pos);
+            continue;
+        }
         double current_price = pos.side == Side::UP ? quotes.up_bid : quotes.down_bid;
         if (current_price <= 0) continue;
         pos.current_price = current_price;
@@ -644,10 +686,12 @@ std::string ExperimentEngine::status_json() const {
         x["coin"] = p.coin;
         x["regime"] = regime_name_local(p.regime);
         x["side"] = side_name(p.side);
+        x["market"] = p.market_question;
         x["entry_price"] = p.entry_price;
         x["current_price"] = p.current_price;
         x["shares"] = p.shares;
         x["remaining_pct"] = p.shares_remaining_pct;
+        x["minutes_remaining_at_entry"] = p.minutes_remaining_at_entry;
         x["max_price"] = p.max_price;
         x["min_price"] = p.min_price;
         pos.push_back(x);

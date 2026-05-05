@@ -603,9 +603,9 @@ function renderExperiment(prefix, expStatus, expTrades) {
       if (positions.length === 0) {
         expPosEl.innerHTML = '<div class="positions-empty">No experiment positions</div>';
       } else {
-        let html = '<table><thead><tr><th>ID</th><th>Coin</th><th>Regime</th><th>Side</th><th>Entry</th><th>Current</th><th>Remaining</th><th>MFE</th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>ID</th><th>Coin</th><th>Market</th><th>Regime</th><th>Side</th><th>Entry</th><th>Current</th><th>Remaining</th><th>MFE</th></tr></thead><tbody>';
         for (const p of positions) {
-          html += '<tr><td>' + p.id + '</td><td>' + p.coin + '</td><td>' + p.regime + '</td><td class="side-' + String(p.side).toLowerCase() + '">' + p.side + '</td><td>' + Number(p.entry_price || 0).toFixed(3) + '</td><td>' + Number(p.current_price || 0).toFixed(3) + '</td><td>' + Number((p.remaining_pct || 0) * 100).toFixed(0) + '%</td><td class="positive">+' + Number(((p.max_price || 0) - (p.entry_price || 0)) * 100).toFixed(1) + 'c</td></tr>';
+          html += '<tr><td>' + p.id + '</td><td>' + p.coin + '</td><td title="' + esc(p.market || '') + '">' + esc(shortMarketLabel(p.market || '', 0)) + '</td><td>' + p.regime + '</td><td class="side-' + String(p.side).toLowerCase() + '">' + p.side + '</td><td>' + Number(p.entry_price || 0).toFixed(3) + '</td><td>' + Number(p.current_price || 0).toFixed(3) + '</td><td>' + Number((p.remaining_pct || 0) * 100).toFixed(0) + '%</td><td class="positive">+' + Number(((p.max_price || 0) - (p.entry_price || 0)) * 100).toFixed(1) + 'c</td></tr>';
         }
         html += '</tbody></table>';
         expPosEl.innerHTML = html;
