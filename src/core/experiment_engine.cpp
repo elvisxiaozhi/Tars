@@ -418,7 +418,7 @@ void ExperimentEngine::reset_global_hour() {
     std::lock_guard<std::mutex> lock(mu_);
     global_trades_this_hour_ = 0;
     quiet_trades_this_hour_ = 0;
-    stop_price_this_hour_ = 0;
+    non_btc_stop_price_this_hour_ = 0;
 }
 
 bool ExperimentEngine::has_open_coin(const std::string& coin) const {
@@ -496,7 +496,7 @@ void ExperimentEngine::on_market(const std::string& coin,
             pos.realized_pnl += pnl;
             pos.closed = true;
             coin_state_[coin].candle_stopped = true;
-            if (exit.reason == "stop_price") stop_price_this_hour_++;
+            if (exit.reason == "stop_price" && coin != "BTC") non_btc_stop_price_this_hour_++;
             balance_ += sell_value - exit_fee;
 
             TradeRecord rec;
@@ -524,8 +524,8 @@ void ExperimentEngine::on_market(const std::string& coin,
     auto& cs = coin_state_[coin];
     if (cs.candle_stopped || cs.candle_traded || has_open_coin(coin)) return;
     if (global_trades_this_hour_ >= cfg_.strategy.max_global_trades_per_hour) return;
-    if (stop_price_this_hour_ >= 3) {
-        reject_counts_["global_stop_price_limit"]++;
+    if (coin != "BTC" && non_btc_stop_price_this_hour_ >= 3) {
+        reject_counts_["non_btc_stop_price_limit"]++;
         return;
     }
 
@@ -687,6 +687,20 @@ std::string ExperimentEngine::trades_json() const {
         j["exit_reason"] = t.exit_reason;
         j["pnl"] = t.realized_pnl;
         arr.push_back(j);
+    }
+    return arr.dump();
+}
+
+std::string ExperimentEngine::all_trades_json() const {
+    nlohmann::json arr = nlohmann::json::array();
+    std::ifstream in(log_path_);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        try {
+            arr.push_back(nlohmann::json::parse(line));
+        } catch (...) {
+        }
     }
     return arr.dump();
 }

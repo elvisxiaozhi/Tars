@@ -78,6 +78,7 @@ public:
     void prune_closed();
     std::string status_json() const;
     std::string trades_json() const;
+    std::string all_trades_json() const;
 
 private:
     struct CoinRiskState {
@@ -103,7 +104,7 @@ private:
     int next_id_ = 1;
     int global_trades_this_hour_ = 0;
     int quiet_trades_this_hour_ = 0;
-    int stop_price_this_hour_ = 0;
+    int non_btc_stop_price_this_hour_ = 0;
     std::string strategy_name_;
     std::string log_path_;
     std::string id_prefix_;

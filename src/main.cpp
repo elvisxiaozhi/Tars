@@ -363,6 +363,7 @@ int main(int argc, char* argv[]) {
         json j;
         j["mode"] = state.mode;
         j["tick_count"] = state.tick_count;
+        j["start_time"] = state.start_time;
         j["btc_price"] = state.btc.current_price;
         j["btc_strike"] = state.btc.strike_price;
         j["btc_deviation_pct"] = state.btc.deviation_pct;
@@ -860,12 +861,20 @@ int main(int argc, char* argv[]) {
         return experiment.trades_json();
     });
 
+    api.on_experiment_all_trades([&]() -> std::string {
+        return experiment.all_trades_json();
+    });
+
     api.on_trend_experiment_status([&]() -> std::string {
         return trend_experiment.status_json();
     });
 
     api.on_trend_experiment_trades([&]() -> std::string {
         return trend_experiment.trades_json();
+    });
+
+    api.on_trend_experiment_all_trades([&]() -> std::string {
+        return trend_experiment.all_trades_json();
     });
 
     // POST /api/shutdown — 优雅停止 bot（前端"Stop Bot"按钮触发）

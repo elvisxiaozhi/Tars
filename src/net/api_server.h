@@ -26,8 +26,10 @@ public:
     void on_analytics(ApiDataCallback cb);
     void on_experiment_status(ApiDataCallback cb);
     void on_experiment_trades(ApiDataCallback cb);
+    void on_experiment_all_trades(ApiDataCallback cb);
     void on_trend_experiment_status(ApiDataCallback cb);
     void on_trend_experiment_trades(ApiDataCallback cb);
+    void on_trend_experiment_all_trades(ApiDataCallback cb);
     // POST /api/shutdown — 触发优雅退出（设 g_running=false → 主循环退出 → emergency_close_all）
     void on_shutdown(ApiDataCallback cb);
 

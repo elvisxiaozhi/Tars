@@ -52,6 +52,11 @@ inline const std::string DASHBOARD_HTML = R"html(
   .trade-detail summary { cursor:pointer; color:#58a6ff; padding:8px 10px; list-style:none; user-select:none; }
   .trade-detail summary::-webkit-details-marker { display:none; }
   .trade-detail[open] summary { border-bottom:1px solid #1e2d3d; }
+  .tabs { display:flex; gap:6px; margin:16px 0; border-bottom:1px solid #1e2d3d; }
+  .tab-btn { cursor:pointer; padding:8px 14px; border:1px solid #30363d; border-bottom:none; background:#111827; color:#c9d1d9; border-radius:6px 6px 0 0; font-size:0.85em; }
+  .tab-btn.active { background:#1f6feb; color:#fff; border-color:#388bfd; }
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
   .uptime { font-size: 0.8em; color: #7d8590; }
   .refresh { font-size: 0.7em; color: #484f58; }
   .pnl-bar { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
@@ -152,6 +157,18 @@ inline const std::string DASHBOARD_HTML = R"html(
 <div class="section">
   <div class="section-title">Markets</div>
   <div id="markets-container"></div>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="main">Main Strategy</button>
+  <button class="tab-btn" data-tab="trend">Trend Follow</button>
+  <button class="tab-btn" data-tab="regime">Regime Experiment</button>
+</div>
+
+<div id="tab-main" class="tab-panel active">
+<div class="section">
+  <div class="section-title">Coin P&L</div>
+  <div id="main-coin-pnl"></div>
 </div>
 
 <!-- Open Positions section 仅在有持仓时显示（P1-4）-->
@@ -293,8 +310,10 @@ inline const std::string DASHBOARD_HTML = R"html(
     </div>
   </details>
 </details>
+</div>
 
-<details class="section" id="experiment-details">
+<div id="tab-regime" class="tab-panel">
+<details class="section" id="experiment-details" open>
   <summary class="section-title" style="cursor:pointer;list-style:none;">
     <span>Experiment</span>
     <span id="exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
@@ -305,12 +324,16 @@ inline const std::string DASHBOARD_HTML = R"html(
     <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="exp-open">--</div></div>
     <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="exp-trades-count">--</div></div>
   </div>
+  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
+  <div id="exp-coin-pnl"></div>
   <div id="exp-regime-stats" style="margin-top:12px;"></div>
   <div id="exp-positions" style="margin-top:12px;"></div>
   <div id="exp-trades" style="margin-top:12px;"></div>
 </details>
+</div>
 
-<details class="section" id="trend-experiment-details">
+<div id="tab-trend" class="tab-panel">
+<details class="section" id="trend-experiment-details" open>
   <summary class="section-title" style="cursor:pointer;list-style:none;">
     <span>Trend Experiment</span>
     <span id="trend-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
@@ -321,10 +344,13 @@ inline const std::string DASHBOARD_HTML = R"html(
     <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="trend-exp-open">--</div></div>
     <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="trend-exp-trades-count">--</div></div>
   </div>
+  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
+  <div id="trend-exp-coin-pnl"></div>
   <div id="trend-exp-regime-stats" style="margin-top:12px;"></div>
   <div id="trend-exp-positions" style="margin-top:12px;"></div>
   <div id="trend-exp-trades" style="margin-top:12px;"></div>
 </details>
+</div>
 
 <script>
 const API_BASE = '';
@@ -351,6 +377,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  const tabButtons = document.querySelectorAll('.tab-btn');
+  const tabPanels = document.querySelectorAll('.tab-panel');
+  function activateTab(tab) {
+    tabButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+    tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === 'tab-' + tab));
+    localStorage.setItem('dashboard.tab', tab);
+  }
+  const savedTab = localStorage.getItem('dashboard.tab') || 'main';
+  activateTab(document.getElementById('tab-' + savedTab) ? savedTab : 'main');
+  tabButtons.forEach(btn => {
+    btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+  });
+
   // 折叠状态恢复（多个 details）
   const persistDetails = (id, defaultOpen=false) => {
     const el = document.getElementById(id);
@@ -367,8 +406,8 @@ document.addEventListener('DOMContentLoaded', () => {
   persistDetails('ad-distribution',       false);
   persistDetails('ad-direction',          false);
   persistDetails('ad-buckets',            false);
-  persistDetails('experiment-details',    false);
-  persistDetails('trend-experiment-details', false);
+  persistDetails('experiment-details',    true);
+  persistDetails('trend-experiment-details', true);
 
   // Stop Bot 按钮
   const stopBtn = document.getElementById('stop-bot-btn');
@@ -591,16 +630,77 @@ function renderExperiment(prefix, expStatus, expTrades) {
   }
 }
 
+function renderCoinPnl(containerId, sessionTrades, allTrades) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+
+  function aggregate(records) {
+    const grouped = new Map();
+    for (const t of records || []) {
+      const key = tradePeriodKey(t);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(t);
+    }
+
+    const byCoin = new Map();
+    for (const items of grouped.values()) {
+      const summary = summarizeTradeGroup(items);
+      const coin = summary.coin || 'BTC';
+      if (!byCoin.has(coin)) {
+        byCoin.set(coin, { coin, pnl: 0, positions: 0, wins: 0, losses: 0, volume: 0 });
+      }
+      const row = byCoin.get(coin);
+      row.pnl += summary.pnl || 0;
+      row.positions += 1;
+      row.volume += summary.cost || 0;
+      if ((summary.pnl || 0) > 0) row.wins += 1;
+      if ((summary.pnl || 0) < 0) row.losses += 1;
+    }
+    return byCoin;
+  }
+
+  const session = aggregate(sessionTrades);
+  const total = aggregate(allTrades);
+  const coins = Array.from(new Set([...session.keys(), ...total.keys()])).sort();
+  if (coins.length === 0) {
+    el.innerHTML = '<div class="positions-empty">No closed trades yet</div>';
+    return;
+  }
+
+  let html = '<table><thead><tr><th>Coin</th><th>Session P&L</th><th>Session Entries</th><th>Session WR</th><th>All-time P&L</th><th>All-time Entries</th><th>All-time WR</th></tr></thead><tbody>';
+  for (const coin of coins) {
+    const s = session.get(coin) || { pnl: 0, positions: 0, wins: 0, losses: 0 };
+    const a = total.get(coin) || { pnl: 0, positions: 0, wins: 0, losses: 0 };
+    const sClosed = s.wins + s.losses;
+    const aClosed = a.wins + a.losses;
+    const sWr = sClosed > 0 ? (s.wins / sClosed * 100).toFixed(1) + '%' : '--';
+    const aWr = aClosed > 0 ? (a.wins / aClosed * 100).toFixed(1) + '%' : '--';
+    html += '<tr>';
+    html += '<td style="font-weight:bold;color:#58a6ff;">' + esc(coin) + '</td>';
+    html += '<td class="' + pnlClass(s.pnl) + '">' + formatPnl(s.pnl) + '</td>';
+    html += '<td>' + s.positions + '</td>';
+    html += '<td>' + sWr + '</td>';
+    html += '<td class="' + pnlClass(a.pnl) + '">' + formatPnl(a.pnl) + '</td>';
+    html += '<td>' + a.positions + '</td>';
+    html += '<td>' + aWr + '</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
 async function refresh() {
-  let [status, trades, stats, analytics, expStatus, expTrades, trendExpStatus, trendExpTrades] = await Promise.all([
+  let [status, trades, stats, analytics, expStatus, expTrades, expAllTrades, trendExpStatus, trendExpTrades, trendExpAllTrades] = await Promise.all([
     fetchJSON('/api/status'),
     fetchJSON('/api/trades'),
     fetchJSON('/api/stats'),
     fetchJSON('/api/analytics'),
     fetchJSON('/api/experiment/status'),
     fetchJSON('/api/experiment/trades'),
+    fetchJSON('/api/experiment/all-trades'),
     fetchJSON('/api/experiment-trend/status'),
-    fetchJSON('/api/experiment-trend/trades')
+    fetchJSON('/api/experiment-trend/trades'),
+    fetchJSON('/api/experiment-trend/all-trades')
   ]);
 
   if (status) {
@@ -697,6 +797,19 @@ async function refresh() {
 
   renderExperiment('exp', expStatus, expTrades);
   renderExperiment('trend-exp', trendExpStatus, trendExpTrades);
+
+  const allMainTrades = Array.isArray(trades) ? trades : [];
+  const filteredMainTrades = (currentFilter === 'all')
+    ? allMainTrades
+    : allMainTrades.filter(t => (t.mode || 'dry_run') === currentFilter);
+  const startTime = status ? Number(status.start_time || 0) : 0;
+  const sessionMainTrades = filteredMainTrades.filter(t => {
+    const ts = Number(t.exit_time || t.entry_time || 0);
+    return !startTime || !ts || ts >= startTime;
+  });
+  renderCoinPnl('main-coin-pnl', sessionMainTrades, filteredMainTrades);
+  renderCoinPnl('exp-coin-pnl', Array.isArray(expTrades) ? expTrades : [], Array.isArray(expAllTrades) ? expAllTrades : (Array.isArray(expTrades) ? expTrades : []));
+  renderCoinPnl('trend-exp-coin-pnl', Array.isArray(trendExpTrades) ? trendExpTrades : [], Array.isArray(trendExpAllTrades) ? trendExpAllTrades : (Array.isArray(trendExpTrades) ? trendExpTrades : []));
 
   if (stats) {
     // 根据 currentFilter 选择数据源（all = 总计；live/dry_run = 单组）
