@@ -14,8 +14,8 @@ Strategy::Strategy(const AppConfig& cfg, std::string coin)
     : cfg_(cfg), coin_(std::move(coin)) {}
 
 double Strategy::max_entry_price(int minutes_remaining) const {
-    // §一：剩余30分钟以上，ask < 30¢
-    if (minutes_remaining > 30) return 0.30;
+    // §一：剩余35分钟以上，ask <= 30¢
+    if (minutes_remaining > 35) return 0.30;
     return 0;  // 不入场
 }
 
@@ -38,7 +38,8 @@ static double breakeven_price(double entry_price) {
 
 EntrySignal Strategy::evaluate_entry(
     const BtcMarketData& btc,
-    double up_ask, double down_ask,
+    double up_bid, double up_ask,
+    double down_bid, double down_ask,
     const std::string& up_token_id, const std::string& down_token_id,
     const std::string& condition_id, const std::string& question,
     int minutes_remaining) {
@@ -49,10 +50,10 @@ EntrySignal Strategy::evaluate_entry(
     sig.coin = coin_;
     sig.regime = StrategyRegime::LEGACY_CHEAP;
 
-    // §一.1 时间窗口：剩余时间 > 20 分钟
-    // 从 30→20 的依据：4-26 早间数据显示 BTC 波动集中在蜡烛末段，30 阈值屏蔽了 100% 的甜区机会
-    // 20 min 仍能承接 TP0（contract +20¢ 在 BTC 走方向时 5-10min 可达），但 TP1/TP2 命中率会降
-    if (minutes_remaining <= 20) {
+    // §一.1 时间窗口：剩余时间 > 35 分钟
+    // 5/4 overnight: <=35m entries contributed most of the drawdown. Cheap
+    // contracts need enough time to reach staged TP levels.
+    if (minutes_remaining <= 35) {
         sig.reject_reason = "time_too_short: " + std::to_string(minutes_remaining) + "min left";
         return sig;
     }
@@ -66,15 +67,18 @@ EntrySignal Strategy::evaluate_entry(
     // 方向选择：选择更便宜的一方买入
     Side candidate_side = Side::NONE;
     double candidate_ask = 0;
+    double candidate_bid = 0;
     std::string candidate_token;
 
     if (up_ask > 0 && (down_ask <= 0 || up_ask <= down_ask)) {
         candidate_side = Side::UP;
         candidate_ask = up_ask;
+        candidate_bid = up_bid;
         candidate_token = up_token_id;
     } else if (down_ask > 0) {
         candidate_side = Side::DOWN;
         candidate_ask = down_ask;
+        candidate_bid = down_bid;
         candidate_token = down_token_id;
     } else {
         sig.reject_reason = "no_valid_ask";
@@ -99,6 +103,16 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
 
+    if (candidate_bid <= 0) {
+        sig.reject_reason = "no_valid_bid";
+        return sig;
+    }
+    double spread = candidate_ask - candidate_bid;
+    if (spread < 0 || spread > 0.03) {
+        sig.reject_reason = "legacy_spread_wide: " + std::to_string(spread);
+        return sig;
+    }
+
     // 信号有效
     sig.valid = true;
     sig.side = candidate_side;
@@ -106,6 +120,11 @@ EntrySignal Strategy::evaluate_entry(
     // §二：在当前价下方1¢挂限价买单
     sig.entry_price = candidate_ask - 0.01;
     if (sig.entry_price < 0.01) sig.entry_price = 0.01;
+    if (sig.entry_price < 0.10 || sig.entry_price > 0.30) {
+        sig.valid = false;
+        sig.reject_reason = "entry_out_of_range_10_30c: " + std::to_string(sig.entry_price);
+        return sig;
+    }
     sig.size_usdc = 1.00;
     sig.shares = sig.size_usdc / sig.entry_price;
     sig.token_id = candidate_token;

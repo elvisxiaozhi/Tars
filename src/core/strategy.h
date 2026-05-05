@@ -96,7 +96,8 @@ public:
     // 评估入场条件，返回信号
     EntrySignal evaluate_entry(
         const BtcMarketData& btc,
-        double up_ask, double down_ask,
+        double up_bid, double up_ask,
+        double down_bid, double down_ask,
         const std::string& up_token_id, const std::string& down_token_id,
         const std::string& condition_id, const std::string& question,
         int minutes_remaining);

@@ -20,6 +20,12 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
         return false;
     }
 
+    if (stop_price_this_hour_ >= 3) {
+        reject_reason = "global_stop_price_limit: " + std::to_string(stop_price_this_hour_) +
+                        "/3 this hour";
+        return false;
+    }
+
     // Live mode keeps the original global single-position risk gate.
     if (live_mode_ && open_positions_ >= max_concurrent_) {
         reject_reason = "max_concurrent: " + std::to_string(open_positions_) +
@@ -61,6 +67,7 @@ void RiskManager::reset_candle(const std::string& coin) {
 void RiskManager::reset_global_hour() {
     candle_stopped_ = false;
     stopped_coins_.clear();
+    stop_price_this_hour_ = 0;
 }
 
 double RiskManager::compute_position_size() const {
@@ -76,6 +83,11 @@ void RiskManager::record_loss(double amount) {
 
     spdlog::debug("RISK: loss ${:.2f} | daily_pnl=${:.2f} | consec_loss={}",
                   amount, daily_pnl_, consecutive_losses_);
+}
+
+void RiskManager::record_stop_price() {
+    stop_price_this_hour_++;
+    spdlog::warn("RISK: global stop_price count this hour = {}/3", stop_price_this_hour_);
 }
 
 void RiskManager::record_profit(double amount) {
@@ -95,6 +107,7 @@ void RiskManager::reset_daily() {
     daily_trades_ = 0;
     candle_stopped_ = false;
     stopped_coins_.clear();
+    stop_price_this_hour_ = 0;
     spdlog::info("RISK: daily stats reset");
 }
 

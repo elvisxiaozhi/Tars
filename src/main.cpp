@@ -338,6 +338,8 @@ int main(int argc, char* argv[]) {
     polymarket::RiskManager risk(cfg);
     polymarket::TradeJournal journal("./logs/trades.jsonl");
     polymarket::ExperimentEngine experiment(cfg);
+    polymarket::ExperimentEngine trend_experiment(
+        cfg, "trend_follow", "./logs/experiment_trend_trades.jsonl", "T");
 
     // 显示用 balance：LIVE 模式取真实 vault cash；dry_run 取虚拟 risk balance
     auto display_balance = [&]() {
@@ -858,6 +860,14 @@ int main(int argc, char* argv[]) {
         return experiment.trades_json();
     });
 
+    api.on_trend_experiment_status([&]() -> std::string {
+        return trend_experiment.status_json();
+    });
+
+    api.on_trend_experiment_trades([&]() -> std::string {
+        return trend_experiment.trades_json();
+    });
+
     // POST /api/shutdown — 优雅停止 bot（前端"Stop Bot"按钮触发）
     // 设 g_running=false → 主循环退出 → emergency_close_all 兜底 → 进程退出
     api.on_shutdown([&]() -> std::string {
@@ -962,6 +972,7 @@ int main(int argc, char* argv[]) {
                     last_it->second != md.candle_open_time) {
                     risk.reset_candle(result.coin);
                     experiment.reset_candle(result.coin);
+                    trend_experiment.reset_candle(result.coin);
                     spdlog::info("New candle [{}]: reset per-coin/global hour trade flags",
                                  result.coin);
                 }
@@ -974,6 +985,7 @@ int main(int argc, char* argv[]) {
                 newest_candle_open != last_global_candle_open) {
                 risk.reset_global_hour();
                 experiment.reset_global_hour();
+                trend_experiment.reset_global_hour();
                 spdlog::info("New global hour: reset global trade counters");
             }
             if (newest_candle_open != 0) {
@@ -1163,6 +1175,7 @@ int main(int argc, char* argv[]) {
                 exp_quotes.up_token_id = quotes.up_token_id;
                 exp_quotes.down_token_id = quotes.down_token_id;
                 experiment.on_market(coin, md, entry, exp_quotes, now_ms());
+                trend_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
 
                 if (live_trader && has_open_position) {
                     continue;
@@ -1184,7 +1197,8 @@ int main(int argc, char* argv[]) {
                 }
 
                 auto sig = strat_it->second.evaluate_entry(
-                    md, quotes.up_ask, quotes.down_ask,
+                    md, quotes.up_bid, quotes.up_ask,
+                    quotes.down_bid, quotes.down_ask,
                     quotes.up_token_id, quotes.down_token_id,
                     cid, entry.market.question,
                     md.minutes_remaining);
@@ -1215,7 +1229,8 @@ int main(int argc, char* argv[]) {
                             }
                             quotes = extract_quotes(*updated);
                             auto fresh_sig = strat_it->second.evaluate_entry(
-                                md, quotes.up_ask, quotes.down_ask,
+                                md, quotes.up_bid, quotes.up_ask,
+                                quotes.down_bid, quotes.down_ask,
                                 quotes.up_token_id, quotes.down_token_id,
                                 cid, entry.market.question,
                                 md.minutes_remaining);
@@ -1612,6 +1627,9 @@ int main(int argc, char* argv[]) {
                         exit_sig.reason == "stop_btc" ||
                         exit_sig.reason == "trailing_stop" || exit_sig.reason == "dead_water_exit") {
                         risk.set_candle_stopped(pos.coin);
+                        if (exit_sig.reason == "stop_price") {
+                            risk.record_stop_price();
+                        }
                         spdlog::warn("Candle stopped [{}]: {} triggered, no more trades this candle",
                                      pos.coin, exit_sig.reason);
                     }
@@ -1673,6 +1691,7 @@ int main(int argc, char* argv[]) {
                                [](const polymarket::Position& p) { return p.closed; }),
                 positions.end());
             experiment.prune_closed();
+            trend_experiment.prune_closed();
 
             // 同步持仓到共享状态
             {

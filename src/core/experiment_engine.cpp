@@ -182,6 +182,51 @@ EntrySignal ExperimentStrategy::evaluate_entry(const BtcMarketData& md,
     return sig;
 }
 
+EntrySignal ExperimentStrategy::evaluate_trend_follow(
+    const BtcMarketData& md,
+    const ExperimentQuotes& quotes,
+    const std::string& condition_id,
+    const std::string& question) {
+    EntrySignal sig;
+    sig.condition_id = condition_id;
+    sig.market_question = question;
+    sig.coin = coin_;
+    sig.regime = StrategyRegime::TREND;
+
+    if (md.minutes_remaining <= 20) {
+        sig.reject_reason = "time_too_short";
+        return sig;
+    }
+
+    Side side = md.deviation_pct > 0 ? Side::UP :
+                md.deviation_pct < 0 ? Side::DOWN : Side::NONE;
+    if (side == Side::NONE) {
+        sig.reject_reason = "no_direction";
+        return sig;
+    }
+
+    double ask = side == Side::UP ? quotes.up_ask : quotes.down_ask;
+    double bid = side == Side::UP ? quotes.up_bid : quotes.down_bid;
+    std::string token = side == Side::UP ? quotes.up_token_id : quotes.down_token_id;
+    if (ask < 0.60 || ask > 0.80) {
+        sig.reject_reason = "trend_follow_price_window";
+        return sig;
+    }
+    if (bid <= 0 || ask - bid > 0.03) {
+        sig.reject_reason = "trend_follow_spread_wide";
+        return sig;
+    }
+
+    sig.valid = true;
+    sig.side = side;
+    sig.market_ask = ask;
+    sig.entry_price = std::max(0.01, ask - 0.01);
+    sig.size_usdc = 1.00;
+    sig.shares = sig.size_usdc / sig.entry_price;
+    sig.token_id = token;
+    return sig;
+}
+
 std::vector<TakeProfitLevel> ExperimentStrategy::compute_tp_levels(
     double entry_price, StrategyRegime regime) const {
     std::vector<TakeProfitLevel> levels;
@@ -196,6 +241,15 @@ std::vector<TakeProfitLevel> ExperimentStrategy::compute_tp_levels(
         levels.push_back({1, 0.70, 3.0 / 7.0, false});
         levels.push_back({2, 0.90, 1.00, false});
     }
+    return levels;
+}
+
+std::vector<TakeProfitLevel> ExperimentStrategy::compute_trend_follow_tp_levels(
+    double entry_price) const {
+    std::vector<TakeProfitLevel> levels;
+    levels.push_back({0, std::min(0.90, entry_price + 0.10), 0.50, false});
+    levels.push_back({1, std::min(0.90, entry_price + 0.15), 0.50, false});
+    levels.push_back({2, 0.90, 1.00, false});
     return levels;
 }
 
@@ -281,9 +335,75 @@ ExitSignal ExperimentStrategy::evaluate_exit(const Position& pos,
     return exit;
 }
 
-ExperimentEngine::ExperimentEngine(const AppConfig& cfg)
+ExitSignal ExperimentStrategy::evaluate_trend_follow_exit(
+    const Position& pos,
+    double current_contract_price,
+    const BtcMarketData& md) const {
+    ExitSignal exit;
+    int64_t elapsed_sec = (wall_now_ms() - pos.entry_time) / 1000;
+    double mfe = pos.max_price - pos.entry_price;
+
+    if (current_contract_price <= pos.entry_price - 0.20) {
+        exit.should_exit = true;
+        exit.reason = "stop_price";
+        exit.exit_price = current_contract_price;
+        return exit;
+    }
+
+    bool dev_crossed_zero =
+        (pos.side == Side::UP && md.deviation_pct <= 0) ||
+        (pos.side == Side::DOWN && md.deviation_pct >= 0);
+    if (dev_crossed_zero) {
+        exit.should_exit = true;
+        exit.reason = "stop_btc";
+        exit.exit_price = current_contract_price;
+        return exit;
+    }
+
+    if (elapsed_sec >= 600 && mfe < 0.03) {
+        exit.should_exit = true;
+        exit.reason = "dead_water_exit";
+        exit.exit_price = current_contract_price;
+        return exit;
+    }
+
+    if (mfe >= 0.15) {
+        double stop = std::max(pos.entry_price + 0.06, pos.max_price - 0.05);
+        if (current_contract_price <= stop) {
+            exit.should_exit = true;
+            exit.reason = "trailing_stop";
+            exit.exit_price = current_contract_price;
+            return exit;
+        }
+    } else if (mfe >= 0.10) {
+        double stop = std::max(pos.entry_price + 0.03, pos.max_price - 0.06);
+        if (current_contract_price <= stop) {
+            exit.should_exit = true;
+            exit.reason = "trailing_stop";
+            exit.exit_price = current_contract_price;
+            return exit;
+        }
+    }
+
+    if (md.minutes_remaining <= 10 && current_contract_price < 0.55) {
+        exit.should_exit = true;
+        exit.reason = "stop_time";
+        exit.exit_price = current_contract_price;
+        return exit;
+    }
+
+    return exit;
+}
+
+ExperimentEngine::ExperimentEngine(const AppConfig& cfg,
+                                   std::string strategy_name,
+                                   std::string log_path,
+                                   std::string id_prefix)
     : cfg_(cfg), enabled_(cfg.experiment.enabled),
-      balance_(cfg.experiment.initial_balance) {
+      balance_(cfg.experiment.initial_balance),
+      strategy_name_(std::move(strategy_name)),
+      log_path_(std::move(log_path)),
+      id_prefix_(std::move(id_prefix)) {
     for (const auto& coin : cfg_.coins) {
         strategies_.emplace(coin.coin, ExperimentStrategy(cfg_, coin.coin));
     }
@@ -298,6 +418,7 @@ void ExperimentEngine::reset_global_hour() {
     std::lock_guard<std::mutex> lock(mu_);
     global_trades_this_hour_ = 0;
     quiet_trades_this_hour_ = 0;
+    stop_price_this_hour_ = 0;
 }
 
 bool ExperimentEngine::has_open_coin(const std::string& coin) const {
@@ -311,6 +432,7 @@ void ExperimentEngine::on_market(const std::string& coin,
                                  const ExperimentQuotes& quotes,
                                  int64_t now_ms) {
     if (!enabled_) return;
+    if (cfg_.strategy.mode == "live" && coin != "BTC") return;
     std::lock_guard<std::mutex> lock(mu_);
     auto strat_it = strategies_.find(coin);
     if (strat_it == strategies_.end()) return;
@@ -362,7 +484,9 @@ void ExperimentEngine::on_market(const std::string& coin,
             continue;
         }
 
-        auto exit = strat_it->second.evaluate_exit(pos, current_price, md);
+        auto exit = strategy_name_ == "trend_follow"
+            ? strat_it->second.evaluate_trend_follow_exit(pos, current_price, md)
+            : strat_it->second.evaluate_exit(pos, current_price, md);
         if (exit.should_exit) {
             double remaining_shares = pos.shares * pos.shares_remaining_pct;
             double sell_value = remaining_shares * exit.exit_price;
@@ -372,6 +496,7 @@ void ExperimentEngine::on_market(const std::string& coin,
             pos.realized_pnl += pnl;
             pos.closed = true;
             coin_state_[coin].candle_stopped = true;
+            if (exit.reason == "stop_price") stop_price_this_hour_++;
             balance_ += sell_value - exit_fee;
 
             TradeRecord rec;
@@ -399,9 +524,16 @@ void ExperimentEngine::on_market(const std::string& coin,
     auto& cs = coin_state_[coin];
     if (cs.candle_stopped || cs.candle_traded || has_open_coin(coin)) return;
     if (global_trades_this_hour_ >= cfg_.strategy.max_global_trades_per_hour) return;
+    if (stop_price_this_hour_ >= 3) {
+        reject_counts_["global_stop_price_limit"]++;
+        return;
+    }
 
-    auto sig = strat_it->second.evaluate_entry(md, quotes, entry.market.condition_id,
-                                               entry.market.question);
+    auto sig = strategy_name_ == "trend_follow"
+        ? strat_it->second.evaluate_trend_follow(md, quotes, entry.market.condition_id,
+                                                 entry.market.question)
+        : strat_it->second.evaluate_entry(md, quotes, entry.market.condition_id,
+                                          entry.market.question);
     if (!sig.valid) {
         if (!sig.reject_reason.empty()) reject_counts_[sig.reject_reason]++;
         return;
@@ -417,7 +549,7 @@ void ExperimentEngine::on_market(const std::string& coin,
     }
 
     Position pos;
-    pos.id = "E" + std::to_string(next_id_++);
+    pos.id = id_prefix_ + std::to_string(next_id_++);
     pos.side = sig.side;
     pos.regime = sig.regime;
     pos.coin = sig.coin;
@@ -434,7 +566,9 @@ void ExperimentEngine::on_market(const std::string& coin,
     pos.avg_vol = md.avg_24h_vol;
     pos.entry_time = now_ms;
     pos.minutes_remaining_at_entry = md.minutes_remaining;
-    pos.tp_levels = strat_it->second.compute_tp_levels(sig.entry_price, sig.regime);
+    pos.tp_levels = strategy_name_ == "trend_follow"
+        ? strat_it->second.compute_trend_follow_tp_levels(sig.entry_price)
+        : strat_it->second.compute_tp_levels(sig.entry_price, sig.regime);
     pos.max_price = sig.entry_price;
     pos.min_price = sig.entry_price;
     pos.mfe_at_5min = sig.entry_price;
@@ -483,14 +617,14 @@ void ExperimentEngine::record_trade(const TradeRecord& rec) {
     st.pnl += rec.realized_pnl;
     if (rec.realized_pnl > 0) st.wins++;
     else st.losses++;
-    append_jsonl("./logs/experiment_trades.jsonl", rec);
+    append_jsonl(log_path_, rec);
 }
 
 std::string ExperimentEngine::status_json() const {
     std::lock_guard<std::mutex> lock(mu_);
     nlohmann::json j;
     j["enabled"] = enabled_;
-    j["strategy"] = cfg_.experiment.strategy;
+    j["strategy"] = strategy_name_;
     j["balance"] = balance_;
     double pnl = 0;
     for (const auto& t : trades_) pnl += t.realized_pnl;

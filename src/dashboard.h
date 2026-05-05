@@ -310,6 +310,22 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div id="exp-trades" style="margin-top:12px;"></div>
 </details>
 
+<details class="section" id="trend-experiment-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;">
+    <span>Trend Experiment</span>
+    <span id="trend-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+  </summary>
+  <div class="stats-grid" style="margin-top:8px;">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="trend-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="trend-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="trend-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="trend-exp-trades-count">--</div></div>
+  </div>
+  <div id="trend-exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="trend-exp-positions" style="margin-top:12px;"></div>
+  <div id="trend-exp-trades" style="margin-top:12px;"></div>
+</details>
+
 <script>
 const API_BASE = '';
 const REFRESH_MS = 5000;
@@ -352,6 +368,7 @@ document.addEventListener('DOMContentLoaded', () => {
   persistDetails('ad-direction',          false);
   persistDetails('ad-buckets',            false);
   persistDetails('experiment-details',    false);
+  persistDetails('trend-experiment-details', false);
 
   // Stop Bot 按钮
   const stopBtn = document.getElementById('stop-bot-btn');
@@ -513,14 +530,77 @@ function renderSparkline(svgId, values) {
   svg.innerHTML = '<path d="' + path.trim() + '" stroke="' + color + '" stroke-width="1.4" fill="none"/>';
 }
 
+function renderExperiment(prefix, expStatus, expTrades) {
+  if (expStatus) {
+    const expSummary = document.getElementById(prefix + '-summary');
+    if (expSummary) expSummary.textContent = expStatus.enabled ? (expStatus.strategy || 'regime') : 'disabled';
+    document.getElementById(prefix + '-balance').textContent = '$' + Number(expStatus.balance || 0).toFixed(2);
+    const expPnl = document.getElementById(prefix + '-pnl');
+    expPnl.textContent = formatPnl(expStatus.realized_pnl || 0);
+    expPnl.className = 'stat-value ' + pnlClass(expStatus.realized_pnl || 0);
+    document.getElementById(prefix + '-open').textContent = expStatus.open_positions || 0;
+    document.getElementById(prefix + '-trades-count').textContent = expStatus.total_trades || 0;
+
+    const regimeEl = document.getElementById(prefix + '-regime-stats');
+    if (regimeEl) {
+      let html = '<table><thead><tr><th>Regime</th><th>Trades</th><th>Win Rate</th><th>P&L</th></tr></thead><tbody>';
+      const stats = expStatus.regime_stats || {};
+      const keys = Object.keys(stats);
+      if (keys.length === 0) {
+        html += '<tr><td colspan="4" style="text-align:center;color:#7d8590;">No experiment trades yet</td></tr>';
+      } else {
+        for (const k of keys) {
+          const s = stats[k] || {};
+          html += '<tr><td>' + k + '</td><td>' + (s.trades || 0) + '</td><td>' + Number(s.win_rate || 0).toFixed(1) + '%</td><td class="' + pnlClass(s.pnl || 0) + '">' + formatPnl(s.pnl || 0) + '</td></tr>';
+        }
+      }
+      html += '</tbody></table>';
+      regimeEl.innerHTML = html;
+    }
+
+    const expPosEl = document.getElementById(prefix + '-positions');
+    if (expPosEl) {
+      const positions = expStatus.positions || [];
+      if (positions.length === 0) {
+        expPosEl.innerHTML = '<div class="positions-empty">No experiment positions</div>';
+      } else {
+        let html = '<table><thead><tr><th>ID</th><th>Coin</th><th>Regime</th><th>Side</th><th>Entry</th><th>Current</th><th>Remaining</th><th>MFE</th></tr></thead><tbody>';
+        for (const p of positions) {
+          html += '<tr><td>' + p.id + '</td><td>' + p.coin + '</td><td>' + p.regime + '</td><td class="side-' + String(p.side).toLowerCase() + '">' + p.side + '</td><td>' + Number(p.entry_price || 0).toFixed(3) + '</td><td>' + Number(p.current_price || 0).toFixed(3) + '</td><td>' + Number((p.remaining_pct || 0) * 100).toFixed(0) + '%</td><td class="positive">+' + Number(((p.max_price || 0) - (p.entry_price || 0)) * 100).toFixed(1) + 'c</td></tr>';
+        }
+        html += '</tbody></table>';
+        expPosEl.innerHTML = html;
+      }
+    }
+  }
+
+  if (expTrades) {
+    const expTradesEl = document.getElementById(prefix + '-trades');
+    if (expTradesEl) {
+      let html = '<table><thead><tr><th>Time</th><th>Coin</th><th>Regime</th><th>Side</th><th>Entry</th><th>Exit</th><th>Reason</th><th>P&L</th></tr></thead><tbody>';
+      if (expTrades.length === 0) {
+        html += '<tr><td colspan="8" style="text-align:center;color:#7d8590;">No experiment trades yet</td></tr>';
+      } else {
+        for (const t of expTrades.slice().reverse().slice(0, 30)) {
+          html += '<tr><td>' + formatTime(t.exit_time || t.entry_time) + '</td><td>' + (t.coin || '--') + '</td><td>' + (t.regime || '') + '</td><td class="side-' + String(t.side).toLowerCase() + '">' + t.side + '</td><td>' + Number(t.entry_price || 0).toFixed(3) + '</td><td>' + Number(t.exit_price || 0).toFixed(3) + '</td><td>' + renderReason(t.exit_reason) + '</td><td class="' + pnlClass(t.pnl || 0) + '">' + formatPnl(t.pnl || 0) + '</td></tr>';
+        }
+      }
+      html += '</tbody></table>';
+      expTradesEl.innerHTML = html;
+    }
+  }
+}
+
 async function refresh() {
-  let [status, trades, stats, analytics, expStatus, expTrades] = await Promise.all([
+  let [status, trades, stats, analytics, expStatus, expTrades, trendExpStatus, trendExpTrades] = await Promise.all([
     fetchJSON('/api/status'),
     fetchJSON('/api/trades'),
     fetchJSON('/api/stats'),
     fetchJSON('/api/analytics'),
     fetchJSON('/api/experiment/status'),
-    fetchJSON('/api/experiment/trades')
+    fetchJSON('/api/experiment/trades'),
+    fetchJSON('/api/experiment-trend/status'),
+    fetchJSON('/api/experiment-trend/trades')
   ]);
 
   if (status) {
@@ -615,64 +695,8 @@ async function refresh() {
     }
   }
 
-  if (expStatus) {
-    const expSummary = document.getElementById('exp-summary');
-    if (expSummary) expSummary.textContent = expStatus.enabled ? (expStatus.strategy || 'regime') : 'disabled';
-    document.getElementById('exp-balance').textContent = '$' + Number(expStatus.balance || 0).toFixed(2);
-    const expPnl = document.getElementById('exp-pnl');
-    expPnl.textContent = formatPnl(expStatus.realized_pnl || 0);
-    expPnl.className = 'stat-value ' + pnlClass(expStatus.realized_pnl || 0);
-    document.getElementById('exp-open').textContent = expStatus.open_positions || 0;
-    document.getElementById('exp-trades-count').textContent = expStatus.total_trades || 0;
-
-    const regimeEl = document.getElementById('exp-regime-stats');
-    if (regimeEl) {
-      let html = '<table><thead><tr><th>Regime</th><th>Trades</th><th>Win Rate</th><th>P&L</th></tr></thead><tbody>';
-      const stats = expStatus.regime_stats || {};
-      const keys = Object.keys(stats);
-      if (keys.length === 0) {
-        html += '<tr><td colspan="4" style="text-align:center;color:#7d8590;">No experiment trades yet</td></tr>';
-      } else {
-        for (const k of keys) {
-          const s = stats[k] || {};
-          html += '<tr><td>' + k + '</td><td>' + (s.trades || 0) + '</td><td>' + Number(s.win_rate || 0).toFixed(1) + '%</td><td class="' + pnlClass(s.pnl || 0) + '">' + formatPnl(s.pnl || 0) + '</td></tr>';
-        }
-      }
-      html += '</tbody></table>';
-      regimeEl.innerHTML = html;
-    }
-
-    const expPosEl = document.getElementById('exp-positions');
-    if (expPosEl) {
-      const positions = expStatus.positions || [];
-      if (positions.length === 0) {
-        expPosEl.innerHTML = '<div class="positions-empty">No experiment positions</div>';
-      } else {
-        let html = '<table><thead><tr><th>ID</th><th>Coin</th><th>Regime</th><th>Side</th><th>Entry</th><th>Current</th><th>Remaining</th><th>MFE</th></tr></thead><tbody>';
-        for (const p of positions) {
-          html += '<tr><td>' + p.id + '</td><td>' + p.coin + '</td><td>' + p.regime + '</td><td class="side-' + String(p.side).toLowerCase() + '">' + p.side + '</td><td>' + Number(p.entry_price || 0).toFixed(3) + '</td><td>' + Number(p.current_price || 0).toFixed(3) + '</td><td>' + Number((p.remaining_pct || 0) * 100).toFixed(0) + '%</td><td class="positive">+' + Number(((p.max_price || 0) - (p.entry_price || 0)) * 100).toFixed(1) + 'c</td></tr>';
-        }
-        html += '</tbody></table>';
-        expPosEl.innerHTML = html;
-      }
-    }
-  }
-
-  if (expTrades) {
-    const expTradesEl = document.getElementById('exp-trades');
-    if (expTradesEl) {
-      let html = '<table><thead><tr><th>Time</th><th>Coin</th><th>Regime</th><th>Side</th><th>Entry</th><th>Exit</th><th>Reason</th><th>P&L</th></tr></thead><tbody>';
-      if (expTrades.length === 0) {
-        html += '<tr><td colspan="8" style="text-align:center;color:#7d8590;">No experiment trades yet</td></tr>';
-      } else {
-        for (const t of expTrades.slice().reverse().slice(0, 30)) {
-          html += '<tr><td>' + formatTime(t.exit_time || t.entry_time) + '</td><td>' + (t.coin || '--') + '</td><td>' + (t.regime || '') + '</td><td class="side-' + String(t.side).toLowerCase() + '">' + t.side + '</td><td>' + Number(t.entry_price || 0).toFixed(3) + '</td><td>' + Number(t.exit_price || 0).toFixed(3) + '</td><td>' + renderReason(t.exit_reason) + '</td><td class="' + pnlClass(t.pnl || 0) + '">' + formatPnl(t.pnl || 0) + '</td></tr>';
-        }
-      }
-      html += '</tbody></table>';
-      expTradesEl.innerHTML = html;
-    }
-  }
+  renderExperiment('exp', expStatus, expTrades);
+  renderExperiment('trend-exp', trendExpStatus, trendExpTrades);
 
   if (stats) {
     // 根据 currentFilter 选择数据源（all = 总计；live/dry_run = 单组）

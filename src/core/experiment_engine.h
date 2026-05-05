@@ -32,13 +32,21 @@ public:
                                const ExperimentQuotes& quotes,
                                const std::string& condition_id,
                                const std::string& question);
+    EntrySignal evaluate_trend_follow(const BtcMarketData& md,
+                                      const ExperimentQuotes& quotes,
+                                      const std::string& condition_id,
+                                      const std::string& question);
 
     std::vector<TakeProfitLevel> compute_tp_levels(double entry_price,
                                                    StrategyRegime regime) const;
+    std::vector<TakeProfitLevel> compute_trend_follow_tp_levels(double entry_price) const;
 
     ExitSignal evaluate_exit(const Position& pos,
                              double current_contract_price,
                              const BtcMarketData& md) const;
+    ExitSignal evaluate_trend_follow_exit(const Position& pos,
+                                          double current_contract_price,
+                                          const BtcMarketData& md) const;
 
 private:
     const AppConfig& cfg_;
@@ -53,7 +61,10 @@ private:
 
 class ExperimentEngine {
 public:
-    explicit ExperimentEngine(const AppConfig& cfg);
+    explicit ExperimentEngine(const AppConfig& cfg,
+                              std::string strategy_name = "regime",
+                              std::string log_path = "./logs/experiment_trades.jsonl",
+                              std::string id_prefix = "E");
 
     void reset_candle(const std::string& coin);
     void reset_global_hour();
@@ -92,6 +103,10 @@ private:
     int next_id_ = 1;
     int global_trades_this_hour_ = 0;
     int quiet_trades_this_hour_ = 0;
+    int stop_price_this_hour_ = 0;
+    std::string strategy_name_;
+    std::string log_path_;
+    std::string id_prefix_;
     std::map<std::string, ExperimentStrategy> strategies_;
     std::map<std::string, CoinRiskState> coin_state_;
     std::vector<Position> positions_;
