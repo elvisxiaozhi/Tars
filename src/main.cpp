@@ -1186,6 +1186,10 @@ int main(int argc, char* argv[]) {
                 experiment.on_market(coin, md, entry, exp_quotes, now_ms());
                 trend_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
 
+                if (!entry_window) {
+                    continue;
+                }
+
                 if (live_trader && has_open_position) {
                     continue;
                 }

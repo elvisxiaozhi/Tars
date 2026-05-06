@@ -57,6 +57,8 @@ private:
     double abs_dev_prev1_ = 0;
     bool has_dev_prev2_ = false;
     bool has_dev_prev1_ = false;
+    Side trend_prev_side_ = Side::NONE;
+    bool has_trend_prev_side_ = false;
 };
 
 class ExperimentEngine {

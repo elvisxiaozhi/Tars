@@ -193,6 +193,12 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
     sig.coin = coin_;
     sig.regime = StrategyRegime::TREND;
 
+    if (condition_id != last_condition_id_) {
+        last_condition_id_ = condition_id;
+        trend_prev_side_ = Side::NONE;
+        has_trend_prev_side_ = false;
+    }
+
     if (md.minutes_remaining <= 20) {
         sig.reject_reason = "time_too_short";
         return sig;
@@ -205,14 +211,27 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
         return sig;
     }
 
+    bool direction_confirmed = has_trend_prev_side_ && trend_prev_side_ == side;
+    trend_prev_side_ = side;
+    has_trend_prev_side_ = true;
+    if (!direction_confirmed) {
+        sig.reject_reason = "trend_follow_direction_not_confirmed";
+        return sig;
+    }
+
+    if (std::abs(md.deviation_pct) < 0.12) {
+        sig.reject_reason = "trend_follow_dev_too_small";
+        return sig;
+    }
+
     double ask = side == Side::UP ? quotes.up_ask : quotes.down_ask;
     double bid = side == Side::UP ? quotes.up_bid : quotes.down_bid;
     std::string token = side == Side::UP ? quotes.up_token_id : quotes.down_token_id;
-    if (ask < 0.60 || ask > 0.80) {
+    if (ask < 0.65 || ask > 0.75) {
         sig.reject_reason = "trend_follow_price_window";
         return sig;
     }
-    if (bid <= 0 || ask - bid > 0.03) {
+    if (bid <= 0 || ask - bid > 0.02) {
         sig.reject_reason = "trend_follow_spread_wide";
         return sig;
     }
@@ -343,7 +362,7 @@ ExitSignal ExperimentStrategy::evaluate_trend_follow_exit(
     int64_t elapsed_sec = (wall_now_ms() - pos.entry_time) / 1000;
     double mfe = pos.max_price - pos.entry_price;
 
-    if (current_contract_price <= pos.entry_price - 0.20) {
+    if (current_contract_price <= pos.entry_price - 0.12) {
         exit.should_exit = true;
         exit.reason = "stop_price";
         exit.exit_price = current_contract_price;
@@ -360,23 +379,31 @@ ExitSignal ExperimentStrategy::evaluate_trend_follow_exit(
         return exit;
     }
 
-    if (elapsed_sec >= 600 && mfe < 0.03) {
+    if (elapsed_sec >= 240 && mfe < 0.02 &&
+        current_contract_price <= pos.entry_price - 0.04) {
+        exit.should_exit = true;
+        exit.reason = "fast_fail_exit";
+        exit.exit_price = current_contract_price;
+        return exit;
+    }
+
+    if (elapsed_sec >= 480 && mfe < 0.03) {
         exit.should_exit = true;
         exit.reason = "dead_water_exit";
         exit.exit_price = current_contract_price;
         return exit;
     }
 
-    if (mfe >= 0.15) {
-        double stop = std::max(pos.entry_price + 0.06, pos.max_price - 0.05);
+    if (mfe >= 0.12) {
+        double stop = std::max(pos.entry_price + 0.05, pos.max_price - 0.04);
         if (current_contract_price <= stop) {
             exit.should_exit = true;
             exit.reason = "trailing_stop";
             exit.exit_price = current_contract_price;
             return exit;
         }
-    } else if (mfe >= 0.10) {
-        double stop = std::max(pos.entry_price + 0.03, pos.max_price - 0.06);
+    } else if (mfe >= 0.08) {
+        double stop = std::max(pos.entry_price + 0.02, pos.max_price - 0.05);
         if (current_contract_price <= stop) {
             exit.should_exit = true;
             exit.reason = "trailing_stop";
@@ -385,7 +412,7 @@ ExitSignal ExperimentStrategy::evaluate_trend_follow_exit(
         }
     }
 
-    if (md.minutes_remaining <= 10 && current_contract_price < 0.55) {
+    if (md.minutes_remaining <= 10 && current_contract_price < 0.60) {
         exit.should_exit = true;
         exit.reason = "stop_time";
         exit.exit_price = current_contract_price;
