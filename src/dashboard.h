@@ -55,6 +55,7 @@ inline const std::string DASHBOARD_HTML = R"html(
   .tabs { display:flex; gap:6px; margin:16px 0; border-bottom:1px solid #1e2d3d; }
   .tab-btn { cursor:pointer; padding:8px 14px; border:1px solid #30363d; border-bottom:none; background:#111827; color:#c9d1d9; border-radius:6px 6px 0 0; font-size:0.85em; }
   .tab-btn.active { background:#1f6feb; color:#fff; border-color:#388bfd; }
+  .scope-filter, .mode-filter { cursor:pointer; padding:2px 10px; border:1px solid #30363d; background:#21262d; color:#c9d1d9; border-radius:4px; font-size:0.85em; }
   .tab-panel { display:none; }
   .tab-panel.active { display:block; }
   .uptime { font-size: 0.8em; color: #7d8590; }
@@ -89,6 +90,9 @@ inline const std::string DASHBOARD_HTML = R"html(
     <span class="uptime" id="uptime">--</span>
   </div>
   <div style="display:flex;align-items:center;gap:12px;">
+    <span style="font-size:0.75em;color:#7d8590;">Data</span>
+    <button class="scope-filter" data-scope="session">This Run</button>
+    <button class="scope-filter" data-scope="all">All Time</button>
     <span class="mode" id="mode-badge">--</span>
     <span class="refresh" id="refresh-info">auto 5s</span>
     <button id="stop-bot-btn" title="优雅停止 bot（触发 emergency_close_all 兜底）"
@@ -113,7 +117,7 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div class="metric">
     <div class="metric-label">Realized P&L</div>
     <div class="metric-value" id="total-pnl">$0.00</div>
-    <div class="metric-sub">Daily <span id="daily-pnl">$0.00</span></div>
+    <div class="metric-sub">Scope <span id="daily-pnl">This Run</span></div>
     <svg class="metric-spark" id="pnl-spark" width="100%" height="16" preserveAspectRatio="none" viewBox="0 0 100 16"></svg>
   </div>
   <div class="metric">
@@ -357,6 +361,7 @@ const API_BASE = '';
 const REFRESH_MS = 5000;
 // 持久化用户偏好（filter / 折叠状态）
 let currentFilter = localStorage.getItem('dashboard.filter') || 'all';
+let currentScope = localStorage.getItem('dashboard.scope') || 'session';
 
 document.addEventListener('DOMContentLoaded', () => {
   const buttons = document.querySelectorAll('.mode-filter');
@@ -373,6 +378,24 @@ document.addEventListener('DOMContentLoaded', () => {
       currentFilter = btn.dataset.filter;
       localStorage.setItem('dashboard.filter', currentFilter);
       applyActive(btn);
+      if (typeof refresh === 'function') refresh();
+    });
+  });
+
+  const scopeButtons = document.querySelectorAll('.scope-filter');
+  function applyScopeActive(activeScope) {
+    scopeButtons.forEach(b => {
+      const on = b.dataset.scope === activeScope;
+      b.style.background = on ? '#388bfd' : '#21262d';
+      b.style.color = on ? '#ffffff' : '#c9d1d9';
+    });
+  }
+  applyScopeActive(currentScope);
+  scopeButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentScope = btn.dataset.scope;
+      localStorage.setItem('dashboard.scope', currentScope);
+      applyScopeActive(currentScope);
       if (typeof refresh === 'function') refresh();
     });
   });
@@ -435,6 +458,17 @@ function formatPrice(v) { return v ? '$' + Number(v).toLocaleString('en-US', {mi
 function formatPct(v) { return v !== undefined ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '--'; }
 function formatPnl(v) { return (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2); }
 function pnlClass(v) { return v > 0 ? 'positive' : v < 0 ? 'negative' : 'neutral'; }
+function scopeLabel() { return currentScope === 'all' ? 'All Time' : 'This Run'; }
+function selectScope(sessionRecords, allRecords) {
+  const session = Array.isArray(sessionRecords) ? sessionRecords : [];
+  const all = Array.isArray(allRecords) ? allRecords : session;
+  return currentScope === 'all' ? all : session;
+}
+function filterByMode(records) {
+  const rows = Array.isArray(records) ? records : [];
+  if (currentFilter === 'all') return rows;
+  return rows.filter(t => (t.mode || 'dry_run') === currentFilter);
+}
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -537,6 +571,31 @@ function summarizeTradeGroup(items) {
     items: sorted
   };
 }
+function groupTrades(records) {
+  const groupedMap = new Map();
+  for (const t of records || []) {
+    const key = tradePeriodKey(t);
+    if (!groupedMap.has(key)) groupedMap.set(key, []);
+    groupedMap.get(key).push(t);
+  }
+  return Array.from(groupedMap.values()).map(summarizeTradeGroup);
+}
+function summarizeTradeRecords(records) {
+  const groups = groupTrades(records);
+  const pnl = groups.reduce((s, g) => s + (g.pnl || 0), 0);
+  const wins = groups.filter(g => (g.pnl || 0) > 0).length;
+  const losses = groups.filter(g => (g.pnl || 0) < 0).length;
+  const closed = wins + losses;
+  return {
+    groups,
+    pnl,
+    wins,
+    losses,
+    total: groups.length,
+    winRate: closed > 0 ? wins / closed * 100 : 0,
+    avgPnl: groups.length > 0 ? pnl / groups.length : 0
+  };
+}
 function formatTime(ms) {
   if (!ms) return '--';
   const d = new Date(ms);
@@ -570,27 +629,38 @@ function renderSparkline(svgId, values) {
 }
 
 function renderExperiment(prefix, expStatus, expTrades) {
+  const tradeSummary = summarizeTradeRecords(expTrades || []);
   if (expStatus) {
     const expSummary = document.getElementById(prefix + '-summary');
-    if (expSummary) expSummary.textContent = expStatus.enabled ? (expStatus.strategy || 'regime') : 'disabled';
+    if (expSummary) expSummary.textContent = (expStatus.enabled ? (expStatus.strategy || 'regime') : 'disabled') + ' · ' + scopeLabel();
     document.getElementById(prefix + '-balance').textContent = '$' + Number(expStatus.balance || 0).toFixed(2);
     const expPnl = document.getElementById(prefix + '-pnl');
-    expPnl.textContent = formatPnl(expStatus.realized_pnl || 0);
-    expPnl.className = 'stat-value ' + pnlClass(expStatus.realized_pnl || 0);
+    expPnl.textContent = formatPnl(tradeSummary.pnl || 0);
+    expPnl.className = 'stat-value ' + pnlClass(tradeSummary.pnl || 0);
     document.getElementById(prefix + '-open').textContent = expStatus.open_positions || 0;
-    document.getElementById(prefix + '-trades-count').textContent = expStatus.total_trades || 0;
+    document.getElementById(prefix + '-trades-count').textContent = tradeSummary.total || 0;
 
     const regimeEl = document.getElementById(prefix + '-regime-stats');
     if (regimeEl) {
       let html = '<table><thead><tr><th>Regime</th><th>Trades</th><th>Win Rate</th><th>P&L</th></tr></thead><tbody>';
-      const stats = expStatus.regime_stats || {};
+      const stats = {};
+      for (const g of tradeSummary.groups) {
+        const regime = (g.items && g.items[0] && g.items[0].regime) || 'none';
+        if (!stats[regime]) stats[regime] = { trades: 0, wins: 0, losses: 0, pnl: 0 };
+        stats[regime].trades += 1;
+        stats[regime].pnl += g.pnl || 0;
+        if ((g.pnl || 0) > 0) stats[regime].wins += 1;
+        if ((g.pnl || 0) < 0) stats[regime].losses += 1;
+      }
       const keys = Object.keys(stats);
       if (keys.length === 0) {
         html += '<tr><td colspan="4" style="text-align:center;color:#7d8590;">No experiment trades yet</td></tr>';
       } else {
         for (const k of keys) {
           const s = stats[k] || {};
-          html += '<tr><td>' + k + '</td><td>' + (s.trades || 0) + '</td><td>' + Number(s.win_rate || 0).toFixed(1) + '%</td><td class="' + pnlClass(s.pnl || 0) + '">' + formatPnl(s.pnl || 0) + '</td></tr>';
+          const closed = (s.wins || 0) + (s.losses || 0);
+          const wr = closed > 0 ? (s.wins / closed * 100) : 0;
+          html += '<tr><td>' + k + '</td><td>' + (s.trades || 0) + '</td><td>' + wr.toFixed(1) + '%</td><td class="' + pnlClass(s.pnl || 0) + '">' + formatPnl(s.pnl || 0) + '</td></tr>';
         }
       }
       html += '</tbody></table>';
@@ -659,42 +729,115 @@ function renderCoinPnl(containerId, sessionTrades, allTrades) {
     return byCoin;
   }
 
-  const session = aggregate(sessionTrades);
-  const total = aggregate(allTrades);
-  const coins = Array.from(new Set([...session.keys(), ...total.keys()])).sort();
+  const scoped = aggregate(selectScope(sessionTrades, allTrades));
+  const coins = Array.from(scoped.keys()).sort();
   if (coins.length === 0) {
     el.innerHTML = '<div class="positions-empty">No closed trades yet</div>';
     return;
   }
 
-  let html = '<table><thead><tr><th>Coin</th><th>Session P&L</th><th>Session Entries</th><th>Session WR</th><th>All-time P&L</th><th>All-time Entries</th><th>All-time WR</th></tr></thead><tbody>';
+  let html = '<div class="summary-strip" style="margin-bottom:8px;"><span style="color:#484f58;">Scope</span><span>' + scopeLabel() + '</span></div>';
+  html += '<table><thead><tr><th>Coin</th><th>P&L</th><th>Entries</th><th>Win Rate</th><th>Avg P&L</th></tr></thead><tbody>';
   for (const coin of coins) {
-    const s = session.get(coin) || { pnl: 0, positions: 0, wins: 0, losses: 0 };
-    const a = total.get(coin) || { pnl: 0, positions: 0, wins: 0, losses: 0 };
-    const sClosed = s.wins + s.losses;
-    const aClosed = a.wins + a.losses;
-    const sWr = sClosed > 0 ? (s.wins / sClosed * 100).toFixed(1) + '%' : '--';
-    const aWr = aClosed > 0 ? (a.wins / aClosed * 100).toFixed(1) + '%' : '--';
+    const s = scoped.get(coin) || { pnl: 0, positions: 0, wins: 0, losses: 0 };
+    const closed = s.wins + s.losses;
+    const wr = closed > 0 ? (s.wins / closed * 100).toFixed(1) + '%' : '--';
+    const avg = s.positions > 0 ? s.pnl / s.positions : 0;
     html += '<tr>';
     html += '<td style="font-weight:bold;color:#58a6ff;">' + esc(coin) + '</td>';
     html += '<td class="' + pnlClass(s.pnl) + '">' + formatPnl(s.pnl) + '</td>';
     html += '<td>' + s.positions + '</td>';
-    html += '<td>' + sWr + '</td>';
-    html += '<td class="' + pnlClass(a.pnl) + '">' + formatPnl(a.pnl) + '</td>';
-    html += '<td>' + a.positions + '</td>';
-    html += '<td>' + aWr + '</td>';
+    html += '<td>' + wr + '</td>';
+    html += '<td class="' + pnlClass(avg) + '">' + formatPnl(avg) + '</td>';
     html += '</tr>';
   }
   html += '</tbody></table>';
   el.innerHTML = html;
 }
 
+function analyticsFromTrades(records) {
+  const groups = groupTrades(records || []);
+  if (groups.length === 0) return { has_data: false };
+  const values = groups.map(g => g.pnl || 0);
+  const wins = values.filter(v => v > 0);
+  const losses = values.filter(v => v < 0);
+  const grossWin = wins.reduce((a, b) => a + b, 0);
+  const grossLoss = Math.abs(losses.reduce((a, b) => a + b, 0));
+  const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+  const mfeVals = groups.map(g => Math.max(0, (g.max_price || g.entry_price || 0) - (g.entry_price || 0)));
+  const maeVals = groups.map(g => Math.max(0, (g.entry_price || 0) - (g.min_price || g.entry_price || 0)));
+  const hours = {};
+  for (let h = 0; h < 24; h++) hours[String(h)] = { count: 0, total_pnl: 0, avg_pnl: 0 };
+  const days = {};
+  for (const d of ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']) days[d] = { count: 0, total_pnl: 0, avg_pnl: 0 };
+  const exits = {};
+  const direction = { UP: {count:0,wins:0,total_pnl:0,avg_pnl:0,win_rate:0}, DOWN: {count:0,wins:0,total_pnl:0,avg_pnl:0,win_rate:0} };
+  const equity = [];
+  let balance = 0, peak = 0, maxDd = 0;
+  for (const g of groups.slice().sort((a,b)=>(a.exit_time||0)-(b.exit_time||0))) {
+    const d = new Date(g.exit_time || g.entry_time || 0);
+    const h = d.getHours();
+    const dn = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+    hours[String(h)].count++; hours[String(h)].total_pnl += g.pnl || 0;
+    days[dn].count++; days[dn].total_pnl += g.pnl || 0;
+    exits[g.exit_reason || 'unknown'] = (exits[g.exit_reason || 'unknown'] || 0) + 1;
+    if (direction[g.side]) {
+      direction[g.side].count++;
+      direction[g.side].total_pnl += g.pnl || 0;
+      if ((g.pnl || 0) > 0) direction[g.side].wins++;
+    }
+    balance += g.pnl || 0;
+    peak = Math.max(peak, balance);
+    maxDd = Math.max(maxDd, peak - balance);
+    equity.push({ time: g.exit_time || g.entry_time || 0, balance });
+  }
+  for (const h of Object.values(hours)) h.avg_pnl = h.count ? h.total_pnl / h.count : 0;
+  for (const d of Object.values(days)) d.avg_pnl = d.count ? d.total_pnl / d.count : 0;
+  for (const s of Object.values(direction)) {
+    s.avg_pnl = s.count ? s.total_pnl / s.count : 0;
+    s.win_rate = s.count ? s.wins / s.count * 100 : 0;
+  }
+  const bucket = () => ({ count: 0, wins: 0, sum_pnl: 0, avg_pnl: 0, win_rate: 0 });
+  const entryBuckets = {'<=0.18':bucket(),'0.18-0.24':bucket(),'0.24-0.30':bucket(),'>0.30':bucket()};
+  const devBuckets = {'low':bucket(),'mid':bucket(),'high':bucket()};
+  const durBuckets = {'<10m':bucket(),'10-20m':bucket(),'20m+':bucket()};
+  for (const g of groups) {
+    const add = (b) => { b.count++; if ((g.pnl||0)>0) b.wins++; b.sum_pnl += g.pnl || 0; };
+    add(g.entry_price <= 0.18 ? entryBuckets['<=0.18'] : g.entry_price <= 0.24 ? entryBuckets['0.18-0.24'] : g.entry_price <= 0.30 ? entryBuckets['0.24-0.30'] : entryBuckets['>0.30']);
+    const dev = Math.abs((g.items && g.items[0] && g.items[0].btc_deviation_pct) || 0);
+    add(dev < 0.15 ? devBuckets.low : dev < 0.30 ? devBuckets.mid : devBuckets.high);
+    const mins = (g.hold_duration_sec || 0) / 60;
+    add(mins < 10 ? durBuckets['<10m'] : mins < 20 ? durBuckets['10-20m'] : durBuckets['20m+']);
+  }
+  for (const map of [entryBuckets, devBuckets, durBuckets]) {
+    for (const b of Object.values(map)) {
+      b.avg_pnl = b.count ? b.sum_pnl / b.count : 0;
+      b.win_rate = b.count ? b.wins / b.count * 100 : 0;
+    }
+  }
+  const trailing = groups.filter(g => g.exit_reason === 'trailing_stop').map(g => g.pnl || 0);
+  const priceStops = groups.filter(g => g.exit_reason === 'stop_price').map(g => g.pnl || 0);
+  return {
+    has_data: true,
+    mfe_mae: { avg_mfe: avg(mfeVals), avg_mae: avg(maeVals), max_mfe: Math.max(...mfeVals, 0), ratio: avg(maeVals) > 0 ? avg(mfeVals) / avg(maeVals) : 0 },
+    duration: { avg: Math.round(avg(groups.map(g => g.hold_duration_sec || 0))), min: Math.min(...groups.map(g => g.hold_duration_sec || 0)), max: Math.max(...groups.map(g => g.hold_duration_sec || 0)) },
+    spread: { avg_spread_winners: 0, avg_spread_losers: 0 },
+    hours, days, exit_reasons: exits, streak: { after_2loss_avg_pnl: 0, after_2loss_count: 0, normal_avg_pnl: avg(values), normal_count: groups.length },
+    profit_factor: grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? 99 : 0,
+    ev_per_trade: avg(values), avg_win: avg(wins), avg_loss: avg(losses), win_loss_ratio: Math.abs(avg(losses)) > 0 ? avg(wins) / Math.abs(avg(losses)) : 0,
+    max_drawdown: maxDd, max_drawdown_pct: 0,
+    mfe_capture: { avg: 0, avg_winners: 0, avg_losers: 0 },
+    trailing_stop_stats: { count: trailing.length, avg_pnl: avg(trailing), stop_price_avg_pnl: avg(priceStops) },
+    direction, tp_hit_rates: Object.fromEntries(Object.entries(exits).map(([k,v]) => [k, {count:v, pct:v/groups.length*100}])),
+    equity_curve: equity,
+    entry_price_buckets: entryBuckets, btc_deviation_buckets: devBuckets, duration_buckets: durBuckets
+  };
+}
+
 async function refresh() {
-  let [status, trades, stats, analytics, expStatus, expTrades, expAllTrades, trendExpStatus, trendExpTrades, trendExpAllTrades] = await Promise.all([
+  let [status, trades, expStatus, expTrades, expAllTrades, trendExpStatus, trendExpTrades, trendExpAllTrades] = await Promise.all([
     fetchJSON('/api/status'),
     fetchJSON('/api/trades'),
-    fetchJSON('/api/stats'),
-    fetchJSON('/api/analytics'),
     fetchJSON('/api/experiment/status'),
     fetchJSON('/api/experiment/trades'),
     fetchJSON('/api/experiment/all-trades'),
@@ -795,43 +938,32 @@ async function refresh() {
     }
   }
 
-  renderExperiment('exp', expStatus, expTrades);
-  renderExperiment('trend-exp', trendExpStatus, trendExpTrades);
-
   const allMainTrades = Array.isArray(trades) ? trades : [];
-  const filteredMainTrades = (currentFilter === 'all')
-    ? allMainTrades
-    : allMainTrades.filter(t => (t.mode || 'dry_run') === currentFilter);
   const startTime = status ? Number(status.start_time || 0) : 0;
-  const sessionMainTrades = filteredMainTrades.filter(t => {
+  const sessionAllMainTrades = allMainTrades.filter(t => {
     const ts = Number(t.exit_time || t.entry_time || 0);
     return !startTime || !ts || ts >= startTime;
   });
-  renderCoinPnl('main-coin-pnl', sessionMainTrades, filteredMainTrades);
+  const scopedMainTrades = filterByMode(selectScope(sessionAllMainTrades, allMainTrades));
+  const mainSummary = summarizeTradeRecords(scopedMainTrades);
+  renderExperiment('exp', expStatus, selectScope(expTrades, expAllTrades));
+  renderExperiment('trend-exp', trendExpStatus, selectScope(trendExpTrades, trendExpAllTrades));
+  renderCoinPnl('main-coin-pnl', filterByMode(sessionAllMainTrades), filterByMode(allMainTrades));
   renderCoinPnl('exp-coin-pnl', Array.isArray(expTrades) ? expTrades : [], Array.isArray(expAllTrades) ? expAllTrades : (Array.isArray(expTrades) ? expTrades : []));
   renderCoinPnl('trend-exp-coin-pnl', Array.isArray(trendExpTrades) ? trendExpTrades : [], Array.isArray(trendExpAllTrades) ? trendExpAllTrades : (Array.isArray(trendExpTrades) ? trendExpTrades : []));
 
-  if (stats) {
-    // 根据 currentFilter 选择数据源（all = 总计；live/dry_run = 单组）
-    const grp = (currentFilter === 'all')
-      ? { total_pnl: stats.total_pnl, win_rate: stats.win_rate,
-          wins: stats.wins, losses: stats.losses, total_trades: stats.total_trades }
-      : (stats.by_mode && stats.by_mode[currentFilter]) || { total_pnl: 0, win_rate: 0, wins: 0, losses: 0, total_trades: 0 };
-    const pnlEl = document.getElementById('total-pnl');
-    pnlEl.textContent = formatPnl(grp.total_pnl);
-    pnlEl.className = 'card-value ' + pnlClass(grp.total_pnl);
-    document.getElementById('daily-pnl').textContent = formatPnl(stats.daily_pnl);
-    document.getElementById('win-rate').textContent = grp.win_rate.toFixed(1) + '%';
-    document.getElementById('win-loss').textContent = grp.wins + 'W / ' + grp.losses + 'L';
-    document.getElementById('total-trades').textContent = grp.total_trades;
-  }
+  const pnlEl = document.getElementById('total-pnl');
+  pnlEl.textContent = formatPnl(mainSummary.pnl);
+  pnlEl.className = 'card-value ' + pnlClass(mainSummary.pnl);
+  document.getElementById('daily-pnl').textContent = scopeLabel();
+  document.getElementById('win-rate').textContent = mainSummary.winRate.toFixed(1) + '%';
+  document.getElementById('win-loss').textContent = mainSummary.wins + 'W / ' + mainSummary.losses + 'L';
+  document.getElementById('total-trades').textContent = mainSummary.total;
 
-  if (trades && trades.length > 0) {
+  if (allMainTrades.length > 0) {
     const tbody = document.getElementById('trades-body');
     let html = '';
-    const filtered = (currentFilter === 'all')
-      ? trades
-      : trades.filter(t => (t.mode || 'dry_run') === currentFilter);
+    const filtered = scopedMainTrades;
     const thCount = document.getElementById('th-count');
 
     // P&L mini sparkline（cum P&L 按 exit_time 排序）
@@ -841,16 +973,9 @@ async function refresh() {
       .map(t => (cum += (t.pnl || 0)));
     renderSparkline('pnl-spark', sparkData);
 
-    const groupedMap = new Map();
-    for (const t of filtered) {
-      const key = tradePeriodKey(t);
-      if (!groupedMap.has(key)) groupedMap.set(key, []);
-      groupedMap.get(key).push(t);
-    }
-    const groups = Array.from(groupedMap.values())
-      .map(summarizeTradeGroup)
+    const groups = groupTrades(filtered)
       .sort((a, b) => (b.exit_time || 0) - (a.exit_time || 0));
-    if (thCount) thCount.textContent = '(' + groups.length + ' entries / ' + filtered.length + ' exits)';
+    if (thCount) thCount.textContent = scopeLabel() + ' · ' + groups.length + ' entries / ' + filtered.length + ' exits';
 
     if (groups.length === 0) {
       tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades for current filter</td></tr>';
@@ -909,11 +1034,8 @@ async function refresh() {
     renderSparkline('pnl-spark', []);
   }
 
-  // Analytics section — 根据 currentFilter 选数据源
-  // all = 顶层；live/dry_run = analytics.by_mode.X
-  if (currentFilter !== 'all' && analytics && analytics.by_mode && analytics.by_mode[currentFilter]) {
-    analytics = analytics.by_mode[currentFilter];
-  }
+  // Analytics section follows the same global scope + mode filter as the rest of the dashboard.
+  const analytics = analyticsFromTrades(scopedMainTrades);
   if (analytics && analytics.has_data) {
     const mm = analytics.mfe_mae;
     document.getElementById('a-avg-mfe').textContent = '+' + (mm.avg_mfe * 100).toFixed(1) + 'c';
