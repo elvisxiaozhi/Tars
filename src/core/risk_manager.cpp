@@ -20,9 +20,9 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
         return false;
     }
 
-    if (stop_price_this_hour_ >= 3) {
-        reject_reason = "global_stop_price_limit: " + std::to_string(stop_price_this_hour_) +
-                        "/3 this hour";
+    if (sig.coin != "BTC" && non_btc_stop_price_this_hour_ >= 2) {
+        reject_reason = "non_btc_stop_price_limit: " +
+                        std::to_string(non_btc_stop_price_this_hour_) + "/2 this hour";
         return false;
     }
 
@@ -68,6 +68,7 @@ void RiskManager::reset_global_hour() {
     candle_stopped_ = false;
     stopped_coins_.clear();
     stop_price_this_hour_ = 0;
+    non_btc_stop_price_this_hour_ = 0;
 }
 
 double RiskManager::compute_position_size() const {
@@ -85,9 +86,11 @@ void RiskManager::record_loss(double amount) {
                   amount, daily_pnl_, consecutive_losses_);
 }
 
-void RiskManager::record_stop_price() {
+void RiskManager::record_stop_price(const std::string& coin) {
     stop_price_this_hour_++;
-    spdlog::warn("RISK: global stop_price count this hour = {}/3", stop_price_this_hour_);
+    if (coin != "BTC") non_btc_stop_price_this_hour_++;
+    spdlog::warn("RISK: stop_price count this hour = {} total, {} non-BTC/2",
+                 stop_price_this_hour_, non_btc_stop_price_this_hour_);
 }
 
 void RiskManager::record_profit(double amount) {
@@ -108,6 +111,7 @@ void RiskManager::reset_daily() {
     candle_stopped_ = false;
     stopped_coins_.clear();
     stop_price_this_hour_ = 0;
+    non_btc_stop_price_this_hour_ = 0;
     spdlog::info("RISK: daily stats reset");
 }
 

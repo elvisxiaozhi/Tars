@@ -19,6 +19,27 @@ double Strategy::max_entry_price(int minutes_remaining) const {
     return 0;  // 不入场
 }
 
+namespace {
+
+struct LegacyEntryFilter {
+    double min_entry = 0.18;
+    double max_entry = 0.26;
+    double max_abs_dev = 0.30;
+    double max_spread = 0.03;
+};
+
+LegacyEntryFilter legacy_filter_for_coin(const std::string& coin) {
+    if (coin == "BTC" || coin == "SOL") {
+        return {0.18, 0.26, 0.30, 0.03};
+    }
+    if (coin == "ETH") {
+        return {0.20, 0.26, 0.25, 0.02};
+    }
+    return {0.20, 0.24, 0.20, 0.02};
+}
+
+}  // namespace
+
 // 计算费后回本价：在 sell_price 卖出时，扣除买卖双向手续费后刚好不亏
 // 手续费公式：shares × 0.05 × p × (1-p)
 // 买入成本/share = entry_price + 0.05 × entry_price × (1 - entry_price)
@@ -63,6 +84,7 @@ EntrySignal Strategy::evaluate_entry(
         sig.reject_reason = "no_entry_window";
         return sig;
     }
+    LegacyEntryFilter filter = legacy_filter_for_coin(coin_);
 
     // 方向选择：选择更便宜的一方买入
     Side candidate_side = Side::NONE;
@@ -97,6 +119,12 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
 
+    if (std::abs(btc.deviation_pct) > filter.max_abs_dev) {
+        sig.reject_reason = "legacy_dev_too_large: " + std::to_string(btc.deviation_pct) +
+            " > " + std::to_string(filter.max_abs_dev);
+        return sig;
+    }
+
     // §九.1 红线：不追涨买入超过30¢的合约
     if (candidate_ask > 0.30) {
         sig.reject_reason = "red_line_30c: ask=" + std::to_string(candidate_ask);
@@ -108,7 +136,7 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
     double spread = candidate_ask - candidate_bid;
-    if (spread < 0 || spread > 0.03) {
+    if (spread < 0 || spread > filter.max_spread) {
         sig.reject_reason = "legacy_spread_wide: " + std::to_string(spread);
         return sig;
     }
@@ -120,20 +148,22 @@ EntrySignal Strategy::evaluate_entry(
     // §二：在当前价下方1¢挂限价买单
     sig.entry_price = candidate_ask - 0.01;
     if (sig.entry_price < 0.01) sig.entry_price = 0.01;
-    if (sig.entry_price < 0.10 || sig.entry_price > 0.30) {
+    if (sig.entry_price < filter.min_entry || sig.entry_price > filter.max_entry) {
         sig.valid = false;
-        sig.reject_reason = "entry_out_of_range_10_30c: " + std::to_string(sig.entry_price);
+        sig.reject_reason = "entry_out_of_range_by_coin: " + std::to_string(sig.entry_price) +
+            " not in " + std::to_string(filter.min_entry) + "-" +
+            std::to_string(filter.max_entry);
         return sig;
     }
     sig.size_usdc = 1.00;
     sig.shares = sig.size_usdc / sig.entry_price;
     sig.token_id = candidate_token;
 
-    spdlog::info("SIGNAL [{}]: {} {} @ {:.3f} (ask={:.3f}, max={:.3f}, size=${:.2f}, dev={:+.2f}%)",
+    spdlog::info("SIGNAL [{}]: {} {} @ {:.3f} (ask={:.3f}, range={:.2f}-{:.2f}, spread={:.3f}, size=${:.2f}, dev={:+.2f}%)",
                  coin_,
                  (sig.side == Side::UP ? "UP" : "DOWN"),
-                 question, sig.entry_price, candidate_ask, max_price, sig.size_usdc,
-                 btc.deviation_pct);
+                 question, sig.entry_price, candidate_ask, filter.min_entry,
+                 filter.max_entry, spread, sig.size_usdc, btc.deviation_pct);
 
     return sig;
 }
@@ -207,34 +237,41 @@ ExitSignal Strategy::evaluate_exit(
         return exit;
     }
 
+    if (elapsed_sec >= 300 && mfe_gain < 0.02 &&
+        current_contract_price <= pos.entry_price - 0.05) {
+        exit.should_exit = true;
+        exit.reason = "fast_fail_exit";
+        exit.exit_price = current_contract_price;
+        exit.use_market_order = true;
+        spdlog::warn("FAST FAIL EXIT: {} elapsed={}s mfe_gain={:+.3f} entry={:.3f} now={:.3f}",
+                     pos.market_question, elapsed_sec, mfe_gain,
+                     pos.entry_price, current_contract_price);
+        return exit;
+    }
+
     // §五.2 移动止盈（Trailing Stop）：基于 MFE 动态提升止损线
     // Step 2.20：阈值从 +25/+15 降到 +15/+10，捕获低入场价（$0.10-$0.20）的相对涨幅
     double mfe = pos.max_price - pos.entry_price;
     if (mfe >= 0.15) {
-        // MFE ≥ +15¢：peak-based 止损 = max(peak - 15¢, entry + 10¢)
-        // 回吐超过峰值 15¢ 即离场；同时保底至少 +10¢ 利润
-        double trailing_stop = std::max(pos.max_price - 0.15, pos.entry_price + 0.10);
+        double trailing_stop = std::max(pos.max_price - 0.07, pos.entry_price + 0.08);
         if (current_contract_price <= trailing_stop) {
             exit.should_exit = true;
             exit.reason = "trailing_stop";
             exit.exit_price = current_contract_price;
             exit.use_market_order = true;
-            spdlog::warn("TRAILING STOP (peak-15c): {} entry={:.3f} peak={:.3f} now={:.3f} stop={:.3f}",
+            spdlog::warn("TRAILING STOP (mfe>=15c): {} entry={:.3f} peak={:.3f} now={:.3f} stop={:.3f}",
                          pos.market_question, pos.entry_price, pos.max_price,
                          current_contract_price, trailing_stop);
             return exit;
         }
     } else if (mfe >= 0.10) {
-        // MFE ≥ +10¢：锁住 +5¢ 利润（Step 2.22 从保本档升级到 +5¢ 档）
-        // 依据：4-29~4-30 三笔 trailing 亏损 max 都在 +11¢~+12¢，触发保本档后回吐到 entry-2¢
-        // 出场（合计 -$1.40）；改为 entry+5¢ 阈值后这三笔可锁住 +$1.50（净 +$2.90）
-        double trailing_stop = pos.entry_price + 0.05;
+        double trailing_stop = std::max(pos.max_price - 0.08, pos.entry_price + 0.04);
         if (current_contract_price <= trailing_stop) {
             exit.should_exit = true;
             exit.reason = "trailing_stop";
             exit.exit_price = current_contract_price;
             exit.use_market_order = true;
-            spdlog::warn("TRAILING STOP (entry+5c): {} entry={:.3f} peak={:.3f} now={:.3f} stop={:.3f}",
+            spdlog::warn("TRAILING STOP (mfe>=10c): {} entry={:.3f} peak={:.3f} now={:.3f} stop={:.3f}",
                          pos.market_question, pos.entry_price, pos.max_price,
                          current_contract_price, trailing_stop);
             return exit;
@@ -257,20 +294,20 @@ ExitSignal Strategy::evaluate_last_10min(
     ExitSignal exit;
 
     // §六 最后10分钟特殊处理
-    if (current_contract_price < 0.20) {
-        // 0-20¢：立即清仓（时间止损）
+    if (current_contract_price < 0.25) {
+        // 0-25¢：立即清仓（时间止损）
         exit.should_exit = true;
         exit.reason = "stop_time";
         exit.exit_price = current_contract_price;
         exit.use_market_order = true;
-        spdlog::warn("TIME STOP: price={:.3f} < 20¢ with {}min left",
+        spdlog::warn("TIME STOP: price={:.3f} < 25¢ with {}min left",
                      current_contract_price, minutes_remaining);
     } else if (current_contract_price >= 0.80) {
         // 80¢以上：持有到期博 $1 结算
         spdlog::debug("HOLD TO EXPIRY: price={:.3f} >= 80¢, {}min left",
                       current_contract_price, minutes_remaining);
     }
-    // 20-80¢：继续按止盈规则走
+    // 25-80¢：继续按止盈规则走
 
     return exit;
 }

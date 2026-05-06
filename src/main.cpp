@@ -1638,10 +1638,11 @@ int main(int argc, char* argv[]) {
                     // §三 止损后本场不再交易（价格止损 / 时间止损 / 移动止盈回撤 / 死水早退都算止损出场）
                     if (exit_sig.reason == "stop_price" || exit_sig.reason == "stop_time" ||
                         exit_sig.reason == "stop_btc" ||
-                        exit_sig.reason == "trailing_stop" || exit_sig.reason == "dead_water_exit") {
+                        exit_sig.reason == "trailing_stop" || exit_sig.reason == "dead_water_exit" ||
+                        exit_sig.reason == "fast_fail_exit") {
                         risk.set_candle_stopped(pos.coin);
                         if (exit_sig.reason == "stop_price") {
-                            risk.record_stop_price();
+                            risk.record_stop_price(pos.coin);
                         }
                         spdlog::warn("Candle stopped [{}]: {} triggered, no more trades this candle",
                                      pos.coin, exit_sig.reason);

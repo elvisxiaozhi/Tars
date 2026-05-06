@@ -23,7 +23,7 @@ public:
     void record_loss(double amount);
 
     // 记录本小时一次价格止损，用于全局熔断
-    void record_stop_price();
+    void record_stop_price(const std::string& coin);
 
     // 记录一次盈利
     void record_profit(double amount);
@@ -53,6 +53,7 @@ public:
     double daily_pnl() const { return daily_pnl_; }
     int open_position_count() const { return open_positions_; }
     int stop_price_this_hour() const { return stop_price_this_hour_; }
+    int non_btc_stop_price_this_hour() const { return non_btc_stop_price_this_hour_; }
 
     // 仓位计数
     void add_position() { open_positions_++; }
@@ -71,6 +72,7 @@ private:
     int daily_trades_ = 0;
     double daily_pnl_ = 0;
     int stop_price_this_hour_ = 0;
+    int non_btc_stop_price_this_hour_ = 0;
     bool candle_stopped_ = false;  // 本场 K线 已止损，禁止再交易
     std::set<std::string> stopped_coins_;
 };
