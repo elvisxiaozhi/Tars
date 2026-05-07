@@ -1,6 +1,6 @@
 # Polymarket 1小时 UP/DOWN 交易策略
 
-> 最后更新：2026-05-05。当前主策略是多币种监听版 `legacy_cheap`：dry run 可模拟多币种，live 模式只允许 BTC 真实交易。
+> 最后更新：2026-05-07。当前主策略是多币种监听版 `legacy_cheap`：dry run 可模拟多币种，live 模式只允许 BTC 真实交易。
 
 ---
 
@@ -30,8 +30,9 @@
 | 时间窗口 | `minutes_remaining > 35` |
 | 方向选择 | 买入 UP / DOWN 中 ask 更低的一方 |
 | ask 红线 | `candidate_ask <= 0.30` |
-| 入场价区间 | `0.10 <= entry_price <= 0.30` |
-| spread 过滤 | `candidate_ask - candidate_bid <= 0.03` |
+| 入场价区间 | 按币种配置：BTC/SOL `0.18-0.26`，ETH `0.20-0.26`，其它 `0.20-0.24` |
+| spread 过滤 | 按币种配置：BTC/SOL `<= 0.03`，其它更严；`0.20 <= entry < 0.25` 时必须 `<= 0.01` |
+| dev 过滤 | `abs(dev)` 不超过币种阈值；且不能明显偏向候选方向的反面 |
 | 挂单价格 | `entry_price = candidate_ask - 0.01`，最低 0.01 |
 | 单笔成本 | `size_usdc = $1.00` |
 | 同币种持仓 | 同一币种已有未平仓仓位时，不再开该币种 |
@@ -52,10 +53,26 @@
 
 低价不等于便宜。昨晚 `<10c` 的交易合计亏损约 `$2.58`，很多是已经接近归零的一边。
 
-当前只允许：
+当前主策略不再用统一区间，而是按币种过滤：
 
 ```text
-0.10 <= entry_price <= 0.30
+BTC/SOL: 0.18 <= entry_price <= 0.26
+ETH:     0.20 <= entry_price <= 0.26
+Others:  0.20 <= entry_price <= 0.24
+```
+
+如果 `0.20 <= entry_price < 0.25`，还需要二次过滤：
+
+```text
+spread <= 0.01
+abs(dev) <= coin_max_abs_dev * 0.80
+```
+
+此外，便宜边不能明显逆着 BTC 当前 dev：
+
+```text
+买 UP   时 dev >= -0.12%
+买 DOWN 时 dev <= +0.12%
 ```
 
 ---
@@ -83,7 +100,7 @@
 
 ### 全局 stop_price 熔断
 
-如果本小时全局累计 `stop_price >= 3`，本小时停止所有新开仓。
+如果本小时全局累计 `stop_price >= 2`，本小时停止所有新开仓。
 
 目的：当某一小时出现集体错误方向、盘口恶化或市场急变时，避免多币种连续吃止损。
 
@@ -127,7 +144,22 @@
 - 该币种本小时暂停
 - 本小时全局 `stop_price` 计数 +1
 
-### 5.2 死水早退
+### 5.2 快速失败
+
+入场 3 分钟后，如果 MFE 未启动且价格已明显走弱：
+
+```text
+elapsed_sec >= 180
+max_price - entry_price < 0.02
+current_price <= entry_price - 0.03
+```
+
+则退出：
+
+- exit_reason = `fast_fail_exit`
+- 用于提前处理无启动且快速走弱的仓位
+
+### 5.3 死水早退
 
 入场 8 分钟后，如果 MFE 未启动：
 
@@ -143,7 +175,18 @@ current_price >= entry_price * 0.85
 - 只处理浅亏且无启动的仓位
 - 深亏仓位交给 `stop_price` 处理
 
-### 5.3 移动止盈
+### 5.4 移动止盈
+
+如果任意 TP 已触发，残仓跌回：
+
+```text
+current_price <= entry_price + 0.02
+```
+
+则退出：
+
+- exit_reason = `trailing_stop`
+- 防止盈利仓位的尾仓回吐到接近亏损
 
 基于持仓期间最高价 `max_price`：
 
@@ -158,7 +201,7 @@ current_price >= entry_price * 0.85
 - 按 best bid 出场
 - 该币种本小时暂停
 
-### 5.4 最后 10 分钟时间处理
+### 5.5 最后 10 分钟时间处理
 
 如果进入最后 10 分钟：
 
@@ -213,13 +256,13 @@ current_price < strike -> 买 DOWN
 
 | 条件 | 当前规则 |
 |------|----------|
-| 时间窗口 | `minutes_remaining > 20` |
+| 时间窗口 | `20 < minutes_remaining <= 40` |
 | 方向 | 只买强边 |
-| ask 区间 | `0.60 <= ask <= 0.80` |
-| spread | `ask - bid <= 0.03` |
+| ask 区间 | `0.65 <= ask <= 0.72` |
+| spread | `ask - bid <= 0.02` |
 | 挂单价格 | `entry_price = ask - 0.01` |
 | 单笔成本 | `$1.00` |
-| dev 阈值 | 暂不启用 |
+| dev 阈值 | `abs(dev) >= 0.12%` |
 | 波动率过滤 | 暂不启用 |
 | 失速过滤 | 暂不启用 |
 
@@ -235,12 +278,14 @@ current_price < strike -> 买 DOWN
 
 | 类型 | 当前规则 |
 |------|----------|
-| 价格止损 | `current_price <= entry_price - 0.20` |
-| dev 反转 | UP 仓位 `dev <= 0`；DOWN 仓位 `dev >= 0` |
-| 死水退出 | 入场 10 分钟后，`MFE < 0.03` |
-| 移动止盈一档 | `MFE >= 0.10` 后，`max(entry + 0.03, max_price - 0.06)` |
-| 移动止盈二档 | `MFE >= 0.15` 后，`max(entry + 0.06, max_price - 0.05)` |
-| 最后 10 分钟 | `current_price < 0.55` 退出；`>= 0.80` 倾向持有到期 |
+| 价格止损 | `current_price <= entry_price - 0.08` |
+| dev 动量衰减 | UP 仓位 `dev < entry_dev - 0.08%`；DOWN 仓位 `dev > entry_dev + 0.08%` |
+| fast_fail | 入场 150 秒后，`MFE < 0.02` 且 `current <= entry - 0.03` |
+| 死水退出 | 入场 8 分钟后，`MFE < 0.03` |
+| TP 后残仓保护 | 任意 TP 触发后，`current <= entry + 0.02` 则移动止盈退出 |
+| 移动止盈一档 | `MFE >= 0.08` 后，`max(entry + 0.02, max_price - 0.05)` |
+| 移动止盈二档 | `MFE >= 0.12` 后，`max(entry + 0.05, max_price - 0.04)` |
+| 最后 10 分钟 | `current_price < 0.60` 退出 |
 
 风控：
 
@@ -279,7 +324,7 @@ current_price < strike -> 买 DOWN
 5. 不加仓到亏损仓位
 6. 同币种持仓未清前，不再开该币种
 7. 同币种止损后，本小时不再交易该币种
-8. 本小时全局 stop_price >= 3 后，停止所有新开仓
+8. 本小时全局 stop_price >= 2 后，停止所有新开仓
 9. live 模式只允许 BTC
 
 ---

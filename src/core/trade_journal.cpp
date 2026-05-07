@@ -75,6 +75,8 @@ TradeJournal::TradeJournal(const std::string& path) : path_(path) {
             r.mfe5_gain_pct               = j.value("mfe5_gain_pct", 0.0);
             r.mfe10_gain_pct              = j.value("mfe10_gain_pct", 0.0);
             r.mfe15_gain_pct              = j.value("mfe15_gain_pct", 0.0);
+            r.has_tp_before_exit          = j.value("has_tp_before_exit", false);
+            r.tp_count_before_exit        = j.value("tp_count_before_exit", 0);
             r.dw_btc_dev_pct              = j.value("dw_btc_dev_pct", 0.0);
             r.dw_vol_ratio                = j.value("dw_vol_ratio", 0.0);
             r.dw_spread                   = j.value("dw_spread", 0.0);
@@ -141,6 +143,8 @@ void TradeJournal::record(const TradeRecord& trade) {
     j["mfe5_gain_pct"] = trade.mfe5_gain_pct;
     j["mfe10_gain_pct"] = trade.mfe10_gain_pct;
     j["mfe15_gain_pct"] = trade.mfe15_gain_pct;
+    j["has_tp_before_exit"] = trade.has_tp_before_exit;
+    j["tp_count_before_exit"] = trade.tp_count_before_exit;
     // dead_water 触发时的上下文埋点（仅 dead_water_exit 时有意义；其它 exit 全为默认 0/false）
     j["dw_btc_dev_pct"]  = trade.dw_btc_dev_pct;
     j["dw_vol_ratio"]    = trade.dw_vol_ratio;

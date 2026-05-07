@@ -26,6 +26,12 @@ bool RiskManager::can_open_position(const EntrySignal& sig,
         return false;
     }
 
+    if (stop_price_this_hour_ >= 2) {
+        reject_reason = "global_stop_price_limit: " +
+                        std::to_string(stop_price_this_hour_) + "/2 this hour";
+        return false;
+    }
+
     // Live mode keeps the original global single-position risk gate.
     if (live_mode_ && open_positions_ >= max_concurrent_) {
         reject_reason = "max_concurrent: " + std::to_string(open_positions_) +
@@ -89,7 +95,7 @@ void RiskManager::record_loss(double amount) {
 void RiskManager::record_stop_price(const std::string& coin) {
     stop_price_this_hour_++;
     if (coin != "BTC") non_btc_stop_price_this_hour_++;
-    spdlog::warn("RISK: stop_price count this hour = {} total, {} non-BTC/2",
+    spdlog::warn("RISK: stop_price count this hour = {}/2 total, {} non-BTC/2",
                  stop_price_this_hour_, non_btc_stop_price_this_hour_);
 }
 

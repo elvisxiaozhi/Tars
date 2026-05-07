@@ -54,6 +54,8 @@ struct TradeRecord {
     double mfe5_gain_pct = 0;   // (mfe_at_5min - entry) / entry
     double mfe10_gain_pct = 0;
     double mfe15_gain_pct = 0;
+    bool has_tp_before_exit = false;  // 本条记录生成前/生成时该仓位是否已有 TP 触发
+    int tp_count_before_exit = 0;     // 本条记录生成前/生成时该仓位已触发 TP 数量
     // §五.1b dead_water 触发时的市场上下文埋点（仅 exit_reason=="dead_water_exit" 填）
     // Step 2.23：用于 20+ 笔后回归是否要加 BTC 方向 / vol 条件
     double dw_btc_dev_pct = 0;       // 触发瞬间 BTC dev (%)

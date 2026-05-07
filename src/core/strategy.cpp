@@ -1,5 +1,6 @@
 #include "core/strategy.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <utility>
@@ -125,6 +126,14 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
 
+    if ((candidate_side == Side::UP && btc.deviation_pct < -0.12) ||
+        (candidate_side == Side::DOWN && btc.deviation_pct > 0.12)) {
+        sig.reject_reason = "legacy_dev_against_side: side=" +
+            std::string(candidate_side == Side::UP ? "UP" : "DOWN") +
+            " dev=" + std::to_string(btc.deviation_pct);
+        return sig;
+    }
+
     // §九.1 红线：不追涨买入超过30¢的合约
     if (candidate_ask > 0.30) {
         sig.reject_reason = "red_line_30c: ask=" + std::to_string(candidate_ask);
@@ -154,6 +163,21 @@ EntrySignal Strategy::evaluate_entry(
             " not in " + std::to_string(filter.min_entry) + "-" +
             std::to_string(filter.max_entry);
         return sig;
+    }
+    if (sig.entry_price >= 0.20 && sig.entry_price < 0.25) {
+        if (spread > 0.010001) {
+            sig.valid = false;
+            sig.reject_reason = "legacy_mid_entry_spread_wide: " + std::to_string(spread);
+            return sig;
+        }
+        double mid_dev_limit = filter.max_abs_dev * 0.80;
+        if (std::abs(btc.deviation_pct) > mid_dev_limit) {
+            sig.valid = false;
+            sig.reject_reason = "legacy_mid_entry_dev_too_large: " +
+                std::to_string(btc.deviation_pct) + " > " +
+                std::to_string(mid_dev_limit);
+            return sig;
+        }
     }
     sig.size_usdc = 1.00;
     sig.shares = sig.size_usdc / sig.entry_price;
@@ -226,24 +250,36 @@ ExitSignal Strategy::evaluate_exit(
     //   实测 5 笔 dead_water 中 2 笔触发时 current 已 -37/-38%，这种深亏应让
     //   stop_price 接管而非 dead_water"接受任意亏损"。floor=entry × 0.85（亏 ≤15%）
     bool shallow_loss = (current_contract_price >= pos.entry_price * 0.85);
+    if (elapsed_sec >= 180 && mfe_gain < 0.02 &&
+        current_contract_price <= pos.entry_price - 0.03) {
+        exit.should_exit = true;
+        exit.reason = "fast_fail_exit";
+        exit.exit_price = current_contract_price;
+        exit.use_market_order = true;
+        spdlog::warn("FAST FAIL EXIT: {} elapsed={}s mfe_gain={:+.3f} entry={:.3f} now={:.3f}",
+                     pos.market_question, elapsed_sec, mfe_gain,
+                     pos.entry_price, current_contract_price);
+        return exit;
+    }
+
+    bool has_tp = std::any_of(pos.tp_levels.begin(), pos.tp_levels.end(),
+        [](const TakeProfitLevel& tp) { return tp.triggered; });
+    if (has_tp && current_contract_price <= pos.entry_price + 0.02) {
+        exit.should_exit = true;
+        exit.reason = "trailing_stop";
+        exit.exit_price = current_contract_price;
+        exit.use_market_order = true;
+        spdlog::warn("TP PROTECT STOP: {} entry={:.3f} now={:.3f}",
+                     pos.market_question, pos.entry_price, current_contract_price);
+        return exit;
+    }
+
     if (elapsed_sec >= 480 && mfe_gain < 0.02 && shallow_loss) {
         exit.should_exit = true;
         exit.reason = "dead_water_exit";
         exit.exit_price = current_contract_price;
         exit.use_market_order = true;
         spdlog::warn("DEAD WATER EXIT: {} elapsed={}s mfe_gain={:+.3f} entry={:.3f} now={:.3f}",
-                     pos.market_question, elapsed_sec, mfe_gain,
-                     pos.entry_price, current_contract_price);
-        return exit;
-    }
-
-    if (elapsed_sec >= 300 && mfe_gain < 0.02 &&
-        current_contract_price <= pos.entry_price - 0.05) {
-        exit.should_exit = true;
-        exit.reason = "fast_fail_exit";
-        exit.exit_price = current_contract_price;
-        exit.use_market_order = true;
-        spdlog::warn("FAST FAIL EXIT: {} elapsed={}s mfe_gain={:+.3f} entry={:.3f} now={:.3f}",
                      pos.market_question, elapsed_sec, mfe_gain,
                      pos.entry_price, current_contract_price);
         return exit;

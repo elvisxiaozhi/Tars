@@ -55,6 +55,22 @@ void append_jsonl(const std::string& path, const TradeRecord& rec) {
     j["fee"] = rec.fee_paid;
     j["max_price"] = rec.max_price;
     j["min_price"] = rec.min_price;
+    j["btc_price"] = rec.btc_price_at_entry;
+    j["btc_strike"] = rec.btc_strike;
+    j["btc_deviation_pct"] = rec.btc_deviation_pct;
+    j["entry_vol"] = rec.entry_vol;
+    j["avg_vol"] = rec.avg_vol;
+    j["btc_price_at_exit"] = rec.btc_price_at_exit;
+    j["btc_deviation_at_exit"] = rec.btc_deviation_at_exit;
+    j["spread_at_entry"] = rec.spread_at_entry;
+    j["hold_duration_sec"] = rec.hold_duration_sec;
+    j["mfe_capture_rate"] = rec.mfe_capture_rate;
+    j["mfe_at_5min"] = rec.mfe_at_5min;
+    j["mfe_at_10min"] = rec.mfe_at_10min;
+    j["mfe_at_15min"] = rec.mfe_at_15min;
+    j["mfe5_gain_pct"] = rec.mfe5_gain_pct;
+    j["mfe10_gain_pct"] = rec.mfe10_gain_pct;
+    j["mfe15_gain_pct"] = rec.mfe15_gain_pct;
     std::ofstream out(path, std::ios::app);
     if (out) out << j.dump() << "\n";
 }
@@ -203,6 +219,10 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
         sig.reject_reason = "time_too_short";
         return sig;
     }
+    if (md.minutes_remaining > 40) {
+        sig.reject_reason = "trend_follow_too_early";
+        return sig;
+    }
 
     Side side = md.deviation_pct > 0 ? Side::UP :
                 md.deviation_pct < 0 ? Side::DOWN : Side::NONE;
@@ -227,7 +247,7 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
     double ask = side == Side::UP ? quotes.up_ask : quotes.down_ask;
     double bid = side == Side::UP ? quotes.up_bid : quotes.down_bid;
     std::string token = side == Side::UP ? quotes.up_token_id : quotes.down_token_id;
-    if (ask < 0.65 || ask > 0.75) {
+    if (ask < 0.65 || ask > 0.72) {
         sig.reject_reason = "trend_follow_price_window";
         return sig;
     }
@@ -362,27 +382,40 @@ ExitSignal ExperimentStrategy::evaluate_trend_follow_exit(
     int64_t elapsed_sec = (wall_now_ms() - pos.entry_time) / 1000;
     double mfe = pos.max_price - pos.entry_price;
 
-    if (current_contract_price <= pos.entry_price - 0.12) {
+    if (current_contract_price <= pos.entry_price - 0.08) {
         exit.should_exit = true;
         exit.reason = "stop_price";
         exit.exit_price = current_contract_price;
         return exit;
     }
 
-    bool dev_crossed_zero =
-        (pos.side == Side::UP && md.deviation_pct <= 0) ||
-        (pos.side == Side::DOWN && md.deviation_pct >= 0);
-    if (dev_crossed_zero) {
+    double entry_dev = pos.btc_strike_at_entry > 0
+        ? (pos.btc_price_at_entry - pos.btc_strike_at_entry) /
+            pos.btc_strike_at_entry * 100.0
+        : 0.0;
+    bool dev_momentum_faded =
+        (pos.side == Side::UP && md.deviation_pct < entry_dev - 0.08) ||
+        (pos.side == Side::DOWN && md.deviation_pct > entry_dev + 0.08);
+    if (dev_momentum_faded) {
         exit.should_exit = true;
         exit.reason = "stop_btc";
         exit.exit_price = current_contract_price;
         return exit;
     }
 
-    if (elapsed_sec >= 240 && mfe < 0.02 &&
-        current_contract_price <= pos.entry_price - 0.04) {
+    if (elapsed_sec >= 150 && mfe < 0.02 &&
+        current_contract_price <= pos.entry_price - 0.03) {
         exit.should_exit = true;
         exit.reason = "fast_fail_exit";
+        exit.exit_price = current_contract_price;
+        return exit;
+    }
+
+    bool has_tp = std::any_of(pos.tp_levels.begin(), pos.tp_levels.end(),
+        [](const TakeProfitLevel& tp) { return tp.triggered; });
+    if (has_tp && current_contract_price <= pos.entry_price + 0.02) {
+        exit.should_exit = true;
+        exit.reason = "trailing_stop";
         exit.exit_price = current_contract_price;
         return exit;
     }
@@ -513,6 +546,16 @@ void ExperimentEngine::on_market(const std::string& coin,
         pos.current_price = current_price;
         pos.max_price = std::max(pos.max_price, current_price);
         pos.min_price = std::min(pos.min_price, current_price);
+        int64_t elapsed_sec = (now_ms - pos.entry_time) / 1000;
+        if (elapsed_sec <= 300 && current_price > pos.mfe_at_5min) {
+            pos.mfe_at_5min = current_price;
+        }
+        if (elapsed_sec <= 600 && current_price > pos.mfe_at_10min) {
+            pos.mfe_at_10min = current_price;
+        }
+        if (elapsed_sec <= 900 && current_price > pos.mfe_at_15min) {
+            pos.mfe_at_15min = current_price;
+        }
 
         for (auto& tp : pos.tp_levels) {
             if (tp.triggered || current_price < tp.trigger_price) continue;
@@ -618,7 +661,7 @@ void ExperimentEngine::on_market(const std::string& coin,
     }
 
     Position pos;
-    pos.id = id_prefix_ + std::to_string(next_id_++);
+    pos.id = id_prefix_ + std::to_string(now_ms) + "-" + std::to_string(next_id_++);
     pos.side = sig.side;
     pos.regime = sig.regime;
     pos.coin = sig.coin;
@@ -677,6 +720,14 @@ void ExperimentEngine::fill_record_analytics(TradeRecord& rec, const Position& p
     rec.hold_duration_sec = static_cast<int>((now_ms - pos.entry_time) / 1000);
     double mfe_range = pos.max_price - pos.entry_price;
     rec.mfe_capture_rate = mfe_range > 0 ? (rec.exit_price - pos.entry_price) / mfe_range : 0;
+    rec.mfe_at_5min = pos.mfe_at_5min;
+    rec.mfe_at_10min = pos.mfe_at_10min;
+    rec.mfe_at_15min = pos.mfe_at_15min;
+    if (pos.entry_price > 0) {
+        rec.mfe5_gain_pct = (pos.mfe_at_5min - pos.entry_price) / pos.entry_price;
+        rec.mfe10_gain_pct = (pos.mfe_at_10min - pos.entry_price) / pos.entry_price;
+        rec.mfe15_gain_pct = (pos.mfe_at_15min - pos.entry_price) / pos.entry_price;
+    }
 }
 
 void ExperimentEngine::record_trade(const TradeRecord& rec) {

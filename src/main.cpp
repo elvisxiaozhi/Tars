@@ -167,6 +167,10 @@ static void fill_analytics(polymarket::TradeRecord& rec,
         rec.mfe10_gain_pct = (pos.mfe_at_10min - pos.entry_price) / pos.entry_price;
         rec.mfe15_gain_pct = (pos.mfe_at_15min - pos.entry_price) / pos.entry_price;
     }
+    rec.tp_count_before_exit = static_cast<int>(std::count_if(
+        pos.tp_levels.begin(), pos.tp_levels.end(),
+        [](const polymarket::TakeProfitLevel& tp) { return tp.triggered; }));
+    rec.has_tp_before_exit = rec.tp_count_before_exit > 0;
 }
 
 // === 共享状态（策略线程写，API 线程读） ===
@@ -484,6 +488,8 @@ int main(int argc, char* argv[]) {
             j["balance_before"] = t.balance_before;
             j["hold_duration_sec"] = t.hold_duration_sec;
             j["mfe_capture_rate"] = t.mfe_capture_rate;
+            j["has_tp_before_exit"] = t.has_tp_before_exit;
+            j["tp_count_before_exit"] = t.tp_count_before_exit;
             arr.push_back(j);
         }
         return arr.dump();
