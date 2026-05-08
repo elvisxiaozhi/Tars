@@ -29,6 +29,15 @@ struct LegacyEntryFilter {
     double max_spread = 0.03;
 };
 
+bool is_core_coin(const std::string& coin) {
+    return coin == "BTC" || coin == "ETH" || coin == "SOL";
+}
+
+bool side_aligned(Side side, double deviation_pct) {
+    return (side == Side::UP && deviation_pct > 0) ||
+           (side == Side::DOWN && deviation_pct < 0);
+}
+
 LegacyEntryFilter legacy_filter_for_coin(const std::string& coin) {
     if (coin == "BTC" || coin == "SOL") {
         return {0.18, 0.26, 0.30, 0.03};
@@ -58,7 +67,7 @@ static double breakeven_price(double entry_price) {
     return (-b + std::sqrt(disc)) / (2 * a);
 }
 
-EntrySignal Strategy::evaluate_entry(
+EntrySignal Strategy::evaluate_cheap_rebound(
     const BtcMarketData& btc,
     double up_bid, double up_ask,
     double down_bid, double down_ask,
@@ -70,29 +79,21 @@ EntrySignal Strategy::evaluate_entry(
     sig.condition_id = condition_id;
     sig.market_question = question;
     sig.coin = coin_;
-    sig.regime = StrategyRegime::LEGACY_CHEAP;
+    sig.regime = StrategyRegime::QUIET_REVERSION;
 
-    // §一.1 时间窗口：剩余时间 > 35 分钟
-    // 5/4 overnight: <=35m entries contributed most of the drawdown. Cheap
-    // contracts need enough time to reach staged TP levels.
-    if (minutes_remaining <= 35) {
-        sig.reject_reason = "time_too_short: " + std::to_string(minutes_remaining) + "min left";
+    if (minutes_remaining < 36 || minutes_remaining > 45) {
+        sig.reject_reason = "cheap_rebound_time_window";
+        return sig;
+    }
+    if (std::abs(btc.deviation_pct) > 0.12) {
+        sig.reject_reason = "cheap_rebound_dev_not_quiet";
         return sig;
     }
 
-    double max_price = max_entry_price(minutes_remaining);
-    if (max_price <= 0) {
-        sig.reject_reason = "no_entry_window";
-        return sig;
-    }
-    LegacyEntryFilter filter = legacy_filter_for_coin(coin_);
-
-    // 方向选择：选择更便宜的一方买入
     Side candidate_side = Side::NONE;
     double candidate_ask = 0;
     double candidate_bid = 0;
     std::string candidate_token;
-
     if (up_ask > 0 && (down_ask <= 0 || up_ask <= down_ask)) {
         candidate_side = Side::UP;
         candidate_ask = up_ask;
@@ -108,87 +109,132 @@ EntrySignal Strategy::evaluate_entry(
         return sig;
     }
 
-    // 价格条件
-    if (candidate_ask <= 0 || candidate_ask >= 1.0) {
-        sig.reject_reason = "invalid_ask: " + std::to_string(candidate_ask);
-        return sig;
-    }
-
-    if (candidate_ask > max_price) {
-        sig.reject_reason = "ask_too_high: " +
-            std::to_string(candidate_ask) + " > max " + std::to_string(max_price);
-        return sig;
-    }
-
-    if (std::abs(btc.deviation_pct) > filter.max_abs_dev) {
-        sig.reject_reason = "legacy_dev_too_large: " + std::to_string(btc.deviation_pct) +
-            " > " + std::to_string(filter.max_abs_dev);
-        return sig;
-    }
-
-    if ((candidate_side == Side::UP && btc.deviation_pct < -0.12) ||
-        (candidate_side == Side::DOWN && btc.deviation_pct > 0.12)) {
-        sig.reject_reason = "legacy_dev_against_side: side=" +
-            std::string(candidate_side == Side::UP ? "UP" : "DOWN") +
-            " dev=" + std::to_string(btc.deviation_pct);
-        return sig;
-    }
-
-    // §九.1 红线：不追涨买入超过30¢的合约
-    if (candidate_ask > 0.30) {
-        sig.reject_reason = "red_line_30c: ask=" + std::to_string(candidate_ask);
-        return sig;
-    }
-
-    if (candidate_bid <= 0) {
-        sig.reject_reason = "no_valid_bid";
+    if (candidate_bid <= 0 || candidate_ask <= 0 || candidate_ask > 0.29) {
+        sig.reject_reason = "cheap_rebound_invalid_price";
         return sig;
     }
     double spread = candidate_ask - candidate_bid;
-    if (spread < 0 || spread > filter.max_spread) {
-        sig.reject_reason = "legacy_spread_wide: " + std::to_string(spread);
+    if (spread < 0 || spread > 0.010001) {
+        sig.reject_reason = "cheap_rebound_spread_wide";
         return sig;
     }
 
-    // 信号有效
+    double entry_price = std::max(0.01, candidate_ask - 0.01);
+    double min_entry = is_core_coin(coin_) ? 0.22 : 0.24;
+    double max_entry = 0.28;
+    double max_abs_dev = is_core_coin(coin_) ? 0.12 : 0.08;
+    if (entry_price < min_entry || entry_price > max_entry) {
+        sig.reject_reason = "cheap_rebound_entry_range";
+        return sig;
+    }
+    if (std::abs(btc.deviation_pct) > max_abs_dev) {
+        sig.reject_reason = "cheap_rebound_coin_dev_too_large";
+        return sig;
+    }
+
     sig.valid = true;
     sig.side = candidate_side;
     sig.market_ask = candidate_ask;
-    // §二：在当前价下方1¢挂限价买单
-    sig.entry_price = candidate_ask - 0.01;
-    if (sig.entry_price < 0.01) sig.entry_price = 0.01;
-    if (sig.entry_price < filter.min_entry || sig.entry_price > filter.max_entry) {
-        sig.valid = false;
-        sig.reject_reason = "entry_out_of_range_by_coin: " + std::to_string(sig.entry_price) +
-            " not in " + std::to_string(filter.min_entry) + "-" +
-            std::to_string(filter.max_entry);
-        return sig;
-    }
-    if (sig.entry_price >= 0.20 && sig.entry_price < 0.25) {
-        if (spread > 0.010001) {
-            sig.valid = false;
-            sig.reject_reason = "legacy_mid_entry_spread_wide: " + std::to_string(spread);
-            return sig;
-        }
-        double mid_dev_limit = filter.max_abs_dev * 0.80;
-        if (std::abs(btc.deviation_pct) > mid_dev_limit) {
-            sig.valid = false;
-            sig.reject_reason = "legacy_mid_entry_dev_too_large: " +
-                std::to_string(btc.deviation_pct) + " > " +
-                std::to_string(mid_dev_limit);
-            return sig;
-        }
-    }
+    sig.entry_price = entry_price;
     sig.size_usdc = 1.00;
     sig.shares = sig.size_usdc / sig.entry_price;
     sig.token_id = candidate_token;
+    spdlog::info("SIGNAL [{} cheap_rebound]: {} {} @ {:.3f} (ask={:.3f}, spread={:.3f}, dev={:+.2f}%)",
+                 coin_, sig.side == Side::UP ? "UP" : "DOWN", question,
+                 sig.entry_price, candidate_ask, spread, btc.deviation_pct);
+    return sig;
+}
 
-    spdlog::info("SIGNAL [{}]: {} {} @ {:.3f} (ask={:.3f}, range={:.2f}-{:.2f}, spread={:.3f}, size=${:.2f}, dev={:+.2f}%)",
-                 coin_,
-                 (sig.side == Side::UP ? "UP" : "DOWN"),
-                 question, sig.entry_price, candidate_ask, filter.min_entry,
-                 filter.max_entry, spread, sig.size_usdc, btc.deviation_pct);
+EntrySignal Strategy::evaluate_momentum_follow(
+    const BtcMarketData& btc,
+    double up_bid, double up_ask,
+    double down_bid, double down_ask,
+    const std::string& up_token_id, const std::string& down_token_id,
+    const std::string& condition_id, const std::string& question,
+    int minutes_remaining) {
 
+    EntrySignal sig;
+    sig.condition_id = condition_id;
+    sig.market_question = question;
+    sig.coin = coin_;
+    sig.regime = StrategyRegime::TREND;
+
+    if (minutes_remaining < 32 || minutes_remaining > 42) {
+        sig.reject_reason = "momentum_time_window";
+        return sig;
+    }
+    double abs_dev = std::abs(btc.deviation_pct);
+    if (abs_dev < 0.20) {
+        sig.reject_reason = "momentum_dev_too_small";
+        return sig;
+    }
+
+    Side side = btc.deviation_pct > 0 ? Side::UP : Side::DOWN;
+    double ask = side == Side::UP ? up_ask : down_ask;
+    double bid = side == Side::UP ? up_bid : down_bid;
+    std::string token = side == Side::UP ? up_token_id : down_token_id;
+    if (bid <= 0 || ask <= 0) {
+        sig.reject_reason = "momentum_invalid_quote";
+        return sig;
+    }
+    double spread = ask - bid;
+    if (spread < 0 || spread > 0.010001) {
+        sig.reject_reason = "momentum_spread_wide";
+        return sig;
+    }
+
+    double entry_price = std::max(0.01, ask - 0.01);
+    if (entry_price < 0.64 || entry_price > 0.69) {
+        sig.reject_reason = "momentum_entry_range";
+        return sig;
+    }
+    if (entry_price > 0.68 && abs_dev < 0.24) {
+        sig.reject_reason = "momentum_high_entry_dev_weak";
+        return sig;
+    }
+    if (!is_core_coin(coin_) && abs_dev < 0.24) {
+        sig.reject_reason = "momentum_alt_dev_weak";
+        return sig;
+    }
+
+    sig.valid = true;
+    sig.side = side;
+    sig.market_ask = ask;
+    sig.entry_price = entry_price;
+    sig.size_usdc = 1.00;
+    sig.shares = sig.size_usdc / sig.entry_price;
+    sig.token_id = token;
+    spdlog::info("SIGNAL [{} momentum]: {} {} @ {:.3f} (ask={:.3f}, spread={:.3f}, dev={:+.2f}%)",
+                 coin_, sig.side == Side::UP ? "UP" : "DOWN", question,
+                 sig.entry_price, ask, spread, btc.deviation_pct);
+    return sig;
+}
+
+EntrySignal Strategy::evaluate_entry(
+    const BtcMarketData& btc,
+    double up_bid, double up_ask,
+    double down_bid, double down_ask,
+    const std::string& up_token_id, const std::string& down_token_id,
+    const std::string& condition_id, const std::string& question,
+    int minutes_remaining) {
+
+    double abs_dev = std::abs(btc.deviation_pct);
+    if (abs_dev <= 0.12) {
+        return evaluate_cheap_rebound(btc, up_bid, up_ask, down_bid, down_ask,
+                                      up_token_id, down_token_id, condition_id,
+                                      question, minutes_remaining);
+    }
+    if (abs_dev >= 0.20) {
+        return evaluate_momentum_follow(btc, up_bid, up_ask, down_bid, down_ask,
+                                        up_token_id, down_token_id, condition_id,
+                                        question, minutes_remaining);
+    }
+
+    EntrySignal sig;
+    sig.condition_id = condition_id;
+    sig.market_question = question;
+    sig.coin = coin_;
+    sig.reject_reason = "regime_uncertain: abs_dev=" + std::to_string(abs_dev);
     return sig;
 }
 
@@ -199,6 +245,13 @@ std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price) {
 std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price, StrategyRegime) {
     // §四 止盈规则：先锁利润，再保留趋势尾仓
     std::vector<TakeProfitLevel> levels;
+
+    if (entry_price >= 0.60) {
+        levels.push_back({0, std::min(0.88, entry_price + 0.08), 0.50, false});
+        levels.push_back({1, std::min(0.90, entry_price + 0.14), 0.50, false});
+        levels.push_back({2, 0.90, 1.00, false});
+        return levels;
+    }
 
     levels.push_back({0, 0.45, 0.50, false});  // TP0: sell 50% of remaining
     levels.push_back({1, 0.70, 0.50, false});  // TP1: sell 50% of remaining
@@ -217,6 +270,97 @@ ExitSignal Strategy::evaluate_exit(
     int minutes_remaining) {
 
     ExitSignal exit;
+    auto now_chrono = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    int64_t elapsed_sec = (now_chrono - pos.entry_time) / 1000;
+    double mfe_gain = pos.max_price - pos.entry_price;
+
+    if (pos.regime == StrategyRegime::TREND) {
+        if (current_contract_price <= pos.entry_price - 0.07) {
+            exit.should_exit = true;
+            exit.reason = "stop_price";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("MOMENTUM STOP: {} entry={:.3f} now={:.3f}",
+                         pos.market_question, pos.entry_price, current_contract_price);
+            return exit;
+        }
+
+        double entry_dev = pos.btc_strike_at_entry > 0
+            ? (pos.btc_price_at_entry - pos.btc_strike_at_entry) /
+                pos.btc_strike_at_entry * 100.0
+            : 0.0;
+        bool momentum_faded =
+            (pos.side == Side::UP && btc.deviation_pct < entry_dev - 0.08) ||
+            (pos.side == Side::DOWN && btc.deviation_pct > entry_dev + 0.08);
+        if (momentum_faded) {
+            exit.should_exit = true;
+            exit.reason = "stop_btc";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            return exit;
+        }
+
+        if (elapsed_sec >= 150 && mfe_gain < 0.02 &&
+            current_contract_price <= pos.entry_price - 0.03) {
+            exit.should_exit = true;
+            exit.reason = "fast_fail_exit";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            return exit;
+        }
+
+        bool has_tp = std::any_of(pos.tp_levels.begin(), pos.tp_levels.end(),
+            [](const TakeProfitLevel& tp) { return tp.triggered; });
+        if (has_tp && current_contract_price <= pos.entry_price + 0.02) {
+            exit.should_exit = true;
+            exit.reason = "trailing_stop";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            return exit;
+        }
+
+        double mfe = pos.max_price - pos.entry_price;
+        if (mfe >= 0.12) {
+            double trailing_stop = std::max(pos.entry_price + 0.05, pos.max_price - 0.04);
+            if (current_contract_price <= trailing_stop) {
+                exit.should_exit = true;
+                exit.reason = "trailing_stop";
+                exit.exit_price = current_contract_price;
+                exit.use_market_order = true;
+                return exit;
+            }
+        } else if (mfe >= 0.08) {
+            double trailing_stop = std::max(pos.entry_price + 0.02, pos.max_price - 0.05);
+            if (current_contract_price <= trailing_stop) {
+                exit.should_exit = true;
+                exit.reason = "trailing_stop";
+                exit.exit_price = current_contract_price;
+                exit.use_market_order = true;
+                return exit;
+            }
+        }
+
+        bool still_aligned = side_aligned(pos.side, btc.deviation_pct);
+        if (minutes_remaining <= 5 &&
+            (current_contract_price < 0.88 || !still_aligned)) {
+            exit.should_exit = true;
+            exit.reason = "stop_time";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            return exit;
+        }
+        if (minutes_remaining <= 8 &&
+            (current_contract_price < 0.78 || !still_aligned)) {
+            exit.should_exit = true;
+            exit.reason = "stop_time";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            return exit;
+        }
+
+        return exit;
+    }
 
     // §五.1 价格止损：从入场价下跌 ≥ 30%
     // Step 2.25：阈值从 -50% 收紧到 -30%。
@@ -242,10 +386,6 @@ ExitSignal Strategy::evaluate_exit(
     //     · 18:10 case：7m00s 涨到 0.43（mfe +20¢） → 8min 窗口能救
     //     · 13:11 case：18+ min 才反弹 → 8min 仍救不了，接受 -$0.36 损失
     //   救命 case（04-29、04-30 15:25）多扛 3 分钟，最坏多损 ~$0.2/笔。
-    auto now_chrono = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    int64_t elapsed_sec = (now_chrono - pos.entry_time) / 1000;
-    double mfe_gain = pos.max_price - pos.entry_price;
     // Step 2.25：dead_water 加 price floor，避免亏损 -10~-30% 时被 dead_water 误退出
     //   实测 5 笔 dead_water 中 2 笔触发时 current 已 -37/-38%，这种深亏应让
     //   stop_price 接管而非 dead_water"接受任意亏损"。floor=entry × 0.85（亏 ≤15%）

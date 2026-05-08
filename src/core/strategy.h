@@ -122,6 +122,20 @@ public:
 private:
     // 根据剩余时间返回最大入场价
     double max_entry_price(int minutes_remaining) const;
+    EntrySignal evaluate_cheap_rebound(
+        const BtcMarketData& btc,
+        double up_bid, double up_ask,
+        double down_bid, double down_ask,
+        const std::string& up_token_id, const std::string& down_token_id,
+        const std::string& condition_id, const std::string& question,
+        int minutes_remaining);
+    EntrySignal evaluate_momentum_follow(
+        const BtcMarketData& btc,
+        double up_bid, double up_ask,
+        double down_bid, double down_ask,
+        const std::string& up_token_id, const std::string& down_token_id,
+        const std::string& condition_id, const std::string& question,
+        int minutes_remaining);
 
     AppConfig cfg_;
     std::string coin_ = "BTC";

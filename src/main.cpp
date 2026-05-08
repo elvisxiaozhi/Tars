@@ -341,7 +341,8 @@ int main(int argc, char* argv[]) {
     }
     polymarket::RiskManager risk(cfg);
     polymarket::TradeJournal journal("./logs/trades.jsonl");
-    polymarket::ExperimentEngine experiment(cfg);
+    polymarket::ExperimentEngine experiment(
+        cfg, "legacy_cheap_v2", "./logs/experiment_legacy_cheap_v2_trades.jsonl", "L");
     polymarket::ExperimentEngine trend_experiment(
         cfg, "trend_follow", "./logs/experiment_trend_trades.jsonl", "T");
 

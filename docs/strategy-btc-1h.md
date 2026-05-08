@@ -1,6 +1,6 @@
 # Polymarket 1小时 UP/DOWN 交易策略
 
-> 最后更新：2026-05-07。当前主策略是多币种监听版 `legacy_cheap`：dry run 可模拟多币种，live 模式只允许 BTC 真实交易。
+> 最后更新：2026-05-08。当前主策略是 `regime_adaptive`：先判断 quiet / momentum / uncertain，再决定是否交易。优化后的 `legacy_cheap_v2` 保留为独立实验对照组。
 
 ---
 
@@ -15,28 +15,44 @@
 
 ---
 
-## 二、核心策略：legacy_cheap
+## 二、核心策略：regime_adaptive
 
-`legacy_cheap` 的核心思想仍然是：在 1 小时 UP/DOWN 市场中，寻找价格较低的一边，用小额仓位买入，等待反弹或结算方向确认。
+`regime_adaptive` 不再直接“便宜就买”。它先按 dev 强度把市场拆成三类：
 
-但当前版本不再是“低于 30c 就买”。必须同时满足盘口质量、价格区间和剩余时间要求。
+| Regime | 条件 | 动作 |
+|--------|------|------|
+| quiet | `abs(dev) <= 0.12%` | 允许 `cheap_rebound` |
+| uncertain | `0.12% < abs(dev) < 0.20%` | 不交易 |
+| momentum | `abs(dev) >= 0.20%` | 允许强边 `trend_follow` |
 
-### 入场条件
+### cheap_rebound 入场条件
 
 以下条件必须全部满足：
 
 | 条件 | 当前规则 |
 |------|----------|
-| 时间窗口 | `minutes_remaining > 35` |
+| 时间窗口 | `36 <= minutes_remaining <= 45` |
 | 方向选择 | 买入 UP / DOWN 中 ask 更低的一方 |
-| ask 红线 | `candidate_ask <= 0.30` |
-| 入场价区间 | 按币种配置：BTC/SOL `0.18-0.26`，ETH `0.20-0.26`，其它 `0.20-0.24` |
-| spread 过滤 | 按币种配置：BTC/SOL `<= 0.03`，其它更严；`0.20 <= entry < 0.25` 时必须 `<= 0.01` |
-| dev 过滤 | `abs(dev)` 不超过币种阈值；且不能明显偏向候选方向的反面 |
+| ask 红线 | `candidate_ask <= 0.29` |
+| 入场价区间 | BTC/ETH/SOL `0.22-0.28`，其它 `0.24-0.28` |
+| spread 过滤 | `spread <= 0.01` |
+| dev 过滤 | BTC/ETH/SOL `abs(dev) <= 0.12%`，其它 `<= 0.08%` |
 | 挂单价格 | `entry_price = candidate_ask - 0.01`，最低 0.01 |
 | 单笔成本 | `size_usdc = $1.00` |
 | 同币种持仓 | 同一币种已有未平仓仓位时，不再开该币种 |
 | live 限制 | live 模式只交易 BTC |
+
+### momentum 入场条件
+
+| 条件 | 当前规则 |
+|------|----------|
+| 时间窗口 | `32 <= minutes_remaining <= 42` |
+| 方向选择 | dev 为正买 UP，dev 为负买 DOWN |
+| 入场价区间 | `0.64 <= entry_price <= 0.69` |
+| spread 过滤 | `spread <= 0.01` |
+| dev 过滤 | `abs(dev) >= 0.20%` |
+| 高价过滤 | `entry_price > 0.68` 时必须 `abs(dev) >= 0.24%` |
+| 弱币种过滤 | 非 BTC/ETH/SOL 必须 `abs(dev) >= 0.24%` |
 
 ### spread 过滤说明
 
@@ -47,33 +63,25 @@
 - `spread >= 3c` 的交易合计亏损约 `$5.16`
 - `spread >= 5c` 的交易合计亏损约 `$3.45`
 
-因此当前 `legacy_cheap` 只接受 `spread <= 0.03` 的盘口。
+因此当前主策略只接受 `spread <= 0.01` 的主策略入场；`legacy_cheap_v2` 实验对照组继续按优化后的旧规则采样。
 
 ### 入场价区间说明
 
 低价不等于便宜。昨晚 `<10c` 的交易合计亏损约 `$2.58`，很多是已经接近归零的一边。
 
-当前主策略不再用统一区间，而是按币种过滤：
+当前主策略不再用统一区间，而是按 regime 过滤：
 
 ```text
-BTC/SOL: 0.18 <= entry_price <= 0.26
-ETH:     0.20 <= entry_price <= 0.26
-Others:  0.20 <= entry_price <= 0.24
+cheap_rebound:
+  BTC/ETH/SOL: 0.22 <= entry_price <= 0.28
+  Others:      0.24 <= entry_price <= 0.28
+
+momentum:
+  Strong side: 0.64 <= entry_price <= 0.69
 ```
 
-如果 `0.20 <= entry_price < 0.25`，还需要二次过滤：
+`legacy_cheap_v2` 实验对照组继续保留按币种区间和 `0.20-0.24` 二次过滤，用于和新主策略比较。
 
-```text
-spread <= 0.01
-abs(dev) <= coin_max_abs_dev * 0.80
-```
-
-此外，便宜边不能明显逆着 BTC 当前 dev：
-
-```text
-买 UP   时 dev >= -0.12%
-买 DOWN 时 dev <= +0.12%
-```
 
 ---
 
@@ -108,13 +116,21 @@ abs(dev) <= coin_max_abs_dev * 0.80
 
 ## 四、止盈规则
 
-当前主策略三档分批止盈：
+cheap_rebound 三档分批止盈：
 
 | 档位 | 触发价 | 卖出比例 |
 |------|--------|----------|
 | TP0 | 0.45 | 卖出剩余仓位的 50% |
 | TP1 | 0.70 | 卖出剩余仓位的 50% |
 | TP2 | 0.88 | 卖出剩余仓位的 100% |
+
+momentum 分支使用更近的动态止盈：
+
+| 档位 | 触发价 | 卖出比例 |
+|------|--------|----------|
+| TP0 | `min(0.88, entry + 0.08)` | 卖出剩余仓位的 50% |
+| TP1 | `min(0.90, entry + 0.14)` | 卖出剩余仓位的 50% |
+| TP2 | 0.90 | 卖出剩余仓位的 100% |
 
 说明：
 
@@ -237,9 +253,16 @@ current_price <= entry_price + 0.02
   - `/api/experiment/trades`
 - Dashboard 底部 `Experiment` 区块展示实验策略表现
 
-### Experiment 1：regime
+### Experiment 1：legacy_cheap_v2
 
-第一个实验区域用于观察 `trend / reversal / quiet_reversion` 混合 regime 策略，不作为 live 交易依据。
+第一个实验区域用于保留优化后的 `legacy_cheap` 作为对照组，不作为 live 交易依据。它继续使用旧版便宜边逻辑和近期加入的过滤：
+
+- `minutes_remaining > 35`
+- 按币种 entry 区间过滤
+- spread 过滤
+- `0.20 <= entry < 0.25` 二次过滤
+- fast_fail
+- TP 后残仓保护
 
 ### Experiment 2：trend_follow
 
@@ -256,15 +279,15 @@ current_price < strike -> 买 DOWN
 
 | 条件 | 当前规则 |
 |------|----------|
-| 时间窗口 | `20 < minutes_remaining <= 40` |
+| 时间窗口 | `30 < minutes_remaining <= 42` |
 | 方向 | 只买强边 |
 | ask 区间 | `0.65 <= ask <= 0.72` |
-| spread | `ask - bid <= 0.02` |
+| spread | `ask - bid <= 0.02`；高价入场必须 `<= 0.01` |
 | 挂单价格 | `entry_price = ask - 0.01` |
 | 单笔成本 | `$1.00` |
-| dev 阈值 | `abs(dev) >= 0.12%` |
+| dev 阈值 | `abs(dev) >= 0.18%` |
 | 波动率过滤 | 暂不启用 |
-| 失速过滤 | 暂不启用 |
+| 高价过滤 | `entry_price > 0.68` 时，必须 `abs(dev) >= 0.22%` 且 spread `<= 0.01` |
 
 止盈：
 
@@ -285,7 +308,8 @@ current_price < strike -> 买 DOWN
 | TP 后残仓保护 | 任意 TP 触发后，`current <= entry + 0.02` 则移动止盈退出 |
 | 移动止盈一档 | `MFE >= 0.08` 后，`max(entry + 0.02, max_price - 0.05)` |
 | 移动止盈二档 | `MFE >= 0.12` 后，`max(entry + 0.05, max_price - 0.04)` |
-| 最后 10 分钟 | `current_price < 0.60` 退出 |
+| 最后 8 分钟 | `current_price < 0.78` 或 dev 不再同向则退出 |
+| 最后 5 分钟 | 除非 `current_price >= 0.88` 且 dev 仍同向，否则退出 |
 
 风控：
 
@@ -311,7 +335,7 @@ current_price < strike -> 买 DOWN
 - 剩余时间太少
 - 多币种同时遇到弱盘口时连续 stop_price
 
-因此当前优化方向不是换掉 `legacy_cheap`，而是降低交易频率、提高入场质量。
+因此当前优化方向已经从单一 `legacy_cheap` 升级为 regime-based：quiet 才做便宜边反弹，momentum 才做强边跟随，中间不确定区间不交易。
 
 ---
 
