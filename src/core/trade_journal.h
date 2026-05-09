@@ -62,6 +62,15 @@ struct TradeRecord {
     double dw_vol_ratio = 0;         // current_1h_vol / avg_24h_vol（>1 = 当前更活跃）
     double dw_spread = 0;            // 触发瞬间 ask-bid（我方 token）
     bool   dw_dev_favors = false;    // BTC dev 方向是否帮助仓位（UP & dev>0 / DOWN & dev<0）
+    std::string strategy;
+    int entry_confidence = 0;
+    std::string btc_alignment;
+    std::string eth_alignment;
+    std::string cross_coin_state;
+    std::string entry_price_bucket;
+    std::string confidence_components;
+    double max_favorable = 0;
+    double max_adverse = 0;
 };
 
 class TradeJournal {

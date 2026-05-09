@@ -81,6 +81,15 @@ TradeJournal::TradeJournal(const std::string& path) : path_(path) {
             r.dw_vol_ratio                = j.value("dw_vol_ratio", 0.0);
             r.dw_spread                   = j.value("dw_spread", 0.0);
             r.dw_dev_favors               = j.value("dw_dev_favors", false);
+            r.strategy                    = j.value("strategy", std::string{});
+            r.entry_confidence            = j.value("entry_confidence", 0);
+            r.btc_alignment               = j.value("btc_alignment", std::string{});
+            r.eth_alignment               = j.value("eth_alignment", std::string{});
+            r.cross_coin_state            = j.value("cross_coin_state", std::string{});
+            r.entry_price_bucket          = j.value("entry_price_bucket", std::string{});
+            r.confidence_components       = j.value("confidence_components", std::string{});
+            r.max_favorable               = j.value("max_favorable", 0.0);
+            r.max_adverse                 = j.value("max_adverse", 0.0);
             records_.push_back(std::move(r));
             ++loaded;
         } catch (const std::exception&) {
@@ -150,6 +159,15 @@ void TradeJournal::record(const TradeRecord& trade) {
     j["dw_vol_ratio"]    = trade.dw_vol_ratio;
     j["dw_spread"]       = trade.dw_spread;
     j["dw_dev_favors"]   = trade.dw_dev_favors;
+    j["strategy"] = trade.strategy;
+    j["entry_confidence"] = trade.entry_confidence;
+    j["btc_alignment"] = trade.btc_alignment;
+    j["eth_alignment"] = trade.eth_alignment;
+    j["cross_coin_state"] = trade.cross_coin_state;
+    j["entry_price_bucket"] = trade.entry_price_bucket;
+    j["confidence_components"] = trade.confidence_components;
+    j["max_favorable"] = trade.max_favorable;
+    j["max_adverse"] = trade.max_adverse;
 
     std::ofstream f(path_, std::ios::app);
     if (f.is_open()) {

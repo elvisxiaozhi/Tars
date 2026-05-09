@@ -24,6 +24,13 @@ struct ExperimentQuotes {
     std::string down_token_id;
 };
 
+struct TrendFollowContext {
+    bool has_btc = false;
+    bool has_eth = false;
+    BtcMarketData btc;
+    BtcMarketData eth;
+};
+
 class ExperimentStrategy {
 public:
     ExperimentStrategy(const AppConfig& cfg, std::string coin);
@@ -35,7 +42,8 @@ public:
     EntrySignal evaluate_trend_follow(const BtcMarketData& md,
                                       const ExperimentQuotes& quotes,
                                       const std::string& condition_id,
-                                      const std::string& question);
+                                      const std::string& question,
+                                      const TrendFollowContext& ctx);
     EntrySignal evaluate_legacy_cheap_v2(const BtcMarketData& md,
                                          const ExperimentQuotes& quotes,
                                          const std::string& condition_id,
@@ -50,7 +58,8 @@ public:
                              const BtcMarketData& md) const;
     ExitSignal evaluate_trend_follow_exit(const Position& pos,
                                           double current_contract_price,
-                                          const BtcMarketData& md) const;
+                                          const BtcMarketData& md,
+                                          const TrendFollowContext& ctx) const;
 
 private:
     const AppConfig& cfg_;
@@ -115,6 +124,7 @@ private:
     std::string log_path_;
     std::string id_prefix_;
     std::map<std::string, ExperimentStrategy> strategies_;
+    std::map<std::string, BtcMarketData> latest_market_data_;
     std::map<std::string, CoinRiskState> coin_state_;
     std::vector<Position> positions_;
     std::vector<TradeRecord> trades_;

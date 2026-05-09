@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <sstream>
 
 #include <spdlog/spdlog.h>
 
@@ -52,6 +53,36 @@ bool trend_follow_side_aligned(Side side, double deviation_pct) {
            (side == Side::DOWN && deviation_pct < 0);
 }
 
+std::string trend_alignment(Side side, const BtcMarketData* md) {
+    if (!md) return "missing";
+    if (std::abs(md->deviation_pct) < 0.05) return "neutral";
+    if (trend_follow_side_aligned(side, md->deviation_pct)) return "aligned";
+    return "opposed";
+}
+
+std::string trend_price_bucket(double entry_price) {
+    if (entry_price <= 0.66) return "<=0.66";
+    if (entry_price <= 0.68) return "0.66-0.68";
+    if (entry_price <= 0.71) return "0.68-0.71";
+    return ">0.71";
+}
+
+bool opposed_pair(const BtcMarketData* a, const BtcMarketData* b) {
+    if (!a || !b) return false;
+    if (std::abs(a->deviation_pct) < 0.05 || std::abs(b->deviation_pct) < 0.05) return false;
+    return (a->deviation_pct > 0 && b->deviation_pct < 0) ||
+           (a->deviation_pct < 0 && b->deviation_pct > 0);
+}
+
+std::string cross_coin_state(const std::string& btc_alignment,
+                             const std::string& eth_alignment,
+                             bool btc_eth_opposed) {
+    if (btc_eth_opposed) return "btc_eth_diverged";
+    if (btc_alignment == "opposed" || eth_alignment == "opposed") return "mixed";
+    if (btc_alignment == "missing" && eth_alignment == "missing") return "missing";
+    return "aligned";
+}
+
 double fee(double shares, double price, bool taker, const FeeConfig& fees) {
     double rate = taker ? fees.taker_fee_rate : fees.maker_fee_rate;
     return shares * rate * price * (1.0 - price) + fees.gas_per_tx_usdc;
@@ -93,6 +124,15 @@ void append_jsonl(const std::string& path, const TradeRecord& rec) {
     j["mfe5_gain_pct"] = rec.mfe5_gain_pct;
     j["mfe10_gain_pct"] = rec.mfe10_gain_pct;
     j["mfe15_gain_pct"] = rec.mfe15_gain_pct;
+    j["strategy"] = rec.strategy;
+    j["entry_confidence"] = rec.entry_confidence;
+    j["btc_alignment"] = rec.btc_alignment;
+    j["eth_alignment"] = rec.eth_alignment;
+    j["cross_coin_state"] = rec.cross_coin_state;
+    j["entry_price_bucket"] = rec.entry_price_bucket;
+    j["confidence_components"] = rec.confidence_components;
+    j["max_favorable"] = rec.max_favorable;
+    j["max_adverse"] = rec.max_adverse;
     std::ofstream out(path, std::ios::app);
     if (out) out << j.dump() << "\n";
 }
@@ -224,7 +264,8 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
     const BtcMarketData& md,
     const ExperimentQuotes& quotes,
     const std::string& condition_id,
-    const std::string& question) {
+    const std::string& question,
+    const TrendFollowContext& ctx) {
     EntrySignal sig;
     sig.condition_id = condition_id;
     sig.market_question = question;
@@ -279,6 +320,10 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
         return sig;
     }
     double entry_price = std::max(0.01, ask - 0.01);
+    if (entry_price > 0.71) {
+        sig.reject_reason = "trend_follow_entry_too_high";
+        return sig;
+    }
     if (entry_price > 0.68) {
         if (abs_dev < 0.22) {
             sig.reject_reason = "trend_follow_high_entry_dev_weak";
@@ -290,6 +335,57 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
         }
     }
 
+    const BtcMarketData* btc_md = ctx.has_btc ? &ctx.btc : nullptr;
+    const BtcMarketData* eth_md = ctx.has_eth ? &ctx.eth : nullptr;
+    std::string btc_align = trend_alignment(side, btc_md);
+    std::string eth_align = trend_alignment(side, eth_md);
+    bool btc_eth_diverged = opposed_pair(btc_md, eth_md);
+    std::string cross_state = cross_coin_state(btc_align, eth_align, btc_eth_diverged);
+
+    int confidence = 0;
+    std::vector<std::string> components;
+    confidence += 1;
+    components.push_back("target_direction=+1");
+    confidence += 1;
+    components.push_back("direction_confirmed=+1");
+    if (btc_align == "aligned" || btc_align == "neutral") {
+        confidence += 1;
+        components.push_back("btc_" + btc_align + "=+1");
+    }
+    if (eth_align == "aligned" || eth_align == "neutral") {
+        confidence += 1;
+        components.push_back("eth_" + eth_align + "=+1");
+    }
+    if (abs_dev >= 0.22) {
+        confidence += 1;
+        components.push_back("target_dev_strong=+1");
+    }
+    if (entry_price <= 0.68) {
+        confidence += 1;
+        components.push_back("entry_value=+1");
+    }
+    if (entry_price > 0.69) {
+        confidence -= 1;
+        components.push_back("chase_penalty=-1");
+    }
+    if (btc_eth_diverged) {
+        confidence -= 1;
+        components.push_back("btc_eth_diverged=-1");
+    }
+    if (btc_align == "opposed" && btc_md && std::abs(btc_md->deviation_pct) >= 0.12) {
+        confidence -= 1;
+        components.push_back("btc_strong_opposed=-1");
+    }
+
+    if (entry_price > 0.68 && confidence < 4) {
+        sig.reject_reason = "trend_follow_high_entry_confidence_low";
+        return sig;
+    }
+    if (confidence < 3) {
+        sig.reject_reason = "trend_follow_confidence_low";
+        return sig;
+    }
+
     sig.valid = true;
     sig.side = side;
     sig.market_ask = ask;
@@ -297,6 +393,17 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
     sig.size_usdc = 1.00;
     sig.shares = sig.size_usdc / sig.entry_price;
     sig.token_id = token;
+    sig.entry_confidence = confidence;
+    sig.btc_alignment = btc_align;
+    sig.eth_alignment = eth_align;
+    sig.cross_coin_state = cross_state;
+    sig.entry_price_bucket = trend_price_bucket(entry_price);
+    std::ostringstream component_out;
+    for (size_t i = 0; i < components.size(); ++i) {
+        if (i > 0) component_out << ",";
+        component_out << components[i];
+    }
+    sig.confidence_components = component_out.str();
     return sig;
 }
 
@@ -503,7 +610,8 @@ ExitSignal ExperimentStrategy::evaluate_exit(const Position& pos,
 ExitSignal ExperimentStrategy::evaluate_trend_follow_exit(
     const Position& pos,
     double current_contract_price,
-    const BtcMarketData& md) const {
+    const BtcMarketData& md,
+    const TrendFollowContext& ctx) const {
     ExitSignal exit;
     int64_t elapsed_sec = (wall_now_ms() - pos.entry_time) / 1000;
     double mfe = pos.max_price - pos.entry_price;
@@ -532,7 +640,34 @@ ExitSignal ExperimentStrategy::evaluate_trend_follow_exit(
     if (elapsed_sec >= 150 && mfe < 0.02 &&
         current_contract_price <= pos.entry_price - 0.03) {
         exit.should_exit = true;
-        exit.reason = "fast_fail_exit";
+        exit.reason = "momentum_fail_stop";
+        exit.exit_price = current_contract_price;
+        return exit;
+    }
+
+    if (elapsed_sec >= 90 && mfe < 0.015 &&
+        current_contract_price <= pos.entry_price - 0.02) {
+        exit.should_exit = true;
+        exit.reason = "momentum_fail_stop";
+        exit.exit_price = current_contract_price;
+        return exit;
+    }
+
+    if (elapsed_sec >= 150 && mfe < 0.03) {
+        exit.should_exit = true;
+        exit.reason = "momentum_fail_stop";
+        exit.exit_price = current_contract_price;
+        return exit;
+    }
+
+    const BtcMarketData* btc_md = ctx.has_btc ? &ctx.btc : nullptr;
+    const BtcMarketData* eth_md = ctx.has_eth ? &ctx.eth : nullptr;
+    std::string btc_align = trend_alignment(pos.side, btc_md);
+    std::string eth_align = trend_alignment(pos.side, eth_md);
+    if ((btc_align == "opposed" || eth_align == "opposed") &&
+        current_contract_price <= pos.entry_price) {
+        exit.should_exit = true;
+        exit.reason = "momentum_fail_stop";
         exit.exit_price = current_contract_price;
         return exit;
     }
@@ -630,6 +765,18 @@ void ExperimentEngine::on_market(const std::string& coin,
     if (!enabled_) return;
     if (cfg_.strategy.mode == "live" && coin != "BTC") return;
     std::lock_guard<std::mutex> lock(mu_);
+    latest_market_data_[coin] = md;
+    TrendFollowContext trend_ctx;
+    auto btc_latest = latest_market_data_.find("BTC");
+    if (btc_latest != latest_market_data_.end()) {
+        trend_ctx.has_btc = true;
+        trend_ctx.btc = btc_latest->second;
+    }
+    auto eth_latest = latest_market_data_.find("ETH");
+    if (eth_latest != latest_market_data_.end()) {
+        trend_ctx.has_eth = true;
+        trend_ctx.eth = eth_latest->second;
+    }
     auto strat_it = strategies_.find(coin);
     if (strat_it == strategies_.end()) return;
 
@@ -733,7 +880,7 @@ void ExperimentEngine::on_market(const std::string& coin,
         }
 
         auto exit = strategy_name_ == "trend_follow"
-            ? strat_it->second.evaluate_trend_follow_exit(pos, current_price, md)
+            ? strat_it->second.evaluate_trend_follow_exit(pos, current_price, md, trend_ctx)
             : strat_it->second.evaluate_exit(pos, current_price, md);
         if (exit.should_exit) {
             double remaining_shares = pos.shares * pos.shares_remaining_pct;
@@ -780,7 +927,7 @@ void ExperimentEngine::on_market(const std::string& coin,
     EntrySignal sig;
     if (strategy_name_ == "trend_follow") {
         sig = strat_it->second.evaluate_trend_follow(md, quotes, entry.market.condition_id,
-                                                     entry.market.question);
+                                                     entry.market.question, trend_ctx);
     } else if (strategy_name_ == "legacy_cheap_v2") {
         sig = strat_it->second.evaluate_legacy_cheap_v2(md, quotes, entry.market.condition_id,
                                                         entry.market.question);
@@ -830,6 +977,12 @@ void ExperimentEngine::on_market(const std::string& coin,
     pos.mfe_at_15min = sig.entry_price;
     pos.spread_at_entry = sig.side == Side::UP
         ? quotes.up_ask - quotes.up_bid : quotes.down_ask - quotes.down_bid;
+    pos.entry_confidence = sig.entry_confidence;
+    pos.btc_alignment = sig.btc_alignment;
+    pos.eth_alignment = sig.eth_alignment;
+    pos.cross_coin_state = sig.cross_coin_state;
+    pos.entry_price_bucket = sig.entry_price_bucket;
+    pos.confidence_components = sig.confidence_components;
     positions_.push_back(pos);
     balance_ -= sig.size_usdc;
     cs.candle_traded = true;
@@ -870,6 +1023,15 @@ void ExperimentEngine::fill_record_analytics(TradeRecord& rec, const Position& p
         rec.mfe10_gain_pct = (pos.mfe_at_10min - pos.entry_price) / pos.entry_price;
         rec.mfe15_gain_pct = (pos.mfe_at_15min - pos.entry_price) / pos.entry_price;
     }
+    rec.strategy = strategy_name_;
+    rec.entry_confidence = pos.entry_confidence;
+    rec.btc_alignment = pos.btc_alignment;
+    rec.eth_alignment = pos.eth_alignment;
+    rec.cross_coin_state = pos.cross_coin_state;
+    rec.entry_price_bucket = pos.entry_price_bucket;
+    rec.confidence_components = pos.confidence_components;
+    rec.max_favorable = pos.max_price - pos.entry_price;
+    rec.max_adverse = pos.entry_price - pos.min_price;
 }
 
 void ExperimentEngine::record_trade(const TradeRecord& rec) {
@@ -914,6 +1076,11 @@ std::string ExperimentEngine::status_json() const {
         x["minutes_remaining_at_entry"] = p.minutes_remaining_at_entry;
         x["max_price"] = p.max_price;
         x["min_price"] = p.min_price;
+        x["entry_confidence"] = p.entry_confidence;
+        x["btc_alignment"] = p.btc_alignment;
+        x["eth_alignment"] = p.eth_alignment;
+        x["cross_coin_state"] = p.cross_coin_state;
+        x["entry_price_bucket"] = p.entry_price_bucket;
         pos.push_back(x);
     }
     j["positions"] = pos;
@@ -950,6 +1117,13 @@ std::string ExperimentEngine::trades_json() const {
         j["size_usdc"] = t.size_usdc;
         j["exit_reason"] = t.exit_reason;
         j["pnl"] = t.realized_pnl;
+        j["entry_confidence"] = t.entry_confidence;
+        j["btc_alignment"] = t.btc_alignment;
+        j["eth_alignment"] = t.eth_alignment;
+        j["cross_coin_state"] = t.cross_coin_state;
+        j["entry_price_bucket"] = t.entry_price_bucket;
+        j["max_favorable"] = t.max_favorable;
+        j["max_adverse"] = t.max_adverse;
         arr.push_back(j);
     }
     return arr.dump();

@@ -288,6 +288,23 @@ current_price < strike -> 买 DOWN
 | dev 阈值 | `abs(dev) >= 0.18%` |
 | 波动率过滤 | 暂不启用 |
 | 高价过滤 | `entry_price > 0.68` 时，必须 `abs(dev) >= 0.22%` 且 spread `<= 0.01` |
+| 置信度过滤 | `entry_confidence >= 3` |
+
+置信度评分：
+
+```text
++1 目标币方向确认
++1 连续同方向确认
++1 BTC aligned / neutral
++1 ETH aligned / neutral
++1 abs(dev) >= 0.22%
++1 entry_price <= 0.68
+-1 entry_price > 0.69
+-1 BTC/ETH 明显分歧
+-1 BTC 强反向
+```
+
+`entry_price > 0.68` 时还要求 `entry_confidence >= 4`。
 
 止盈：
 
@@ -303,7 +320,7 @@ current_price < strike -> 买 DOWN
 |------|----------|
 | 价格止损 | `current_price <= entry_price - 0.08` |
 | dev 动量衰减 | UP 仓位 `dev < entry_dev - 0.08%`；DOWN 仓位 `dev > entry_dev + 0.08%` |
-| fast_fail | 入场 150 秒后，`MFE < 0.02` 且 `current <= entry - 0.03` |
+| momentum_fail_stop | 90 秒后 `MFE < 0.015` 且 `current <= entry - 0.02`；或 150 秒后 `MFE < 0.03`；或 BTC/ETH 背景反向且未浮盈 |
 | 死水退出 | 入场 8 分钟后，`MFE < 0.03` |
 | TP 后残仓保护 | 任意 TP 触发后，`current <= entry + 0.02` 则移动止盈退出 |
 | 移动止盈一档 | `MFE >= 0.08` 后，`max(entry + 0.02, max_price - 0.05)` |
@@ -317,6 +334,7 @@ current_price < strike -> 买 DOWN
 - 同币种 stop 后，本小时不再交易该币种
 - 本小时全局 `stop_price >= 3` 后停止新开仓
 - live 模式下即便是实验模拟，也只观察 BTC
+- 实验日志记录 `entry_confidence`、BTC/ETH alignment、`cross_coin_state`、entry bucket、MFE/MAE 和 confidence components
 
 ---
 

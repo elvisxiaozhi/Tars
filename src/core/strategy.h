@@ -27,6 +27,12 @@ struct EntrySignal {
     std::string token_id;
     std::string condition_id;
     std::string reject_reason;    // 如果 valid=false，为什么被拒
+    int entry_confidence = 0;
+    std::string btc_alignment;
+    std::string eth_alignment;
+    std::string cross_coin_state;
+    std::string entry_price_bucket;
+    std::string confidence_components;
 };
 
 // 止盈档位
@@ -74,6 +80,12 @@ struct Position {
     int consec_wins_before = 0;        // 入场前连赢次数
     int consec_losses_before = 0;      // 入场前连亏次数
     double balance_before = 0;         // 入场前账户余额
+    int entry_confidence = 0;
+    std::string btc_alignment;
+    std::string eth_alignment;
+    std::string cross_coin_state;
+    std::string entry_price_bucket;
+    std::string confidence_components;
 
     bool closed = false;
     std::string close_reason;     // "tp0"/"tp1"/"tp2"/"stop_price"/"trailing_stop"/"stop_btc"/"stop_time"/"expired"
