@@ -37,6 +37,7 @@
 | 入场价区间 | BTC/ETH/SOL `0.22-0.28`，其它 `0.24-0.28` |
 | spread 过滤 | `spread <= 0.01` |
 | dev 过滤 | BTC/ETH/SOL `abs(dev) <= 0.12%`，其它 `<= 0.08%` |
+| 跨币种背景 | 若买入方向被多数其它币种强反向，不开仓 |
 | 挂单价格 | `entry_price = candidate_ask - 0.01`，最低 0.01 |
 | 单笔成本 | `size_usdc = $1.00` |
 | 同币种持仓 | 同一币种已有未平仓仓位时，不再开该币种 |
@@ -161,6 +162,26 @@ momentum 分支使用更近的动态止盈：
 - 本小时全局 `stop_price` 计数 +1
 
 ### 5.2 快速失败
+
+`quiet_reversion` 入场后如果没有启动，会更早退出：
+
+```text
+elapsed_sec >= 20
+max_price - entry_price < 0.015
+current_price <= entry_price - 0.02
+```
+
+或者：
+
+```text
+max_adverse >= 0.06
+max_price - entry_price < 0.10
+```
+
+对应退出原因：
+
+- `cheap_fail_stop`
+- `adverse_expansion_stop`
 
 入场 3 分钟后，如果 MFE 未启动且价格已明显走弱：
 

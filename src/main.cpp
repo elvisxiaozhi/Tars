@@ -1221,7 +1221,7 @@ int main(int argc, char* argv[]) {
                     quotes.down_bid, quotes.down_ask,
                     quotes.up_token_id, quotes.down_token_id,
                     cid, entry.market.question,
-                    md.minutes_remaining);
+                    md.minutes_remaining, &market_data);
 
                 if (sig.valid) {
                     if (!live_trader && opened_coins_this_tick.count(coin) > 0) {
@@ -1253,7 +1253,7 @@ int main(int argc, char* argv[]) {
                                 quotes.down_bid, quotes.down_ask,
                                 quotes.up_token_id, quotes.down_token_id,
                                 cid, entry.market.question,
-                                md.minutes_remaining);
+                                md.minutes_remaining, &market_data);
                             if (!fresh_sig.valid || fresh_sig.side != sig.side ||
                                 fresh_sig.regime != sig.regime ||
                                 fresh_sig.token_id != sig.token_id) {
@@ -1646,7 +1646,9 @@ int main(int argc, char* argv[]) {
                     if (exit_sig.reason == "stop_price" || exit_sig.reason == "stop_time" ||
                         exit_sig.reason == "stop_btc" ||
                         exit_sig.reason == "trailing_stop" || exit_sig.reason == "dead_water_exit" ||
-                        exit_sig.reason == "fast_fail_exit") {
+                        exit_sig.reason == "fast_fail_exit" ||
+                        exit_sig.reason == "cheap_fail_stop" ||
+                        exit_sig.reason == "adverse_expansion_stop") {
                         risk.set_candle_stopped(pos.coin);
                         if (exit_sig.reason == "stop_price") {
                             risk.record_stop_price(pos.coin);

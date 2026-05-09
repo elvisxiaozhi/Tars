@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -112,7 +113,8 @@ public:
         double down_bid, double down_ask,
         const std::string& up_token_id, const std::string& down_token_id,
         const std::string& condition_id, const std::string& question,
-        int minutes_remaining);
+        int minutes_remaining,
+        const std::map<std::string, BtcMarketData>* market_context = nullptr);
 
     // 计算止盈档位
     std::vector<TakeProfitLevel> compute_tp_levels(double entry_price);
@@ -140,7 +142,8 @@ private:
         double down_bid, double down_ask,
         const std::string& up_token_id, const std::string& down_token_id,
         const std::string& condition_id, const std::string& question,
-        int minutes_remaining);
+        int minutes_remaining,
+        const std::map<std::string, BtcMarketData>* market_context);
     EntrySignal evaluate_momentum_follow(
         const BtcMarketData& btc,
         double up_bid, double up_ask,

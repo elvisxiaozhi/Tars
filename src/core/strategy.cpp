@@ -73,7 +73,8 @@ EntrySignal Strategy::evaluate_cheap_rebound(
     double down_bid, double down_ask,
     const std::string& up_token_id, const std::string& down_token_id,
     const std::string& condition_id, const std::string& question,
-    int minutes_remaining) {
+    int minutes_remaining,
+    const std::map<std::string, BtcMarketData>* market_context) {
 
     EntrySignal sig;
     sig.condition_id = condition_id;
@@ -130,6 +131,25 @@ EntrySignal Strategy::evaluate_cheap_rebound(
     if (std::abs(btc.deviation_pct) > max_abs_dev) {
         sig.reject_reason = "cheap_rebound_coin_dev_too_large";
         return sig;
+    }
+    if (market_context) {
+        int opposed = 0;
+        int core_opposed = 0;
+        int observed = 0;
+        for (const auto& [sym, md] : *market_context) {
+            if (sym == coin_) continue;
+            observed++;
+            bool is_opposed =
+                (candidate_side == Side::DOWN && md.deviation_pct >= 0.12) ||
+                (candidate_side == Side::UP && md.deviation_pct <= -0.12);
+            if (!is_opposed) continue;
+            opposed++;
+            if (is_core_coin(sym)) core_opposed++;
+        }
+        if (observed >= 3 && (opposed >= 3 || core_opposed >= 2)) {
+            sig.reject_reason = "cheap_rebound_cross_coin_opposed";
+            return sig;
+        }
     }
 
     sig.valid = true;
@@ -216,13 +236,14 @@ EntrySignal Strategy::evaluate_entry(
     double down_bid, double down_ask,
     const std::string& up_token_id, const std::string& down_token_id,
     const std::string& condition_id, const std::string& question,
-    int minutes_remaining) {
+    int minutes_remaining,
+    const std::map<std::string, BtcMarketData>* market_context) {
 
     double abs_dev = std::abs(btc.deviation_pct);
     if (abs_dev <= 0.12) {
         return evaluate_cheap_rebound(btc, up_bid, up_ask, down_bid, down_ask,
                                       up_token_id, down_token_id, condition_id,
-                                      question, minutes_remaining);
+                                      question, minutes_remaining, market_context);
     }
     if (abs_dev >= 0.20) {
         return evaluate_momentum_follow(btc, up_bid, up_ask, down_bid, down_ask,
@@ -360,6 +381,31 @@ ExitSignal Strategy::evaluate_exit(
         }
 
         return exit;
+    }
+
+    if (pos.regime == StrategyRegime::QUIET_REVERSION) {
+        double max_adverse = pos.entry_price - pos.min_price;
+        if (elapsed_sec >= 20 && mfe_gain < 0.015 &&
+            current_contract_price <= pos.entry_price - 0.02) {
+            exit.should_exit = true;
+            exit.reason = "cheap_fail_stop";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("CHEAP FAIL STOP: {} elapsed={}s mfe_gain={:+.3f} entry={:.3f} now={:.3f}",
+                         pos.market_question, elapsed_sec, mfe_gain,
+                         pos.entry_price, current_contract_price);
+            return exit;
+        }
+        if (max_adverse >= 0.06 && mfe_gain < 0.10) {
+            exit.should_exit = true;
+            exit.reason = "adverse_expansion_stop";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("ADVERSE EXPANSION STOP: {} mae={:+.3f} mfe_gain={:+.3f} entry={:.3f} now={:.3f}",
+                         pos.market_question, max_adverse, mfe_gain,
+                         pos.entry_price, current_contract_price);
+            return exit;
+        }
     }
 
     // §五.1 价格止损：从入场价下跌 ≥ 30%
