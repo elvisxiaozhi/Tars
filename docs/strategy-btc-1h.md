@@ -1,6 +1,6 @@
 # Polymarket 1小时 UP/DOWN 交易策略
 
-> 最后更新：2026-05-08。当前主策略是 `regime_adaptive`：先判断 quiet / momentum / uncertain，再决定是否交易。优化后的 `legacy_cheap_v2` 保留为独立实验对照组。
+> 最后更新：2026-05-09。当前主策略是 `regime_adaptive`：先判断 quiet / momentum / uncertain，再决定是否交易。优化后的 `legacy_cheap_v2` 保留为独立实验对照组。
 
 ---
 
@@ -63,7 +63,7 @@
 - `spread >= 3c` 的交易合计亏损约 `$5.16`
 - `spread >= 5c` 的交易合计亏损约 `$3.45`
 
-因此当前主策略只接受 `spread <= 0.01` 的主策略入场；`legacy_cheap_v2` 实验对照组继续按优化后的旧规则采样。
+因此当前主策略和 `legacy_cheap_v2` 实验对照组都只接受 `spread <= 0.01` 的入场。
 
 ### 入场价区间说明
 
@@ -80,7 +80,7 @@ momentum:
   Strong side: 0.64 <= entry_price <= 0.69
 ```
 
-`legacy_cheap_v2` 实验对照组继续保留按币种区间和 `0.20-0.24` 二次过滤，用于和新主策略比较。
+`legacy_cheap_v2` 实验对照组继续保留按币种区间、`0.20-0.24` 二次过滤和 confidence 评分，用于和新主策略比较。
 
 
 ---
@@ -259,9 +259,14 @@ current_price <= entry_price + 0.02
 
 - `minutes_remaining > 35`
 - 按币种 entry 区间过滤
-- spread 过滤
+- spread 必须 `<= 0.01`
 - `0.20 <= entry < 0.25` 二次过滤
-- fast_fail
+- `cheap_rebound_confidence >= 3`
+- `entry >= 0.25` 时要求 `cheap_rebound_confidence >= 4`
+- confidence 加分：`41-45 min`、tight spread、`0.20-0.24` entry、核心币、温和 dev
+- confidence 扣分：非 `41-45 min`、非核心币、背景反向、BTC/ETH 分歧
+- `cheap_fail_stop`
+- `adverse_expansion_stop`
 - TP 后残仓保护
 
 ### Experiment 2：trend_follow

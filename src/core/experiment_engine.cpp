@@ -67,6 +67,13 @@ std::string trend_price_bucket(double entry_price) {
     return ">0.71";
 }
 
+std::string cheap_price_bucket(double entry_price) {
+    if (entry_price < 0.20) return "<0.20";
+    if (entry_price < 0.25) return "0.20-0.24";
+    if (entry_price < 0.27) return "0.25-0.26";
+    return ">=0.27";
+}
+
 bool opposed_pair(const BtcMarketData* a, const BtcMarketData* b) {
     if (!a || !b) return false;
     if (std::abs(a->deviation_pct) < 0.05 || std::abs(b->deviation_pct) < 0.05) return false;
@@ -81,6 +88,20 @@ std::string cross_coin_state(const std::string& btc_alignment,
     if (btc_alignment == "opposed" || eth_alignment == "opposed") return "mixed";
     if (btc_alignment == "missing" && eth_alignment == "missing") return "missing";
     return "aligned";
+}
+
+std::string cheap_background_alignment(Side side, const BtcMarketData* md) {
+    if (!md) return "missing";
+    if (std::abs(md->deviation_pct) < 0.05) return "neutral";
+    if ((side == Side::UP && md->deviation_pct > -0.05) ||
+        (side == Side::DOWN && md->deviation_pct < 0.05)) {
+        return "supportive";
+    }
+    if ((side == Side::UP && md->deviation_pct < -0.12) ||
+        (side == Side::DOWN && md->deviation_pct > 0.12)) {
+        return "opposed";
+    }
+    return "mixed";
 }
 
 double fee(double shares, double price, bool taker, const FeeConfig& fees) {
@@ -411,7 +432,8 @@ EntrySignal ExperimentStrategy::evaluate_legacy_cheap_v2(
     const BtcMarketData& md,
     const ExperimentQuotes& quotes,
     const std::string& condition_id,
-    const std::string& question) {
+    const std::string& question,
+    const TrendFollowContext& ctx) {
     EntrySignal sig;
     sig.condition_id = condition_id;
     sig.market_question = question;
@@ -462,6 +484,10 @@ EntrySignal ExperimentStrategy::evaluate_legacy_cheap_v2(
         sig.reject_reason = "legacy_v2_spread_wide";
         return sig;
     }
+    if (spread > 0.010001) {
+        sig.reject_reason = "legacy_v2_spread_not_tight";
+        return sig;
+    }
 
     double entry_price = std::max(0.01, ask - 0.01);
     if (entry_price < filter.min_entry || entry_price > filter.max_entry) {
@@ -480,6 +506,56 @@ EntrySignal ExperimentStrategy::evaluate_legacy_cheap_v2(
         }
     }
 
+    const BtcMarketData* btc_md = ctx.has_btc ? &ctx.btc : nullptr;
+    const BtcMarketData* eth_md = ctx.has_eth ? &ctx.eth : nullptr;
+    std::string btc_align = cheap_background_alignment(side, btc_md);
+    std::string eth_align = cheap_background_alignment(side, eth_md);
+    bool btc_eth_diverged = opposed_pair(btc_md, eth_md);
+
+    int confidence = 0;
+    std::ostringstream components;
+    auto add_component = [&](const std::string& name, int delta) {
+        confidence += delta;
+        if (components.tellp() > 0) components << ",";
+        components << (delta > 0 ? "+" : "") << delta << ":" << name;
+    };
+
+    if (md.minutes_remaining >= 41 && md.minutes_remaining <= 45) {
+        add_component("time_41_45", 1);
+    } else {
+        add_component("time_outside_41_45", -1);
+    }
+    add_component("spread_tight", 1);
+    if (entry_price >= 0.20 && entry_price < 0.25) {
+        add_component("entry_value_20_24", 1);
+    }
+    if (coin_ == "BTC" || coin_ == "ETH" || coin_ == "SOL") {
+        add_component("core_coin", 1);
+    } else {
+        add_component("non_core_coin", -1);
+    }
+    if (std::abs(md.deviation_pct) < 0.10) {
+        add_component("dev_mild", 1);
+    }
+    if (entry_price >= 0.27) {
+        add_component("entry_high_27_plus", -1);
+    }
+    if (btc_align == "opposed" || eth_align == "opposed") {
+        add_component("background_opposed", -1);
+    }
+    if (btc_eth_diverged) {
+        add_component("btc_eth_diverged", -1);
+    }
+
+    if (confidence < 3) {
+        sig.reject_reason = "legacy_v2_confidence_low";
+        return sig;
+    }
+    if (entry_price >= 0.25 && confidence < 4) {
+        sig.reject_reason = "legacy_v2_high_entry_confidence_low";
+        return sig;
+    }
+
     sig.valid = true;
     sig.side = side;
     sig.market_ask = ask;
@@ -487,6 +563,12 @@ EntrySignal ExperimentStrategy::evaluate_legacy_cheap_v2(
     sig.size_usdc = 1.00;
     sig.shares = sig.size_usdc / sig.entry_price;
     sig.token_id = token;
+    sig.entry_confidence = confidence;
+    sig.btc_alignment = btc_align;
+    sig.eth_alignment = eth_align;
+    sig.cross_coin_state = cross_coin_state(btc_align, eth_align, btc_eth_diverged);
+    sig.entry_price_bucket = cheap_price_bucket(entry_price);
+    sig.confidence_components = components.str();
     return sig;
 }
 
@@ -559,6 +641,48 @@ ExitSignal ExperimentStrategy::evaluate_exit(const Position& pos,
             exit.should_exit = true; exit.reason = "stop_btc"; exit.exit_price = current_contract_price; return exit;
         }
         if (md.minutes_remaining <= 12 && pos.max_price < 0.42) {
+            exit.should_exit = true; exit.reason = "stop_time"; exit.exit_price = current_contract_price; return exit;
+        }
+        return exit;
+    }
+
+    if (pos.regime == StrategyRegime::LEGACY_CHEAP) {
+        double max_adverse = pos.entry_price - pos.min_price;
+        double loss_pct = (pos.entry_price - current_contract_price) / pos.entry_price;
+        if (loss_pct >= 0.30) {
+            exit.should_exit = true; exit.reason = "stop_price"; exit.exit_price = current_contract_price; return exit;
+        }
+        if (elapsed_sec >= 90 && mfe < 0.015 &&
+            current_contract_price <= pos.entry_price - 0.02) {
+            exit.should_exit = true; exit.reason = "cheap_fail_stop"; exit.exit_price = current_contract_price; return exit;
+        }
+        if (elapsed_sec >= 150 && mfe < 0.03) {
+            exit.should_exit = true; exit.reason = "cheap_fail_stop"; exit.exit_price = current_contract_price; return exit;
+        }
+        if (max_adverse >= 0.06 && mfe < 0.10) {
+            exit.should_exit = true; exit.reason = "adverse_expansion_stop"; exit.exit_price = current_contract_price; return exit;
+        }
+        bool has_tp = std::any_of(pos.tp_levels.begin(), pos.tp_levels.end(),
+            [](const TakeProfitLevel& tp) { return tp.triggered; });
+        if (has_tp && current_contract_price <= pos.entry_price + 0.02) {
+            exit.should_exit = true; exit.reason = "trailing_stop"; exit.exit_price = current_contract_price; return exit;
+        }
+        bool shallow_loss = current_contract_price >= pos.entry_price * 0.85;
+        if (elapsed_sec >= 480 && mfe < 0.02 && shallow_loss) {
+            exit.should_exit = true; exit.reason = "dead_water_exit"; exit.exit_price = current_contract_price; return exit;
+        }
+        if (mfe >= 0.15) {
+            double stop = std::max(pos.max_price - 0.15, pos.entry_price + 0.10);
+            if (current_contract_price <= stop) {
+                exit.should_exit = true; exit.reason = "trailing_stop"; exit.exit_price = current_contract_price; return exit;
+            }
+        } else if (mfe >= 0.10) {
+            double stop = pos.entry_price + 0.05;
+            if (current_contract_price <= stop) {
+                exit.should_exit = true; exit.reason = "trailing_stop"; exit.exit_price = current_contract_price; return exit;
+            }
+        }
+        if (md.minutes_remaining <= 10 && current_contract_price < 0.25) {
             exit.should_exit = true; exit.reason = "stop_time"; exit.exit_price = current_contract_price; return exit;
         }
         return exit;
@@ -930,7 +1054,7 @@ void ExperimentEngine::on_market(const std::string& coin,
                                                      entry.market.question, trend_ctx);
     } else if (strategy_name_ == "legacy_cheap_v2") {
         sig = strat_it->second.evaluate_legacy_cheap_v2(md, quotes, entry.market.condition_id,
-                                                        entry.market.question);
+                                                        entry.market.question, trend_ctx);
     } else {
         sig = strat_it->second.evaluate_entry(md, quotes, entry.market.condition_id,
                                               entry.market.question);

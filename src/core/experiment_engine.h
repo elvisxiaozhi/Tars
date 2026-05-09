@@ -47,7 +47,8 @@ public:
     EntrySignal evaluate_legacy_cheap_v2(const BtcMarketData& md,
                                          const ExperimentQuotes& quotes,
                                          const std::string& condition_id,
-                                         const std::string& question);
+                                         const std::string& question,
+                                         const TrendFollowContext& ctx);
 
     std::vector<TakeProfitLevel> compute_tp_levels(double entry_price,
                                                    StrategyRegime regime) const;
