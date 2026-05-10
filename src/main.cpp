@@ -1316,6 +1316,12 @@ int main(int argc, char* argv[]) {
                         pos.consec_wins_before = risk.consecutive_wins();
                         pos.consec_losses_before = risk.consecutive_losses();
                         pos.balance_before = risk.account_balance();
+                        pos.entry_confidence = sig.entry_confidence;
+                        pos.btc_alignment = sig.btc_alignment;
+                        pos.eth_alignment = sig.eth_alignment;
+                        pos.cross_coin_state = sig.cross_coin_state;
+                        pos.entry_price_bucket = sig.entry_price_bucket;
+                        pos.confidence_components = sig.confidence_components;
 
                         // R-V2.6 + P0 fix: LIVE 模式真发 POST /order，然后轮询直到 fill
                         // 关键：BUY 是限价 GTC，可能挂着不立即成交。bot 必须等 fill 确认才创建

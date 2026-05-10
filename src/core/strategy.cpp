@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <sstream>
 #include <utility>
 
 #include <spdlog/spdlog.h>
@@ -36,6 +37,13 @@ bool is_core_coin(const std::string& coin) {
 bool side_aligned(Side side, double deviation_pct) {
     return (side == Side::UP && deviation_pct > 0) ||
            (side == Side::DOWN && deviation_pct < 0);
+}
+
+std::string cheap_price_bucket(double entry_price) {
+    if (entry_price < 0.20) return "<0.20";
+    if (entry_price < 0.25) return "0.20-0.24";
+    if (entry_price < 0.27) return "0.25-0.26";
+    return ">=0.27";
 }
 
 LegacyEntryFilter legacy_filter_for_coin(const std::string& coin) {
@@ -132,10 +140,10 @@ EntrySignal Strategy::evaluate_cheap_rebound(
         sig.reject_reason = "cheap_rebound_coin_dev_too_large";
         return sig;
     }
+    int opposed = 0;
+    int core_opposed = 0;
+    int observed = 0;
     if (market_context) {
-        int opposed = 0;
-        int core_opposed = 0;
-        int observed = 0;
         for (const auto& [sym, md] : *market_context) {
             if (sym == coin_) continue;
             observed++;
@@ -152,6 +160,50 @@ EntrySignal Strategy::evaluate_cheap_rebound(
         }
     }
 
+    int confidence = 0;
+    std::ostringstream components;
+    auto add_component = [&](const std::string& name, int delta) {
+        confidence += delta;
+        if (components.tellp() > 0) components << ",";
+        components << (delta > 0 ? "+" : "") << delta << ":" << name;
+    };
+
+    if (minutes_remaining >= 41 && minutes_remaining <= 45) {
+        add_component("time_41_45", 1);
+    }
+    add_component("spread_tight", 1);
+    if (entry_price >= 0.22 && entry_price < 0.27) {
+        add_component("entry_value_22_26", 1);
+    }
+    bool core_coin = is_core_coin(coin_);
+    if (core_coin) {
+        add_component("core_coin", 1);
+    } else {
+        add_component("non_core_coin", 0);
+    }
+    double abs_dev = std::abs(btc.deviation_pct);
+    double min_sweet_dev = core_coin ? 0.08 : 0.05;
+    if (abs_dev >= min_sweet_dev && abs_dev <= max_abs_dev) {
+        add_component("dev_sweet_spot", 1);
+    } else if (abs_dev < min_sweet_dev) {
+        add_component("dev_too_weak", -1);
+    }
+    if (entry_price >= 0.27) {
+        add_component("entry_high_27_plus", -1);
+    }
+    if (opposed > 0) {
+        add_component("cross_coin_some_opposed", -1);
+    }
+
+    if (confidence < 4) {
+        sig.reject_reason = "cheap_rebound_confidence_low";
+        return sig;
+    }
+    if (entry_price >= 0.27 && confidence < 5) {
+        sig.reject_reason = "cheap_rebound_high_entry_confidence_low";
+        return sig;
+    }
+
     sig.valid = true;
     sig.side = candidate_side;
     sig.market_ask = candidate_ask;
@@ -159,9 +211,12 @@ EntrySignal Strategy::evaluate_cheap_rebound(
     sig.size_usdc = 1.00;
     sig.shares = sig.size_usdc / sig.entry_price;
     sig.token_id = candidate_token;
-    spdlog::info("SIGNAL [{} cheap_rebound]: {} {} @ {:.3f} (ask={:.3f}, spread={:.3f}, dev={:+.2f}%)",
+    sig.entry_confidence = confidence;
+    sig.entry_price_bucket = cheap_price_bucket(entry_price);
+    sig.confidence_components = components.str();
+    spdlog::info("SIGNAL [{} cheap_rebound]: {} {} @ {:.3f} (ask={:.3f}, spread={:.3f}, dev={:+.2f}%, conf={})",
                  coin_, sig.side == Side::UP ? "UP" : "DOWN", question,
-                 sig.entry_price, candidate_ask, spread, btc.deviation_pct);
+                 sig.entry_price, candidate_ask, spread, btc.deviation_pct, confidence);
     return sig;
 }
 
@@ -274,11 +329,11 @@ std::vector<TakeProfitLevel> Strategy::compute_tp_levels(double entry_price, Str
         return levels;
     }
 
-    levels.push_back({0, 0.45, 0.50, false});  // TP0: sell 50% of remaining
+    levels.push_back({0, 0.45, 0.75, false});  // TP0: sell 75% of remaining
     levels.push_back({1, 0.70, 0.50, false});  // TP1: sell 50% of remaining
     levels.push_back({2, 0.88, 1.00, false});  // TP2: sell all remaining
 
-    spdlog::debug("TP levels for entry={:.3f}: TP0=0.450(50%) TP1=0.700(50% rem) TP2=0.880(100% rem)",
+    spdlog::debug("TP levels for entry={:.3f}: TP0=0.450(75%) TP1=0.700(50% rem) TP2=0.880(100% rem)",
                   entry_price);
 
     return levels;

@@ -1,6 +1,6 @@
 # Polymarket 1小时 UP/DOWN 交易策略
 
-> 最后更新：2026-05-09。当前主策略是 `regime_adaptive`：先判断 quiet / momentum / uncertain，再决定是否交易。优化后的 `legacy_cheap_v2` 保留为独立实验对照组。
+> 最后更新：2026-05-10。当前主策略是 `regime_adaptive`：先判断 quiet / momentum / uncertain，再决定是否交易。优化后的 `legacy_cheap_v2` 保留为独立实验对照组。
 
 ---
 
@@ -38,6 +38,8 @@
 | spread 过滤 | `spread <= 0.01` |
 | dev 过滤 | BTC/ETH/SOL `abs(dev) <= 0.12%`，其它 `<= 0.08%` |
 | 跨币种背景 | 若买入方向被多数其它币种强反向，不开仓 |
+| 入场置信度 | `cheap_rebound_confidence >= 4` |
+| 高价二次过滤 | `entry_price >= 0.27` 时要求 `cheap_rebound_confidence >= 5` |
 | 挂单价格 | `entry_price = candidate_ask - 0.01`，最低 0.01 |
 | 单笔成本 | `size_usdc = $1.00` |
 | 同币种持仓 | 同一币种已有未平仓仓位时，不再开该币种 |
@@ -76,6 +78,8 @@
 cheap_rebound:
   BTC/ETH/SOL: 0.22 <= entry_price <= 0.28
   Others:      0.24 <= entry_price <= 0.28
+  confidence:  >= 4
+  entry >= .27 requires confidence >= 5
 
 momentum:
   Strong side: 0.64 <= entry_price <= 0.69
@@ -121,7 +125,7 @@ cheap_rebound 三档分批止盈：
 
 | 档位 | 触发价 | 卖出比例 |
 |------|--------|----------|
-| TP0 | 0.45 | 卖出剩余仓位的 50% |
+| TP0 | 0.45 | 卖出剩余仓位的 75% |
 | TP1 | 0.70 | 卖出剩余仓位的 50% |
 | TP2 | 0.88 | 卖出剩余仓位的 100% |
 
@@ -135,7 +139,7 @@ momentum 分支使用更近的动态止盈：
 
 说明：
 
-- TP0 先锁定一半利润
+- TP0 先锁定大部分已到手利润
 - TP1 再卖剩余的一半
 - TP2 清空尾仓
 - live 模式 TP 使用 FAK 市价快速卖出，按真实成交 shares 和均价记账
@@ -278,14 +282,15 @@ current_price <= entry_price + 0.02
 
 第一个实验区域用于保留优化后的 `legacy_cheap` 作为对照组，不作为 live 交易依据。它继续使用旧版便宜边逻辑和近期加入的过滤：
 
-- `minutes_remaining > 35`
+- 当前保留历史表现最好的 `41 <= minutes_remaining <= 45`
 - 按币种 entry 区间过滤
 - spread 必须 `<= 0.01`
 - `0.20 <= entry < 0.25` 二次过滤
-- `cheap_rebound_confidence >= 3`
-- `entry >= 0.25` 时要求 `cheap_rebound_confidence >= 4`
+- `cheap_rebound_confidence >= 4`
+- `entry >= 0.25` 时要求 `cheap_rebound_confidence >= 5`
+- UP 方向要求 `cheap_rebound_confidence >= 5`
 - confidence 加分：`41-45 min`、tight spread、`0.20-0.24` entry、核心币、温和 dev
-- confidence 扣分：非 `41-45 min`、非核心币、背景反向、BTC/ETH 分歧
+- confidence 扣分：背景反向、BTC/ETH 分歧
 - `cheap_fail_stop`
 - `adverse_expansion_stop`
 - TP 后残仓保护
@@ -305,16 +310,17 @@ current_price < strike -> 买 DOWN
 
 | 条件 | 当前规则 |
 |------|----------|
-| 时间窗口 | `30 < minutes_remaining <= 42` |
+| 时间窗口 | `41 <= minutes_remaining <= 45` |
+| 币种 | 仅 BTC / ETH |
 | 方向 | 只买强边 |
-| ask 区间 | `0.65 <= ask <= 0.72` |
-| spread | `ask - bid <= 0.02`；高价入场必须 `<= 0.01` |
+| ask 区间 | `0.66 <= ask <= 0.69` |
+| entry 区间 | `0.65 <= entry_price <= 0.68` |
+| spread | `ask - bid <= 0.01` |
 | 挂单价格 | `entry_price = ask - 0.01` |
 | 单笔成本 | `$1.00` |
 | dev 阈值 | `abs(dev) >= 0.18%` |
 | 波动率过滤 | 暂不启用 |
-| 高价过滤 | `entry_price > 0.68` 时，必须 `abs(dev) >= 0.22%` 且 spread `<= 0.01` |
-| 置信度过滤 | `entry_confidence >= 3` |
+| 置信度过滤 | `entry_confidence >= 4` |
 
 置信度评分：
 
@@ -325,12 +331,9 @@ current_price < strike -> 买 DOWN
 +1 ETH aligned / neutral
 +1 abs(dev) >= 0.22%
 +1 entry_price <= 0.68
--1 entry_price > 0.69
 -1 BTC/ETH 明显分歧
 -1 BTC 强反向
 ```
-
-`entry_price > 0.68` 时还要求 `entry_confidence >= 4`。
 
 止盈：
 

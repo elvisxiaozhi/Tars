@@ -299,12 +299,13 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
         has_trend_prev_side_ = false;
     }
 
-    if (md.minutes_remaining <= 30) {
-        sig.reject_reason = "time_too_short";
+    if (coin_ != "BTC" && coin_ != "ETH") {
+        sig.reject_reason = "trend_follow_coin_filter";
         return sig;
     }
-    if (md.minutes_remaining > 42) {
-        sig.reject_reason = "trend_follow_too_early";
+
+    if (md.minutes_remaining < 41 || md.minutes_remaining > 45) {
+        sig.reject_reason = "trend_follow_time_window";
         return sig;
     }
 
@@ -332,28 +333,18 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
     double ask = side == Side::UP ? quotes.up_ask : quotes.down_ask;
     double bid = side == Side::UP ? quotes.up_bid : quotes.down_bid;
     std::string token = side == Side::UP ? quotes.up_token_id : quotes.down_token_id;
-    if (ask < 0.65 || ask > 0.72) {
+    if (ask < 0.66 || ask > 0.69) {
         sig.reject_reason = "trend_follow_price_window";
         return sig;
     }
-    if (bid <= 0 || ask - bid > 0.02) {
+    if (bid <= 0 || ask - bid > 0.010001) {
         sig.reject_reason = "trend_follow_spread_wide";
         return sig;
     }
     double entry_price = std::max(0.01, ask - 0.01);
-    if (entry_price > 0.71) {
-        sig.reject_reason = "trend_follow_entry_too_high";
+    if (entry_price < 0.65 || entry_price > 0.68) {
+        sig.reject_reason = "trend_follow_entry_range";
         return sig;
-    }
-    if (entry_price > 0.68) {
-        if (abs_dev < 0.22) {
-            sig.reject_reason = "trend_follow_high_entry_dev_weak";
-            return sig;
-        }
-        if (ask - bid > 0.01) {
-            sig.reject_reason = "trend_follow_high_entry_spread_wide";
-            return sig;
-        }
     }
 
     const BtcMarketData* btc_md = ctx.has_btc ? &ctx.btc : nullptr;
@@ -398,11 +389,7 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
         components.push_back("btc_strong_opposed=-1");
     }
 
-    if (entry_price > 0.68 && confidence < 4) {
-        sig.reject_reason = "trend_follow_high_entry_confidence_low";
-        return sig;
-    }
-    if (confidence < 3) {
+    if (confidence < 4) {
         sig.reject_reason = "trend_follow_confidence_low";
         return sig;
     }
@@ -440,8 +427,8 @@ EntrySignal ExperimentStrategy::evaluate_legacy_cheap_v2(
     sig.coin = coin_;
     sig.regime = StrategyRegime::LEGACY_CHEAP;
 
-    if (md.minutes_remaining <= 35) {
-        sig.reject_reason = "legacy_v2_time_too_short";
+    if (md.minutes_remaining < 41 || md.minutes_remaining > 45) {
+        sig.reject_reason = "legacy_v2_time_window";
         return sig;
     }
 
@@ -532,7 +519,7 @@ EntrySignal ExperimentStrategy::evaluate_legacy_cheap_v2(
     if (coin_ == "BTC" || coin_ == "ETH" || coin_ == "SOL") {
         add_component("core_coin", 1);
     } else {
-        add_component("non_core_coin", -1);
+        add_component("non_core_coin", 0);
     }
     if (std::abs(md.deviation_pct) < 0.10) {
         add_component("dev_mild", 1);
@@ -547,12 +534,16 @@ EntrySignal ExperimentStrategy::evaluate_legacy_cheap_v2(
         add_component("btc_eth_diverged", -1);
     }
 
-    if (confidence < 3) {
+    if (confidence < 4) {
         sig.reject_reason = "legacy_v2_confidence_low";
         return sig;
     }
-    if (entry_price >= 0.25 && confidence < 4) {
+    if (entry_price >= 0.25 && confidence < 5) {
         sig.reject_reason = "legacy_v2_high_entry_confidence_low";
+        return sig;
+    }
+    if (side == Side::UP && confidence < 5) {
+        sig.reject_reason = "legacy_v2_up_confidence_low";
         return sig;
     }
 
@@ -579,10 +570,10 @@ std::vector<TakeProfitLevel> ExperimentStrategy::compute_tp_levels(
         levels.push_back({0, std::min(0.90, entry_price + 0.08), 0.50, false});
         levels.push_back({1, std::min(0.92, entry_price + 0.15), 1.00, false});
     } else if (regime == StrategyRegime::QUIET_REVERSION) {
-        levels.push_back({0, 0.42, 0.50, false});
+        levels.push_back({0, 0.42, 0.75, false});
         levels.push_back({1, 0.62, 1.00, false});
     } else {
-        levels.push_back({0, 0.45, 0.50, false});
+        levels.push_back({0, 0.45, 0.75, false});
         levels.push_back({1, 0.70, 0.50, false});
         levels.push_back({2, 0.88, 1.00, false});
     }
