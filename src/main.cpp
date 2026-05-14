@@ -342,9 +342,9 @@ int main(int argc, char* argv[]) {
     polymarket::RiskManager risk(cfg);
     polymarket::TradeJournal journal("./logs/trades.jsonl");
     polymarket::ExperimentEngine experiment(
-        cfg, "legacy_cheap_v2", "./logs/experiment_legacy_cheap_v2_trades.jsonl", "L");
+        cfg, "eth_cheap_v1", "./logs/experiment_eth_cheap_v1_trades.jsonl", "C");
     polymarket::ExperimentEngine trend_experiment(
-        cfg, "trend_follow", "./logs/experiment_trend_trades.jsonl", "T");
+        cfg, "eth_late_cheap_v1", "./logs/experiment_eth_late_cheap_v1_trades.jsonl", "L");
 
     // 显示用 balance：LIVE 模式取真实 vault cash；dry_run 取虚拟 risk balance
     auto display_balance = [&]() {

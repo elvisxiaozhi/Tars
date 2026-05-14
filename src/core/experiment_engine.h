@@ -49,9 +49,29 @@ public:
                                          const std::string& condition_id,
                                          const std::string& question,
                                          const TrendFollowContext& ctx);
+    EntrySignal evaluate_eth_cheap_v1(const BtcMarketData& md,
+                                      const ExperimentQuotes& quotes,
+                                      const std::string& condition_id,
+                                      const std::string& question);
+    EntrySignal evaluate_eth_only_v1(const BtcMarketData& md,
+                                     const ExperimentQuotes& quotes,
+                                     const std::string& condition_id,
+                                     const std::string& question);
+    EntrySignal evaluate_late_window_v1(const BtcMarketData& md,
+                                        const ExperimentQuotes& quotes,
+                                        const std::string& condition_id,
+                                        const std::string& question);
+    EntrySignal evaluate_eth_late_cheap_v1(const BtcMarketData& md,
+                                           const ExperimentQuotes& quotes,
+                                           const std::string& condition_id,
+                                           const std::string& question);
 
     std::vector<TakeProfitLevel> compute_tp_levels(double entry_price,
                                                    StrategyRegime regime) const;
+    std::vector<TakeProfitLevel> compute_eth_only_tp_levels(double entry_price,
+                                                            StrategyRegime regime) const;
+    std::vector<TakeProfitLevel> compute_late_window_tp_levels(double entry_price) const;
+    std::vector<TakeProfitLevel> compute_eth_late_cheap_tp_levels(double entry_price) const;
     std::vector<TakeProfitLevel> compute_trend_follow_tp_levels(double entry_price) const;
 
     ExitSignal evaluate_exit(const Position& pos,
@@ -61,6 +81,15 @@ public:
                                           double current_contract_price,
                                           const BtcMarketData& md,
                                           const TrendFollowContext& ctx) const;
+    ExitSignal evaluate_eth_only_exit(const Position& pos,
+                                      double current_contract_price,
+                                      const BtcMarketData& md) const;
+    ExitSignal evaluate_late_window_exit(const Position& pos,
+                                         double current_contract_price,
+                                         const BtcMarketData& md) const;
+    ExitSignal evaluate_eth_late_cheap_exit(const Position& pos,
+                                            double current_contract_price,
+                                            const BtcMarketData& md) const;
 
 private:
     const AppConfig& cfg_;

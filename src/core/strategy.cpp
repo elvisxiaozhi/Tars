@@ -90,11 +90,17 @@ EntrySignal Strategy::evaluate_cheap_rebound(
     sig.coin = coin_;
     sig.regime = StrategyRegime::QUIET_REVERSION;
 
-    if (minutes_remaining < 36 || minutes_remaining > 45) {
+    if (coin_ != "BTC" && coin_ != "ETH") {
+        sig.reject_reason = "cheap_rebound_coin_filter";
+        return sig;
+    }
+    if (minutes_remaining <= 30 || minutes_remaining > 50) {
         sig.reject_reason = "cheap_rebound_time_window";
         return sig;
     }
-    if (std::abs(btc.deviation_pct) > 0.12) {
+    double abs_dev = std::abs(btc.deviation_pct);
+    double pre_entry_max_abs_dev = coin_ == "ETH" ? 0.24 : 0.12;
+    if (abs_dev < 0.10 || abs_dev > pre_entry_max_abs_dev) {
         sig.reject_reason = "cheap_rebound_dev_not_quiet";
         return sig;
     }
@@ -118,7 +124,8 @@ EntrySignal Strategy::evaluate_cheap_rebound(
         return sig;
     }
 
-    if (candidate_bid <= 0 || candidate_ask <= 0 || candidate_ask > 0.29) {
+    double max_candidate_ask = coin_ == "ETH" ? 0.31 : 0.29;
+    if (candidate_bid <= 0 || candidate_ask <= 0 || candidate_ask > max_candidate_ask) {
         sig.reject_reason = "cheap_rebound_invalid_price";
         return sig;
     }
@@ -129,14 +136,30 @@ EntrySignal Strategy::evaluate_cheap_rebound(
     }
 
     double entry_price = std::max(0.01, candidate_ask - 0.01);
-    double min_entry = is_core_coin(coin_) ? 0.22 : 0.24;
-    double max_entry = 0.28;
-    double max_abs_dev = is_core_coin(coin_) ? 0.12 : 0.08;
+    double min_entry = 0.24;
+    double max_entry = coin_ == "ETH" ? 0.30 : 0.26;
     if (entry_price < min_entry || entry_price > max_entry) {
         sig.reject_reason = "cheap_rebound_entry_range";
         return sig;
     }
-    if (std::abs(btc.deviation_pct) > max_abs_dev) {
+
+    double max_abs_dev = 0.12;
+    bool eth_medium_value = false;
+    if (coin_ == "ETH") {
+        if (entry_price <= 0.240001) {
+            max_abs_dev = 0.24;
+        } else if (entry_price <= 0.260001) {
+            max_abs_dev = 0.18;
+        } else {
+            eth_medium_value = true;
+            max_abs_dev = 0.24;
+            if (minutes_remaining < 35 || abs_dev < 0.18) {
+                sig.reject_reason = "cheap_rebound_eth_medium_filter";
+                return sig;
+            }
+        }
+    }
+    if (abs_dev > max_abs_dev) {
         sig.reject_reason = "cheap_rebound_coin_dev_too_large";
         return sig;
     }
@@ -174,6 +197,8 @@ EntrySignal Strategy::evaluate_cheap_rebound(
     add_component("spread_tight", 1);
     if (entry_price >= 0.22 && entry_price < 0.27) {
         add_component("entry_value_22_26", 1);
+    } else if (eth_medium_value) {
+        add_component("eth_medium_entry_27_30", 1);
     }
     bool core_coin = is_core_coin(coin_);
     if (core_coin) {
@@ -181,14 +206,13 @@ EntrySignal Strategy::evaluate_cheap_rebound(
     } else {
         add_component("non_core_coin", 0);
     }
-    double abs_dev = std::abs(btc.deviation_pct);
     double min_sweet_dev = core_coin ? 0.08 : 0.05;
     if (abs_dev >= min_sweet_dev && abs_dev <= max_abs_dev) {
         add_component("dev_sweet_spot", 1);
     } else if (abs_dev < min_sweet_dev) {
         add_component("dev_too_weak", -1);
     }
-    if (entry_price >= 0.27) {
+    if (entry_price >= 0.27 && !eth_medium_value) {
         add_component("entry_high_27_plus", -1);
     }
     if (opposed > 0) {
@@ -199,7 +223,7 @@ EntrySignal Strategy::evaluate_cheap_rebound(
         sig.reject_reason = "cheap_rebound_confidence_low";
         return sig;
     }
-    if (entry_price >= 0.27 && confidence < 5) {
+    if (entry_price >= 0.27 && !eth_medium_value && confidence < 5) {
         sig.reject_reason = "cheap_rebound_high_entry_confidence_low";
         return sig;
     }
@@ -208,7 +232,7 @@ EntrySignal Strategy::evaluate_cheap_rebound(
     sig.side = candidate_side;
     sig.market_ask = candidate_ask;
     sig.entry_price = entry_price;
-    sig.size_usdc = 1.00;
+    sig.size_usdc = eth_medium_value ? 0.50 : 1.00;
     sig.shares = sig.size_usdc / sig.entry_price;
     sig.token_id = candidate_token;
     sig.entry_confidence = confidence;
@@ -234,7 +258,11 @@ EntrySignal Strategy::evaluate_momentum_follow(
     sig.coin = coin_;
     sig.regime = StrategyRegime::TREND;
 
-    if (minutes_remaining < 32 || minutes_remaining > 42) {
+    if (coin_ == "SOL") {
+        sig.reject_reason = "momentum_sol_filter";
+        return sig;
+    }
+    if (minutes_remaining < 25 || minutes_remaining > 50) {
         sig.reject_reason = "momentum_time_window";
         return sig;
     }
@@ -259,16 +287,12 @@ EntrySignal Strategy::evaluate_momentum_follow(
     }
 
     double entry_price = std::max(0.01, ask - 0.01);
-    if (entry_price < 0.64 || entry_price > 0.69) {
+    if (entry_price < 0.64 || entry_price > 0.67) {
         sig.reject_reason = "momentum_entry_range";
         return sig;
     }
-    if (entry_price > 0.68 && abs_dev < 0.24) {
-        sig.reject_reason = "momentum_high_entry_dev_weak";
-        return sig;
-    }
-    if (!is_core_coin(coin_) && abs_dev < 0.24) {
-        sig.reject_reason = "momentum_alt_dev_weak";
+    if (coin_ != "BTC" && abs_dev < 0.24) {
+        sig.reject_reason = "momentum_non_btc_dev_weak";
         return sig;
     }
 
@@ -377,10 +401,10 @@ ExitSignal Strategy::evaluate_exit(
             return exit;
         }
 
-        if (elapsed_sec >= 150 && mfe_gain < 0.02 &&
+        if (elapsed_sec >= 150 && mfe_gain < 0.03 &&
             current_contract_price <= pos.entry_price - 0.03) {
             exit.should_exit = true;
-            exit.reason = "fast_fail_exit";
+            exit.reason = "no_start_exit";
             exit.exit_price = current_contract_price;
             exit.use_market_order = true;
             return exit;
@@ -440,8 +464,19 @@ ExitSignal Strategy::evaluate_exit(
 
     if (pos.regime == StrategyRegime::QUIET_REVERSION) {
         double max_adverse = pos.entry_price - pos.min_price;
-        if (elapsed_sec >= 20 && mfe_gain < 0.015 &&
-            current_contract_price <= pos.entry_price - 0.02) {
+        if (elapsed_sec >= 150 && mfe_gain < 0.03 &&
+            current_contract_price <= pos.entry_price - 0.03) {
+            exit.should_exit = true;
+            exit.reason = "no_start_exit";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("NO START EXIT: {} elapsed={}s mfe_gain={:+.3f} entry={:.3f} now={:.3f}",
+                         pos.market_question, elapsed_sec, mfe_gain,
+                         pos.entry_price, current_contract_price);
+            return exit;
+        }
+        if (elapsed_sec >= 90 && mfe_gain < 0.02 &&
+            current_contract_price <= pos.entry_price - 0.03) {
             exit.should_exit = true;
             exit.reason = "cheap_fail_stop";
             exit.exit_price = current_contract_price;
@@ -451,7 +486,8 @@ ExitSignal Strategy::evaluate_exit(
                          pos.entry_price, current_contract_price);
             return exit;
         }
-        if (max_adverse >= 0.06 && mfe_gain < 0.10) {
+        if (elapsed_sec >= 180 && max_adverse >= 0.06 && mfe_gain < 0.10 &&
+            current_contract_price <= pos.entry_price - 0.05) {
             exit.should_exit = true;
             exit.reason = "adverse_expansion_stop";
             exit.exit_price = current_contract_price;

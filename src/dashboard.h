@@ -166,7 +166,7 @@ inline const std::string DASHBOARD_HTML = R"html(
 <div class="tabs">
   <button class="tab-btn active" data-tab="main">Main Strategy</button>
   <button class="tab-btn" data-tab="trend">Trend Follow</button>
-  <button class="tab-btn" data-tab="regime">Legacy V2</button>
+  <button class="tab-btn" data-tab="regime">ETH Cheap</button>
 </div>
 
 <div id="tab-main" class="tab-panel active">
@@ -319,7 +319,7 @@ inline const std::string DASHBOARD_HTML = R"html(
 <div id="tab-regime" class="tab-panel">
 <details class="section" id="experiment-details" open>
   <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>Legacy V2 Experiment</span>
+    <span>ETH Cheap Experiment</span>
     <span id="exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
   </summary>
   <div class="stats-grid" style="margin-top:8px;">
@@ -339,7 +339,7 @@ inline const std::string DASHBOARD_HTML = R"html(
 <div id="tab-trend" class="tab-panel">
 <details class="section" id="trend-experiment-details" open>
   <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>Trend Experiment</span>
+    <span>ETH Late Cheap Experiment</span>
     <span id="trend-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
   </summary>
   <div class="stats-grid" style="margin-top:8px;">
