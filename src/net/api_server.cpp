@@ -24,6 +24,15 @@ struct ApiServer::Impl {
     ApiDataCallback trend_experiment_status_cb;
     ApiDataCallback trend_experiment_trades_cb;
     ApiDataCallback trend_experiment_all_trades_cb;
+    ApiDataCallback finance_experiment_status_cb;
+    ApiDataCallback finance_experiment_trades_cb;
+    ApiDataCallback finance_experiment_all_trades_cb;
+    ApiDataCallback crypto_4h_experiment_status_cb;
+    ApiDataCallback crypto_4h_experiment_trades_cb;
+    ApiDataCallback crypto_4h_experiment_all_trades_cb;
+    ApiDataCallback crypto_daily_experiment_status_cb;
+    ApiDataCallback crypto_daily_experiment_trades_cb;
+    ApiDataCallback crypto_daily_experiment_all_trades_cb;
     ApiDataCallback shutdown_cb;
     std::string dashboard_html;
 
@@ -65,6 +74,33 @@ struct ApiServer::Impl {
         if (target == "/api/experiment-trend/all-trades" && trend_experiment_all_trades_cb) {
             return make_response(http::status::ok, trend_experiment_all_trades_cb(), "application/json");
         }
+        if (target == "/api/experiment-finance/status" && finance_experiment_status_cb) {
+            return make_response(http::status::ok, finance_experiment_status_cb(), "application/json");
+        }
+        if (target == "/api/experiment-finance/trades" && finance_experiment_trades_cb) {
+            return make_response(http::status::ok, finance_experiment_trades_cb(), "application/json");
+        }
+        if (target == "/api/experiment-finance/all-trades" && finance_experiment_all_trades_cb) {
+            return make_response(http::status::ok, finance_experiment_all_trades_cb(), "application/json");
+        }
+        if (target == "/api/experiment-crypto-4h/status" && crypto_4h_experiment_status_cb) {
+            return make_response(http::status::ok, crypto_4h_experiment_status_cb(), "application/json");
+        }
+        if (target == "/api/experiment-crypto-4h/trades" && crypto_4h_experiment_trades_cb) {
+            return make_response(http::status::ok, crypto_4h_experiment_trades_cb(), "application/json");
+        }
+        if (target == "/api/experiment-crypto-4h/all-trades" && crypto_4h_experiment_all_trades_cb) {
+            return make_response(http::status::ok, crypto_4h_experiment_all_trades_cb(), "application/json");
+        }
+        if (target == "/api/experiment-crypto-daily/status" && crypto_daily_experiment_status_cb) {
+            return make_response(http::status::ok, crypto_daily_experiment_status_cb(), "application/json");
+        }
+        if (target == "/api/experiment-crypto-daily/trades" && crypto_daily_experiment_trades_cb) {
+            return make_response(http::status::ok, crypto_daily_experiment_trades_cb(), "application/json");
+        }
+        if (target == "/api/experiment-crypto-daily/all-trades" && crypto_daily_experiment_all_trades_cb) {
+            return make_response(http::status::ok, crypto_daily_experiment_all_trades_cb(), "application/json");
+        }
         if (target == "/api/shutdown" && shutdown_cb) {
             // 仅接受 POST/DELETE，避免 GET 误触发（如浏览器预取）
             if (req.method() != http::verb::post && req.method() != http::verb::delete_) {
@@ -105,7 +141,8 @@ struct ApiServer::Impl {
     }
 };
 
-ApiServer::ApiServer(int port) : impl_(std::make_unique<Impl>()), port_(port) {}
+ApiServer::ApiServer(int port, std::string host)
+    : impl_(std::make_unique<Impl>()), port_(port), host_(std::move(host)) {}
 
 ApiServer::~ApiServer() { stop(); }
 
@@ -119,6 +156,15 @@ void ApiServer::on_experiment_all_trades(ApiDataCallback cb) { impl_->experiment
 void ApiServer::on_trend_experiment_status(ApiDataCallback cb) { impl_->trend_experiment_status_cb = std::move(cb); }
 void ApiServer::on_trend_experiment_trades(ApiDataCallback cb) { impl_->trend_experiment_trades_cb = std::move(cb); }
 void ApiServer::on_trend_experiment_all_trades(ApiDataCallback cb) { impl_->trend_experiment_all_trades_cb = std::move(cb); }
+void ApiServer::on_finance_experiment_status(ApiDataCallback cb) { impl_->finance_experiment_status_cb = std::move(cb); }
+void ApiServer::on_finance_experiment_trades(ApiDataCallback cb) { impl_->finance_experiment_trades_cb = std::move(cb); }
+void ApiServer::on_finance_experiment_all_trades(ApiDataCallback cb) { impl_->finance_experiment_all_trades_cb = std::move(cb); }
+void ApiServer::on_crypto_4h_experiment_status(ApiDataCallback cb) { impl_->crypto_4h_experiment_status_cb = std::move(cb); }
+void ApiServer::on_crypto_4h_experiment_trades(ApiDataCallback cb) { impl_->crypto_4h_experiment_trades_cb = std::move(cb); }
+void ApiServer::on_crypto_4h_experiment_all_trades(ApiDataCallback cb) { impl_->crypto_4h_experiment_all_trades_cb = std::move(cb); }
+void ApiServer::on_crypto_daily_experiment_status(ApiDataCallback cb) { impl_->crypto_daily_experiment_status_cb = std::move(cb); }
+void ApiServer::on_crypto_daily_experiment_trades(ApiDataCallback cb) { impl_->crypto_daily_experiment_trades_cb = std::move(cb); }
+void ApiServer::on_crypto_daily_experiment_all_trades(ApiDataCallback cb) { impl_->crypto_daily_experiment_all_trades_cb = std::move(cb); }
 void ApiServer::on_shutdown(ApiDataCallback cb) { impl_->shutdown_cb = std::move(cb); }
 void ApiServer::set_dashboard_html(const std::string& html) { impl_->dashboard_html = html; }
 
@@ -128,11 +174,13 @@ void ApiServer::start() {
 
     server_thread_ = std::thread([this]() {
         try {
-            tcp::acceptor acceptor(impl_->ioc,
-                tcp::endpoint(tcp::v4(), static_cast<unsigned short>(port_)));
+            tcp::resolver resolver(impl_->ioc);
+            auto results = resolver.resolve(host_, std::to_string(port_));
+            auto endpoint = *results.begin();
+            tcp::acceptor acceptor(impl_->ioc, endpoint.endpoint());
             acceptor.set_option(asio::socket_base::reuse_address(true));
 
-            spdlog::info("API server listening on http://localhost:{}", port_);
+            spdlog::info("API server listening on http://{}:{}", host_, port_);
 
             while (running_) {
                 // 设置非阻塞等待，每秒检查 running_ 状态

@@ -1,29 +1,47 @@
 cmake_minimum_required(VERSION 3.20)
-cmake_policy(SET CMP0144 NEW)
-cmake_policy(SET CMP0167 NEW)
+if(POLICY CMP0144)
+    cmake_policy(SET CMP0144 NEW)
+endif()
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
 project(polymarket-arb VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# --- Brew prefix (Apple Silicon) ---
-set(HOMEBREW_PREFIX "/opt/homebrew")
-list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}")
+# --- Platform prefixes ---
+# macOS/Homebrew installs OpenSSL and secp256k1 outside the default SDK paths.
+# Linux packages are discovered through the system default search paths.
+if(APPLE)
+    set(HOMEBREW_PREFIX "/opt/homebrew")
+    list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}")
+endif()
 
 # --- Boost ---
 find_package(Boost 1.80 REQUIRED)
 
 # --- OpenSSL ---
-set(OPENSSL_ROOT_DIR "${HOMEBREW_PREFIX}/opt/openssl@3")
+if(APPLE)
+    set(OPENSSL_ROOT_DIR "${HOMEBREW_PREFIX}/opt/openssl@3")
+endif()
 find_package(OpenSSL 3.0 REQUIRED)
 
 # --- SQLite3 (macOS built-in) ---
 find_library(SQLITE3_LIB sqlite3)
 
 # --- secp256k1 ---
-find_library(SECP256K1_LIB secp256k1 PATHS "${HOMEBREW_PREFIX}/lib")
-find_path(SECP256K1_INCLUDE secp256k1.h PATHS "${HOMEBREW_PREFIX}/include")
+if(APPLE)
+    find_library(SECP256K1_LIB secp256k1 PATHS "${HOMEBREW_PREFIX}/lib")
+    find_path(SECP256K1_INCLUDE secp256k1.h PATHS "${HOMEBREW_PREFIX}/include")
+else()
+    find_library(SECP256K1_LIB secp256k1)
+    find_path(SECP256K1_INCLUDE secp256k1.h)
+endif()
+if(NOT SECP256K1_LIB OR NOT SECP256K1_INCLUDE)
+    message(FATAL_ERROR "secp256k1 not found. Install libsecp256k1-dev on Linux or secp256k1 via Homebrew on macOS.")
+endif()
 
 # --- spdlog (手动, 编译为静态库) ---
 add_subdirectory(third_party/spdlog)
@@ -58,6 +76,7 @@ set(SOURCES
     src/utils/config.cpp
     src/core/market_feed.cpp
     src/core/binance_feed.cpp
+    src/core/finance_feed.cpp
     src/core/clob_ws_feed.cpp
     src/core/quote_cache.cpp
     src/core/strategy.cpp

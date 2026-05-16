@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <set>
 #include <thread>
 
@@ -113,6 +114,54 @@ static std::string build_hourly_slug(const std::string& prefix, int offset_hours
 
 static std::string build_btc_hourly_slug(int offset_hours = 0) {
     return build_hourly_slug("bitcoin-up-or-down", offset_hours);
+}
+
+static std::string lower_copy(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+static bool looks_like_supported_finance_market(const Market& m) {
+    std::string text = lower_copy(m.question + " " + m.market_slug);
+    bool supported_asset =
+        text.find("spy") != std::string::npos ||
+        text.find("spx") != std::string::npos ||
+        text.find("s&p") != std::string::npos ||
+        text.find("gold") != std::string::npos ||
+        text.find("silver") != std::string::npos ||
+        text.find("wti") != std::string::npos ||
+        text.find("oil") != std::string::npos;
+    if (!supported_asset) return false;
+
+    return text.find("up or down") != std::string::npos;
+}
+
+static bool looks_like_crypto_duration_market(const Market& m, const std::string& duration) {
+    std::string text = lower_copy(m.question + " " + m.market_slug);
+    bool supported_coin =
+        text.find("bitcoin") != std::string::npos || text.find("btc") != std::string::npos ||
+        text.find("ethereum") != std::string::npos || text.find("eth") != std::string::npos ||
+        text.find("solana") != std::string::npos || text.find("sol") != std::string::npos ||
+        text.find("xrp") != std::string::npos ||
+        text.find("bnb") != std::string::npos;
+    if (!supported_coin || text.find("up or down") == std::string::npos) return false;
+
+    bool hourly_shape =
+        text.find("am et") != std::string::npos || text.find("pm et") != std::string::npos;
+    bool four_hour_shape =
+        text.find("4h") != std::string::npos ||
+        text.find("4-hour") != std::string::npos ||
+        text.find("4 hour") != std::string::npos ||
+        text.find("12am-4am") != std::string::npos ||
+        text.find("4am-8am") != std::string::npos ||
+        text.find("8am-12pm") != std::string::npos ||
+        text.find("12pm-4pm") != std::string::npos ||
+        text.find("4pm-8pm") != std::string::npos ||
+        text.find("8pm-12am") != std::string::npos;
+
+    if (duration == "4h") return four_hour_shape;
+    if (duration == "daily") return !four_hour_shape && !hourly_shape;
+    return false;
 }
 
 void MarketFeed::fetch_from_gamma() {
@@ -257,6 +306,14 @@ void MarketFeed::fetch_from_gamma(const std::vector<CoinStrategyConfig>& coins) 
             }
         }
         if (it->second.market.closed || !keep) {
+            bool special_market =
+                looks_like_supported_finance_market(it->second.market) ||
+                looks_like_crypto_duration_market(it->second.market, "4h") ||
+                looks_like_crypto_duration_market(it->second.market, "daily");
+            if (!it->second.market.closed && special_market) {
+                ++it;
+                continue;
+            }
             spdlog::info("  removing market: {}", it->second.market.question);
             it = markets_.erase(it);
         } else {
@@ -266,6 +323,125 @@ void MarketFeed::fetch_from_gamma(const std::vector<CoinStrategyConfig>& coins) 
 
     if (new_count > 0) {
         spdlog::info("Markets: {} new, {} total", new_count, markets_.size());
+    }
+}
+
+void MarketFeed::fetch_finance_markets(int limit) {
+    std::vector<std::string> urls = {
+        cfg_.polymarket.gamma_api_url +
+            "/events?active=true&closed=false&archived=false&tag_slug=finance&limit=" +
+            std::to_string(limit) + "&order=volume24hr&ascending=false",
+        cfg_.polymarket.gamma_api_url +
+            "/events?active=true&closed=false&archived=false&category=finance&limit=" +
+            std::to_string(limit) + "&order=volume24hr&ascending=false"
+    };
+
+    int new_count = 0;
+    int kept_count = 0;
+    for (const auto& url : urls) {
+        net::HttpResponse resp;
+        try {
+            resp = http_.get(url);
+        } catch (const std::exception& e) {
+            spdlog::warn("Finance gamma fetch failed: {}", e.what());
+            continue;
+        }
+        if (resp.status_code != 200) {
+            spdlog::warn("Finance gamma fetch status={}", resp.status_code);
+            continue;
+        }
+
+        auto j = json::parse(resp.body);
+        if (!j.is_array() || j.empty()) continue;
+        for (const auto& event : j) {
+            if (!event.contains("markets") || !event["markets"].is_array()) continue;
+            for (const auto& mj : event["markets"]) {
+                auto m = jh::parse_gamma_market(mj);
+                if (!m.active || m.closed) continue;
+                if (m.tokens.size() != 2) continue;
+                if (!looks_like_supported_finance_market(m)) continue;
+                kept_count++;
+                bool exists = markets_.find(m.condition_id) != markets_.end();
+                if (!exists) {
+                    spdlog::info("  new finance market: {}", m.question);
+                    new_count++;
+                }
+                MarketEntry entry;
+                entry.market = std::move(m);
+                markets_[entry.market.condition_id] = std::move(entry);
+            }
+        }
+        if (kept_count > 0) break;
+    }
+
+    if (new_count > 0) {
+        spdlog::info("Finance markets: {} new, {} supported active", new_count, kept_count);
+    }
+}
+
+void MarketFeed::fetch_crypto_duration_markets(const std::string& duration, int limit) {
+    std::vector<std::string> urls = {
+        cfg_.polymarket.gamma_api_url +
+            "/events?active=true&closed=false&archived=false&tag_slug=crypto&limit=" +
+            std::to_string(limit) + "&order=volume24hr&ascending=false",
+        cfg_.polymarket.gamma_api_url +
+            "/events?active=true&closed=false&archived=false&category=crypto&limit=" +
+            std::to_string(limit) + "&order=volume24hr&ascending=false"
+    };
+
+    int new_count = 0;
+    int kept_count = 0;
+    std::set<std::string> seen_ids;
+    for (const auto& url : urls) {
+        net::HttpResponse resp;
+        try {
+            resp = http_.get(url);
+        } catch (const std::exception& e) {
+            spdlog::warn("Crypto {} gamma fetch failed: {}", duration, e.what());
+            continue;
+        }
+        if (resp.status_code != 200) {
+            spdlog::warn("Crypto {} gamma fetch status={}", duration, resp.status_code);
+            continue;
+        }
+
+        auto j = json::parse(resp.body);
+        if (!j.is_array() || j.empty()) continue;
+        for (const auto& event : j) {
+            if (!event.contains("markets") || !event["markets"].is_array()) continue;
+            for (const auto& mj : event["markets"]) {
+                auto m = jh::parse_gamma_market(mj);
+                if (!m.active || m.closed) continue;
+                if (m.tokens.size() != 2) continue;
+                if (!looks_like_crypto_duration_market(m, duration)) continue;
+                seen_ids.insert(m.condition_id);
+                kept_count++;
+                bool exists = markets_.find(m.condition_id) != markets_.end();
+                if (!exists) {
+                    spdlog::info("  new crypto {} market: {}", duration, m.question);
+                    new_count++;
+                }
+                MarketEntry entry;
+                entry.market = std::move(m);
+                markets_[entry.market.condition_id] = std::move(entry);
+            }
+        }
+        if (kept_count > 0) break;
+    }
+
+    for (auto it = markets_.begin(); it != markets_.end(); ) {
+        if (looks_like_crypto_duration_market(it->second.market, duration) &&
+            seen_ids.find(it->first) == seen_ids.end()) {
+            spdlog::info("  removing crypto {} market: {}", duration, it->second.market.question);
+            it = markets_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (new_count > 0) {
+        spdlog::info("Crypto {} markets: {} new, {} supported active",
+                     duration, new_count, kept_count);
     }
 }
 

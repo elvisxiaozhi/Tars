@@ -30,9 +30,11 @@ double BinanceFeed::fetch_price(const std::string& binance_symbol) {
     return std::stod(j["price"].get<std::string>());
 }
 
-std::vector<BtcCandle> BinanceFeed::fetch_klines(const std::string& binance_symbol, int limit) {
+std::vector<BtcCandle> BinanceFeed::fetch_klines(const std::string& binance_symbol,
+                                                 const std::string& interval,
+                                                 int limit) {
     std::string url = std::string(BINANCE_API) +
-                      "/api/v3/klines?symbol=" + binance_symbol + "&interval=1h&limit=" +
+                      "/api/v3/klines?symbol=" + binance_symbol + "&interval=" + interval + "&limit=" +
                       std::to_string(limit);
     auto resp = http_.get(url);
     if (resp.status_code != 200) {
@@ -115,7 +117,7 @@ BtcMarketData BinanceFeed::fetch(const std::string& coin, const std::string& bin
     bool need_klines = cache.klines.empty() || (now - cache.fetched_at_ms) >= 60000;
     if (need_klines) {
         try {
-            cache.klines = fetch_klines(binance_symbol, 25);
+            cache.klines = fetch_klines(binance_symbol, "1h", 25);
             cache.fetched_at_ms = now;
         } catch (const std::exception& e) {
             if (cache.klines.empty()) throw;
@@ -131,6 +133,36 @@ BtcMarketData BinanceFeed::fetch(const std::string& coin, const std::string& bin
                  latest_.avg_24h_vol, latest_.minutes_remaining);
 
     return latest_;
+}
+
+BtcMarketData BinanceFeed::fetch_period(const std::string& coin,
+                                         const std::string& binance_symbol,
+                                         const std::string& interval,
+                                         int period_minutes) {
+    auto price = fetch_price(binance_symbol);
+    auto cache_key = binance_symbol + ":" + interval;
+    auto now = now_ms_local();
+    auto& cache = kline_cache_[cache_key];
+    bool need_klines = cache.klines.empty() || (now - cache.fetched_at_ms) >= 60000;
+    if (need_klines) {
+        try {
+            cache.klines = fetch_klines(binance_symbol, interval, 25);
+            cache.fetched_at_ms = now;
+        } catch (const std::exception& e) {
+            if (cache.klines.empty()) throw;
+            spdlog::warn("{} {} klines refresh failed, using cached candles: {}",
+                         coin, interval, e.what());
+        }
+    }
+    auto data = compute(coin, price, cache.klines);
+    if (data.candle_open_time > 0) {
+        data.minutes_into_candle = static_cast<int>((now - data.candle_open_time) / 60000);
+        data.minutes_remaining = std::max(0, period_minutes - data.minutes_into_candle);
+    }
+    spdlog::info("{} {}: ${:.4f} | strike: ${:.4f} | dev: {:+.2f}% | {}min left",
+                 coin, interval, data.current_price, data.strike_price,
+                 data.deviation_pct, data.minutes_remaining);
+    return data;
 }
 
 }  // namespace polymarket

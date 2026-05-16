@@ -202,7 +202,7 @@ void ClobWsFeed::handle_json_message(const json& j) {
     if (!j.is_object()) return;
 
     const auto event_type = jh::get_string(j, "event_type");
-    const int64_t ts = [&]() {
+    const int64_t ts = [&]() -> int64_t {
         auto t = jh::get_string(j, "timestamp");
         if (t.empty()) return now_ms_ws();
         try { return std::stoll(t); } catch (...) { return now_ms_ws(); }

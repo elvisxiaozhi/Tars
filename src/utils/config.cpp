@@ -194,7 +194,8 @@ AppConfig load_config(const std::string& path) {
     if (root.contains("network")) {
         auto& n = root["network"];
         cfg.network.proxy_url = jstr(n, "proxy_url");
-        cfg.network.api_port = jint(n, "api_port", 9090);
+        cfg.network.api_host = jstr(n, "api_host", cfg.network.api_host);
+        cfg.network.api_port = jint(n, "api_port", cfg.network.api_port);
     }
 
     // fees

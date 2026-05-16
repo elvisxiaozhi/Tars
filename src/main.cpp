@@ -1,5 +1,6 @@
 #include <chrono>
 #include <csignal>
+#include <cctype>
 #include <ctime>
 #include <algorithm>
 #include <filesystem>
@@ -17,6 +18,7 @@
 #include "core/binance_feed.h"
 #include "core/clob_ws_feed.h"
 #include "core/experiment_engine.h"
+#include "core/finance_feed.h"
 #include "core/market_feed.h"
 #include "core/quote_cache.h"
 #include "core/risk_manager.h"
@@ -328,6 +330,7 @@ int main(int argc, char* argv[]) {
     for (const auto& coin : cfg.coins) {
         binance_feeds[coin.coin] = std::make_unique<polymarket::BinanceFeed>(cfg.network.proxy_url);
     }
+    polymarket::FinanceFeed finance_feed(cfg.network.proxy_url);
     polymarket::MarketFeed market_feed(cfg);
     polymarket::QuoteCache quote_cache;
     polymarket::ClobWsFeed clob_ws(cfg.polymarket.clob_ws_url,
@@ -345,6 +348,12 @@ int main(int argc, char* argv[]) {
         cfg, "eth_cheap_v1", "./logs/experiment_eth_cheap_v1_trades.jsonl", "C");
     polymarket::ExperimentEngine trend_experiment(
         cfg, "eth_late_cheap_v1", "./logs/experiment_eth_late_cheap_v1_trades.jsonl", "L");
+    polymarket::ExperimentEngine finance_experiment(
+        cfg, "finance_updown_v1", "./logs/experiment_finance_updown_v1_trades.jsonl", "F");
+    polymarket::ExperimentEngine crypto_4h_experiment(
+        cfg, "crypto_4h_updown_v1", "./logs/experiment_crypto_4h_updown_v1_trades.jsonl", "H");
+    polymarket::ExperimentEngine crypto_daily_experiment(
+        cfg, "crypto_daily_updown_v1", "./logs/experiment_crypto_daily_updown_v1_trades.jsonl", "D");
 
     // 显示用 balance：LIVE 模式取真实 vault cash；dry_run 取虚拟 risk balance
     auto display_balance = [&]() {
@@ -360,7 +369,7 @@ int main(int argc, char* argv[]) {
     std::vector<polymarket::Position> positions;
 
     // === API 服务器 ===
-    polymarket::net::ApiServer api(cfg.network.api_port);
+    polymarket::net::ApiServer api(cfg.network.api_port, cfg.network.api_host);
     api.set_dashboard_html(polymarket::DASHBOARD_HTML);
 
     api.on_status([&]() -> std::string {
@@ -883,6 +892,33 @@ int main(int argc, char* argv[]) {
     api.on_trend_experiment_all_trades([&]() -> std::string {
         return trend_experiment.all_trades_json();
     });
+    api.on_finance_experiment_status([&]() -> std::string {
+        return finance_experiment.status_json();
+    });
+    api.on_finance_experiment_trades([&]() -> std::string {
+        return finance_experiment.trades_json();
+    });
+    api.on_finance_experiment_all_trades([&]() -> std::string {
+        return finance_experiment.all_trades_json();
+    });
+    api.on_crypto_4h_experiment_status([&]() -> std::string {
+        return crypto_4h_experiment.status_json();
+    });
+    api.on_crypto_4h_experiment_trades([&]() -> std::string {
+        return crypto_4h_experiment.trades_json();
+    });
+    api.on_crypto_4h_experiment_all_trades([&]() -> std::string {
+        return crypto_4h_experiment.all_trades_json();
+    });
+    api.on_crypto_daily_experiment_status([&]() -> std::string {
+        return crypto_daily_experiment.status_json();
+    });
+    api.on_crypto_daily_experiment_trades([&]() -> std::string {
+        return crypto_daily_experiment.trades_json();
+    });
+    api.on_crypto_daily_experiment_all_trades([&]() -> std::string {
+        return crypto_daily_experiment.all_trades_json();
+    });
 
     // POST /api/shutdown — 优雅停止 bot（前端"Stop Bot"按钮触发）
     // 设 g_running=false → 主循环退出 → emergency_close_all 兜底 → 进程退出
@@ -895,8 +931,9 @@ int main(int argc, char* argv[]) {
     api.start();
 
     int poll_sec = cfg.strategy.poll_interval_sec;
-    spdlog::info("Strategy loop: poll every {}s, account=${:.0f}, dashboard at http://localhost:{}",
-                 poll_sec, cfg.strategy.account_balance, cfg.network.api_port);
+    spdlog::info("Strategy loop: poll every {}s, account=${:.0f}, dashboard at http://{}:{}",
+                 poll_sec, cfg.strategy.account_balance,
+                 cfg.network.api_host, cfg.network.api_port);
 
     // 拒绝原因聚合器：避免每个 tick 都打 reject 日志，每 10 次或 5 分钟汇总输出一行
     struct RejectAggregator {
@@ -989,6 +1026,9 @@ int main(int argc, char* argv[]) {
                     risk.reset_candle(result.coin);
                     experiment.reset_candle(result.coin);
                     trend_experiment.reset_candle(result.coin);
+                    finance_experiment.reset_candle(result.coin);
+                    crypto_4h_experiment.reset_candle(result.coin);
+                    crypto_daily_experiment.reset_candle(result.coin);
                     spdlog::info("New candle [{}]: reset per-coin/global hour trade flags",
                                  result.coin);
                 }
@@ -1002,6 +1042,9 @@ int main(int argc, char* argv[]) {
                 risk.reset_global_hour();
                 experiment.reset_global_hour();
                 trend_experiment.reset_global_hour();
+                finance_experiment.reset_global_hour();
+                crypto_4h_experiment.reset_global_hour();
+                crypto_daily_experiment.reset_global_hour();
                 spdlog::info("New global hour: reset global trade counters");
             }
             if (newest_candle_open != 0) {
@@ -1023,6 +1066,9 @@ int main(int argc, char* argv[]) {
             }
 
             market_feed.fetch_markets(cfg.coins);
+            market_feed.fetch_finance_markets();
+            market_feed.fetch_crypto_duration_markets("4h");
+            market_feed.fetch_crypto_duration_markets("daily");
             auto active_token_ids = market_feed.active_token_ids();
             clob_ws.update_subscriptions(active_token_ids);
             const int64_t quote_max_age_ms = live_trader ? 5000 : 10000;
@@ -1042,7 +1088,42 @@ int main(int argc, char* argv[]) {
                 continue;
             }
 
+            auto lower_text = [](std::string s) {
+                for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                return s;
+            };
+            auto crypto_duration_for_market = [&](const polymarket::MarketEntry& entry) -> std::string {
+                std::string text = lower_text(entry.market.question + " " + entry.market.market_slug);
+                if (text.find("up or down") == std::string::npos) return "";
+                std::string coin;
+                if (text.find("bitcoin") != std::string::npos || text.find("btc") != std::string::npos) coin = "BTC";
+                else if (text.find("ethereum") != std::string::npos || text.find("eth") != std::string::npos) coin = "ETH";
+                else if (text.find("solana") != std::string::npos || text.find("sol") != std::string::npos) coin = "SOL";
+                else if (text.find("xrp") != std::string::npos) coin = "XRP";
+                else if (text.find("bnb") != std::string::npos) coin = "BNB";
+                else return "";
+                bool four_hour =
+                    text.find("4h") != std::string::npos ||
+                    text.find("4-hour") != std::string::npos ||
+                    text.find("4 hour") != std::string::npos ||
+                    text.find("12am-4am") != std::string::npos ||
+                    text.find("4am-8am") != std::string::npos ||
+                    text.find("8am-12pm") != std::string::npos ||
+                    text.find("12pm-4pm") != std::string::npos ||
+                    text.find("4pm-8pm") != std::string::npos ||
+                    text.find("8pm-12am") != std::string::npos;
+                bool hourly =
+                    text.find("am et") != std::string::npos ||
+                    text.find("pm et") != std::string::npos;
+                if (four_hour) return "CRYPTO4H:" + coin;
+                if (!hourly) return "CRYPTODAILY:" + coin;
+                return "";
+            };
             auto coin_for_market = [&](const polymarket::MarketEntry& entry) -> std::string {
+                auto duration_coin = crypto_duration_for_market(entry);
+                if (!duration_coin.empty()) return duration_coin;
+                auto finance_asset = polymarket::FinanceFeed::identify_asset(entry.market);
+                if (!finance_asset.empty()) return "FIN:" + finance_asset;
                 for (const auto& coin : cfg.coins) {
                     if (entry.market.market_slug.rfind(coin.hourly_slug_prefix, 0) == 0) {
                         return coin.coin;
@@ -1060,6 +1141,9 @@ int main(int argc, char* argv[]) {
             }
 
             std::set<std::string> opened_coins_this_tick;
+            std::map<std::string, polymarket::BtcMarketData> finance_market_data;
+            std::map<std::string, polymarket::BtcMarketData> crypto_4h_market_data;
+            std::map<std::string, polymarket::BtcMarketData> crypto_daily_market_data;
 
             // 遍历市场，刷新订单簿，评估信号
             std::vector<const polymarket::MarketEntry*> scan_markets;
@@ -1081,6 +1165,170 @@ int main(int argc, char* argv[]) {
                 const auto& entry = *market_entry;
                 const auto& cid = entry.market.condition_id;
                 std::string coin = coin_for_market(entry);
+                bool crypto_4h_market = coin.rfind("CRYPTO4H:", 0) == 0;
+                bool crypto_daily_market = coin.rfind("CRYPTODAILY:", 0) == 0;
+                if (crypto_4h_market || crypto_daily_market) {
+                    std::string crypto_coin = coin.substr(crypto_4h_market ? 9 : 12);
+                    auto feed_it = binance_feeds.find(crypto_coin);
+                    auto cfg_it = coin_cfg.find(crypto_coin);
+                    if (feed_it == binance_feeds.end() || cfg_it == coin_cfg.end()) continue;
+
+                    auto& data_cache = crypto_4h_market ? crypto_4h_market_data : crypto_daily_market_data;
+                    polymarket::BtcMarketData md;
+                    auto data_it = data_cache.find(crypto_coin);
+                    if (data_it == data_cache.end()) {
+                        try {
+                            md = crypto_4h_market
+                                ? feed_it->second->fetch_period(crypto_coin, cfg_it->second.binance_symbol, "4h", 240)
+                                : feed_it->second->fetch_period(crypto_coin, cfg_it->second.binance_symbol, "1d", 1440);
+                            data_cache[crypto_coin] = md;
+                        } catch (const std::exception& e) {
+                            spdlog::debug("Crypto duration feed skipped [{}]: {}", entry.market.question, e.what());
+                            continue;
+                        }
+                    } else {
+                        md = data_it->second;
+                    }
+
+                    std::set<std::string> position_tokens;
+                    for (const auto& p : positions) {
+                        if (!p.closed && p.condition_id == cid) {
+                            position_tokens.insert(p.token_id);
+                        }
+                    }
+
+                    market_feed.apply_cached_quotes(quote_cache, now_ms(), quote_max_age_ms);
+                    auto updated = market_feed.get_market(cid);
+                    if (!updated) continue;
+                    auto quotes = extract_quotes(*updated);
+                    auto quote_now = now_ms();
+                    bool up_fresh = !quotes.up_token_id.empty() &&
+                        quote_cache.is_fresh(quotes.up_token_id, quote_now, quote_max_age_ms);
+                    bool down_fresh = !quotes.down_token_id.empty() &&
+                        quote_cache.is_fresh(quotes.down_token_id, quote_now, quote_max_age_ms);
+                    bool need_rest_quote = !up_fresh || !down_fresh ||
+                        quotes.up_ask <= 0 || quotes.down_ask <= 0;
+                    if (need_rest_quote) {
+                        bool rest_ok = !position_tokens.empty()
+                            ? market_feed.refresh_order_book(cid, position_tokens)
+                            : market_feed.refresh_order_book(cid);
+                        if (!rest_ok) {
+                            reject_agg.add((crypto_4h_market ? "crypto_4h_quote_stale:" : "crypto_daily_quote_stale:") +
+                                           crypto_coin, md.deviation_pct);
+                            continue;
+                        }
+                        updated = market_feed.get_market(cid);
+                        if (!updated) continue;
+                        quotes = extract_quotes(*updated);
+                    }
+                    if (quotes.up_ask <= 0 || quotes.down_ask <= 0) continue;
+
+                    {
+                        std::lock_guard<std::mutex> lock(state.mu);
+                        json row;
+                        row["coin"] = crypto_coin;
+                        row["question"] = entry.market.question;
+                        row["up_bid"] = quotes.up_bid;
+                        row["up_ask"] = quotes.up_ask;
+                        row["down_bid"] = quotes.down_bid;
+                        row["down_ask"] = quotes.down_ask;
+                        row["deviation_pct"] = md.deviation_pct;
+                        row["minutes_remaining"] = md.minutes_remaining;
+                        row["market_type"] = crypto_4h_market ? "crypto_4h" : "crypto_daily";
+                        state.markets.push_back(row);
+                        state.tradable_market_count = static_cast<int>(state.markets.size());
+                    }
+
+                    polymarket::ExperimentQuotes exp_quotes;
+                    exp_quotes.up_bid = quotes.up_bid;
+                    exp_quotes.up_ask = quotes.up_ask;
+                    exp_quotes.down_bid = quotes.down_bid;
+                    exp_quotes.down_ask = quotes.down_ask;
+                    exp_quotes.up_token_id = quotes.up_token_id;
+                    exp_quotes.down_token_id = quotes.down_token_id;
+                    if (crypto_4h_market) {
+                        crypto_4h_experiment.on_market(crypto_coin, md, entry, exp_quotes, now_ms());
+                    } else {
+                        crypto_daily_experiment.on_market(crypto_coin, md, entry, exp_quotes, now_ms());
+                    }
+                    continue;
+                }
+                bool finance_market = coin.rfind("FIN:", 0) == 0;
+                std::string finance_asset = finance_market ? coin.substr(4) : "";
+                if (finance_market) {
+                    polymarket::BtcMarketData md;
+                    auto fin_it = finance_market_data.find(cid);
+                    if (fin_it == finance_market_data.end()) {
+                        try {
+                            md = finance_feed.fetch_for_market(entry.market);
+                            finance_market_data[cid] = md;
+                        } catch (const std::exception& e) {
+                            spdlog::debug("Finance feed skipped [{}]: {}", entry.market.question, e.what());
+                            continue;
+                        }
+                    } else {
+                        md = fin_it->second;
+                    }
+
+                    bool has_open_position = false;
+                    std::set<std::string> position_tokens;
+                    for (const auto& p : positions) {
+                        if (!p.closed && p.condition_id == cid) {
+                            has_open_position = true;
+                            position_tokens.insert(p.token_id);
+                        }
+                    }
+
+                    market_feed.apply_cached_quotes(quote_cache, now_ms(), quote_max_age_ms);
+                    auto updated = market_feed.get_market(cid);
+                    if (!updated) continue;
+                    auto quotes = extract_quotes(*updated);
+                    auto quote_now = now_ms();
+                    bool up_fresh = !quotes.up_token_id.empty() &&
+                        quote_cache.is_fresh(quotes.up_token_id, quote_now, quote_max_age_ms);
+                    bool down_fresh = !quotes.down_token_id.empty() &&
+                        quote_cache.is_fresh(quotes.down_token_id, quote_now, quote_max_age_ms);
+                    bool need_rest_quote = !up_fresh || !down_fresh ||
+                        quotes.up_ask <= 0 || quotes.down_ask <= 0;
+                    if (need_rest_quote) {
+                        bool rest_ok = has_open_position
+                            ? market_feed.refresh_order_book(cid, position_tokens)
+                            : market_feed.refresh_order_book(cid);
+                        if (!rest_ok) {
+                            reject_agg.add("finance_quote_stale:" + finance_asset, md.deviation_pct);
+                            continue;
+                        }
+                        updated = market_feed.get_market(cid);
+                        if (!updated) continue;
+                        quotes = extract_quotes(*updated);
+                    }
+                    if (quotes.up_ask <= 0 || quotes.down_ask <= 0) continue;
+
+                    {
+                        std::lock_guard<std::mutex> lock(state.mu);
+                        json row;
+                        row["coin"] = finance_asset;
+                        row["question"] = entry.market.question;
+                        row["up_bid"] = quotes.up_bid;
+                        row["up_ask"] = quotes.up_ask;
+                        row["down_bid"] = quotes.down_bid;
+                        row["down_ask"] = quotes.down_ask;
+                        row["deviation_pct"] = md.deviation_pct;
+                        row["minutes_remaining"] = md.minutes_remaining;
+                        state.markets.push_back(row);
+                        state.tradable_market_count = static_cast<int>(state.markets.size());
+                    }
+
+                    polymarket::ExperimentQuotes exp_quotes;
+                    exp_quotes.up_bid = quotes.up_bid;
+                    exp_quotes.up_ask = quotes.up_ask;
+                    exp_quotes.down_bid = quotes.down_bid;
+                    exp_quotes.down_ask = quotes.down_ask;
+                    exp_quotes.up_token_id = quotes.up_token_id;
+                    exp_quotes.down_token_id = quotes.down_token_id;
+                    finance_experiment.on_market(finance_asset, md, entry, exp_quotes, now_ms());
+                    continue;
+                }
                 auto data_it = market_data.find(coin);
                 auto strat_it = strategies.find(coin);
                 auto cfg_it = coin_cfg.find(coin);
@@ -1721,6 +1969,9 @@ int main(int argc, char* argv[]) {
                 positions.end());
             experiment.prune_closed();
             trend_experiment.prune_closed();
+            finance_experiment.prune_closed();
+            crypto_4h_experiment.prune_closed();
+            crypto_daily_experiment.prune_closed();
 
             // 同步持仓到共享状态
             {

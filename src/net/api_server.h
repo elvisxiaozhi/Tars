@@ -13,7 +13,7 @@ using ApiDataCallback = std::function<std::string()>;
 
 class ApiServer {
 public:
-    explicit ApiServer(int port = 8080);
+    explicit ApiServer(int port = 8080, std::string host = "127.0.0.1");
     ~ApiServer();
 
     ApiServer(const ApiServer&) = delete;
@@ -30,6 +30,15 @@ public:
     void on_trend_experiment_status(ApiDataCallback cb);
     void on_trend_experiment_trades(ApiDataCallback cb);
     void on_trend_experiment_all_trades(ApiDataCallback cb);
+    void on_finance_experiment_status(ApiDataCallback cb);
+    void on_finance_experiment_trades(ApiDataCallback cb);
+    void on_finance_experiment_all_trades(ApiDataCallback cb);
+    void on_crypto_4h_experiment_status(ApiDataCallback cb);
+    void on_crypto_4h_experiment_trades(ApiDataCallback cb);
+    void on_crypto_4h_experiment_all_trades(ApiDataCallback cb);
+    void on_crypto_daily_experiment_status(ApiDataCallback cb);
+    void on_crypto_daily_experiment_trades(ApiDataCallback cb);
+    void on_crypto_daily_experiment_all_trades(ApiDataCallback cb);
     // POST /api/shutdown — 触发优雅退出（设 g_running=false → 主循环退出 → emergency_close_all）
     void on_shutdown(ApiDataCallback cb);
 
@@ -48,6 +57,7 @@ private:
     std::atomic<bool> running_{false};
     std::thread server_thread_;
     int port_;
+    std::string host_;
 };
 
 }  // namespace polymarket::net

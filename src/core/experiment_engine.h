@@ -65,6 +65,15 @@ public:
                                            const ExperimentQuotes& quotes,
                                            const std::string& condition_id,
                                            const std::string& question);
+    EntrySignal evaluate_finance_updown_v1(const BtcMarketData& md,
+                                           const ExperimentQuotes& quotes,
+                                           const std::string& condition_id,
+                                           const std::string& question);
+    EntrySignal evaluate_crypto_duration_updown_v1(const BtcMarketData& md,
+                                                   const ExperimentQuotes& quotes,
+                                                   const std::string& condition_id,
+                                                   const std::string& question,
+                                                   bool daily);
 
     std::vector<TakeProfitLevel> compute_tp_levels(double entry_price,
                                                    StrategyRegime regime) const;
@@ -72,6 +81,10 @@ public:
                                                             StrategyRegime regime) const;
     std::vector<TakeProfitLevel> compute_late_window_tp_levels(double entry_price) const;
     std::vector<TakeProfitLevel> compute_eth_late_cheap_tp_levels(double entry_price) const;
+    std::vector<TakeProfitLevel> compute_finance_updown_tp_levels(double entry_price,
+                                                                  StrategyRegime regime) const;
+    std::vector<TakeProfitLevel> compute_crypto_duration_tp_levels(double entry_price,
+                                                                   bool daily) const;
     std::vector<TakeProfitLevel> compute_trend_follow_tp_levels(double entry_price) const;
 
     ExitSignal evaluate_exit(const Position& pos,
@@ -90,6 +103,13 @@ public:
     ExitSignal evaluate_eth_late_cheap_exit(const Position& pos,
                                             double current_contract_price,
                                             const BtcMarketData& md) const;
+    ExitSignal evaluate_finance_updown_exit(const Position& pos,
+                                            double current_contract_price,
+                                            const BtcMarketData& md) const;
+    ExitSignal evaluate_crypto_duration_exit(const Position& pos,
+                                             double current_contract_price,
+                                             const BtcMarketData& md,
+                                             bool daily) const;
 
 private:
     const AppConfig& cfg_;
@@ -140,6 +160,12 @@ private:
 
     bool has_open_coin(const std::string& coin) const;
     void record_trade(const TradeRecord& rec);
+    void record_candidate(const std::string& coin,
+                          const BtcMarketData& md,
+                          const MarketEntry& entry,
+                          const ExperimentQuotes& quotes,
+                          const EntrySignal& sig,
+                          int64_t now_ms) const;
     void fill_record_analytics(TradeRecord& rec, const Position& pos,
                                const BtcMarketData& md, int64_t now_ms) const;
 
@@ -152,6 +178,7 @@ private:
     int non_btc_stop_price_this_hour_ = 0;
     std::string strategy_name_;
     std::string log_path_;
+    std::string candidate_log_path_;
     std::string id_prefix_;
     std::map<std::string, ExperimentStrategy> strategies_;
     std::map<std::string, BtcMarketData> latest_market_data_;

@@ -167,6 +167,7 @@ inline const std::string DASHBOARD_HTML = R"html(
   <button class="tab-btn active" data-tab="main">Main Strategy</button>
   <button class="tab-btn" data-tab="trend">Trend Follow</button>
   <button class="tab-btn" data-tab="regime">ETH Cheap</button>
+  <button class="tab-btn" data-tab="finance">Finance</button>
 </div>
 
 <div id="tab-main" class="tab-panel active">
@@ -356,6 +357,62 @@ inline const std::string DASHBOARD_HTML = R"html(
 </details>
 </div>
 
+<div id="tab-finance" class="tab-panel">
+<details class="section" id="finance-experiment-details" open>
+  <summary class="section-title" style="cursor:pointer;list-style:none;">
+    <span>Finance Experiment</span>
+    <span id="finance-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+  </summary>
+  <div class="stats-grid" style="margin-top:8px;">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="finance-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="finance-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="finance-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="finance-exp-trades-count">--</div></div>
+  </div>
+  <div class="section-title" style="margin-top:12px;">Asset P&L</div>
+  <div id="finance-exp-coin-pnl"></div>
+  <div id="finance-exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="finance-exp-positions" style="margin-top:12px;"></div>
+  <div id="finance-exp-trades" style="margin-top:12px;"></div>
+</details>
+
+<details class="section" id="crypto-4h-experiment-details" open>
+  <summary class="section-title" style="cursor:pointer;list-style:none;">
+    <span>Crypto 4H Up/Down Experiment</span>
+    <span id="crypto-4h-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+  </summary>
+  <div class="stats-grid" style="margin-top:8px;">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="crypto-4h-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="crypto-4h-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="crypto-4h-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="crypto-4h-exp-trades-count">--</div></div>
+  </div>
+  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
+  <div id="crypto-4h-exp-coin-pnl"></div>
+  <div id="crypto-4h-exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="crypto-4h-exp-positions" style="margin-top:12px;"></div>
+  <div id="crypto-4h-exp-trades" style="margin-top:12px;"></div>
+</details>
+
+<details class="section" id="crypto-daily-experiment-details" open>
+  <summary class="section-title" style="cursor:pointer;list-style:none;">
+    <span>Crypto Daily Up/Down Experiment</span>
+    <span id="crypto-daily-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+  </summary>
+  <div class="stats-grid" style="margin-top:8px;">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="crypto-daily-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="crypto-daily-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="crypto-daily-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="crypto-daily-exp-trades-count">--</div></div>
+  </div>
+  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
+  <div id="crypto-daily-exp-coin-pnl"></div>
+  <div id="crypto-daily-exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="crypto-daily-exp-positions" style="margin-top:12px;"></div>
+  <div id="crypto-daily-exp-trades" style="margin-top:12px;"></div>
+</details>
+</div>
+
 <script>
 const API_BASE = '';
 const REFRESH_MS = 5000;
@@ -431,6 +488,9 @@ document.addEventListener('DOMContentLoaded', () => {
   persistDetails('ad-buckets',            false);
   persistDetails('experiment-details',    true);
   persistDetails('trend-experiment-details', true);
+  persistDetails('finance-experiment-details', true);
+  persistDetails('crypto-4h-experiment-details', true);
+  persistDetails('crypto-daily-experiment-details', true);
 
   // Stop Bot 按钮
   const stopBtn = document.getElementById('stop-bot-btn');
@@ -835,7 +895,14 @@ function analyticsFromTrades(records) {
 }
 
 async function refresh() {
-  let [status, trades, expStatus, expTrades, expAllTrades, trendExpStatus, trendExpTrades, trendExpAllTrades] = await Promise.all([
+  let [
+    status, trades,
+    expStatus, expTrades, expAllTrades,
+    trendExpStatus, trendExpTrades, trendExpAllTrades,
+    financeExpStatus, financeExpTrades, financeExpAllTrades,
+    crypto4hExpStatus, crypto4hExpTrades, crypto4hExpAllTrades,
+    cryptoDailyExpStatus, cryptoDailyExpTrades, cryptoDailyExpAllTrades
+  ] = await Promise.all([
     fetchJSON('/api/status'),
     fetchJSON('/api/trades'),
     fetchJSON('/api/experiment/status'),
@@ -843,7 +910,16 @@ async function refresh() {
     fetchJSON('/api/experiment/all-trades'),
     fetchJSON('/api/experiment-trend/status'),
     fetchJSON('/api/experiment-trend/trades'),
-    fetchJSON('/api/experiment-trend/all-trades')
+    fetchJSON('/api/experiment-trend/all-trades'),
+    fetchJSON('/api/experiment-finance/status'),
+    fetchJSON('/api/experiment-finance/trades'),
+    fetchJSON('/api/experiment-finance/all-trades'),
+    fetchJSON('/api/experiment-crypto-4h/status'),
+    fetchJSON('/api/experiment-crypto-4h/trades'),
+    fetchJSON('/api/experiment-crypto-4h/all-trades'),
+    fetchJSON('/api/experiment-crypto-daily/status'),
+    fetchJSON('/api/experiment-crypto-daily/trades'),
+    fetchJSON('/api/experiment-crypto-daily/all-trades')
   ]);
 
   if (status) {
@@ -948,9 +1024,15 @@ async function refresh() {
   const mainSummary = summarizeTradeRecords(scopedMainTrades);
   renderExperiment('exp', expStatus, selectScope(expTrades, expAllTrades));
   renderExperiment('trend-exp', trendExpStatus, selectScope(trendExpTrades, trendExpAllTrades));
+  renderExperiment('finance-exp', financeExpStatus, selectScope(financeExpTrades, financeExpAllTrades));
+  renderExperiment('crypto-4h-exp', crypto4hExpStatus, selectScope(crypto4hExpTrades, crypto4hExpAllTrades));
+  renderExperiment('crypto-daily-exp', cryptoDailyExpStatus, selectScope(cryptoDailyExpTrades, cryptoDailyExpAllTrades));
   renderCoinPnl('main-coin-pnl', filterByMode(sessionAllMainTrades), filterByMode(allMainTrades));
   renderCoinPnl('exp-coin-pnl', Array.isArray(expTrades) ? expTrades : [], Array.isArray(expAllTrades) ? expAllTrades : (Array.isArray(expTrades) ? expTrades : []));
   renderCoinPnl('trend-exp-coin-pnl', Array.isArray(trendExpTrades) ? trendExpTrades : [], Array.isArray(trendExpAllTrades) ? trendExpAllTrades : (Array.isArray(trendExpTrades) ? trendExpTrades : []));
+  renderCoinPnl('finance-exp-coin-pnl', Array.isArray(financeExpTrades) ? financeExpTrades : [], Array.isArray(financeExpAllTrades) ? financeExpAllTrades : (Array.isArray(financeExpTrades) ? financeExpTrades : []));
+  renderCoinPnl('crypto-4h-exp-coin-pnl', Array.isArray(crypto4hExpTrades) ? crypto4hExpTrades : [], Array.isArray(crypto4hExpAllTrades) ? crypto4hExpAllTrades : (Array.isArray(crypto4hExpTrades) ? crypto4hExpTrades : []));
+  renderCoinPnl('crypto-daily-exp-coin-pnl', Array.isArray(cryptoDailyExpTrades) ? cryptoDailyExpTrades : [], Array.isArray(cryptoDailyExpAllTrades) ? cryptoDailyExpAllTrades : (Array.isArray(cryptoDailyExpTrades) ? cryptoDailyExpTrades : []));
 
   const pnlEl = document.getElementById('total-pnl');
   pnlEl.textContent = formatPnl(mainSummary.pnl);

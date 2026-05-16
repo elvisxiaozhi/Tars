@@ -26,6 +26,8 @@ public:
     // 拉取市场列表（有 market_filter 时走 gamma API，否则走 CLOB 全量）
     void fetch_markets();
     void fetch_markets(const std::vector<CoinStrategyConfig>& coins);
+    void fetch_finance_markets(int limit = 40);
+    void fetch_crypto_duration_markets(const std::string& duration, int limit = 80);
 
     // 为已加载的市场拉取订单簿，返回成功拉取的数量
     int fetch_order_books();

@@ -1,0 +1,18 @@
+[Unit]
+Description=Polymarket strategy bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/polymarket
+ExecStart=/home/ubuntu/polymarket/build/polymarket-arb /home/ubuntu/polymarket/config/config.json
+Restart=always
+RestartSec=10
+
+# Only needed for live mode. For dry_run, leave this commented out.
+# EnvironmentFile=/etc/polymarket.env
+
+[Install]
+WantedBy=multi-user.target

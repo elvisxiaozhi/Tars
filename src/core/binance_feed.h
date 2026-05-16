@@ -39,13 +39,19 @@ public:
     // 拉取最新 BTC 市场数据（价格 + K线 + 波动率）
     BtcMarketData fetch();
     BtcMarketData fetch(const std::string& coin, const std::string& binance_symbol);
+    BtcMarketData fetch_period(const std::string& coin,
+                               const std::string& binance_symbol,
+                               const std::string& interval,
+                               int period_minutes);
 
     // 获取最近一次 fetch 的数据
     const BtcMarketData& latest() const { return latest_; }
 
 private:
     double fetch_price(const std::string& binance_symbol);
-    std::vector<BtcCandle> fetch_klines(const std::string& binance_symbol, int limit = 25);
+    std::vector<BtcCandle> fetch_klines(const std::string& binance_symbol,
+                                        const std::string& interval = "1h",
+                                        int limit = 25);
     BtcMarketData compute(const std::string& coin, double price, const std::vector<BtcCandle>& klines);
 
     net::HttpClient http_;

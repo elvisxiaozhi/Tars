@@ -145,6 +145,8 @@ inline Market parse_gamma_market(const json& j) {
     m.question = get_string(j, "question");
     m.description = get_string(j, "description");
     m.market_slug = get_string(j, "slug");
+    m.end_date_iso = get_string(j, "endDateIso");
+    if (m.end_date_iso.empty()) m.end_date_iso = get_string(j, "endDate");
     m.active = get_bool(j, "active");
     m.closed = get_bool(j, "closed");
     m.accepting_orders = get_bool(j, "enableOrderBook");

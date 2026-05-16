@@ -25,6 +25,7 @@ struct Market {
     std::string question;
     std::string description;
     std::string market_slug;
+    std::string end_date_iso;
     bool active = false;
     bool closed = false;
     bool accepting_orders = false;

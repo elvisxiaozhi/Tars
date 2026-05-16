@@ -46,7 +46,8 @@
 
     "network": {
         "proxy_url": "",
-        "api_port": 9090
+        "api_host": "127.0.0.1",
+        "api_port": 5819
     },
 
     "wallet": {
