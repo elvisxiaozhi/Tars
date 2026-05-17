@@ -33,6 +33,9 @@ struct ApiServer::Impl {
     ApiDataCallback crypto_daily_experiment_status_cb;
     ApiDataCallback crypto_daily_experiment_trades_cb;
     ApiDataCallback crypto_daily_experiment_all_trades_cb;
+    ApiDataCallback trend_v2_experiment_status_cb;
+    ApiDataCallback trend_v2_experiment_trades_cb;
+    ApiDataCallback trend_v2_experiment_all_trades_cb;
     ApiDataCallback shutdown_cb;
     std::string dashboard_html;
 
@@ -101,6 +104,15 @@ struct ApiServer::Impl {
         if (target == "/api/experiment-crypto-daily/all-trades" && crypto_daily_experiment_all_trades_cb) {
             return make_response(http::status::ok, crypto_daily_experiment_all_trades_cb(), "application/json");
         }
+        if (target == "/api/experiment-trend-v2/status" && trend_v2_experiment_status_cb) {
+            return make_response(http::status::ok, trend_v2_experiment_status_cb(), "application/json");
+        }
+        if (target == "/api/experiment-trend-v2/trades" && trend_v2_experiment_trades_cb) {
+            return make_response(http::status::ok, trend_v2_experiment_trades_cb(), "application/json");
+        }
+        if (target == "/api/experiment-trend-v2/all-trades" && trend_v2_experiment_all_trades_cb) {
+            return make_response(http::status::ok, trend_v2_experiment_all_trades_cb(), "application/json");
+        }
         if (target == "/api/shutdown" && shutdown_cb) {
             // 仅接受 POST/DELETE，避免 GET 误触发（如浏览器预取）
             if (req.method() != http::verb::post && req.method() != http::verb::delete_) {
@@ -165,6 +177,9 @@ void ApiServer::on_crypto_4h_experiment_all_trades(ApiDataCallback cb) { impl_->
 void ApiServer::on_crypto_daily_experiment_status(ApiDataCallback cb) { impl_->crypto_daily_experiment_status_cb = std::move(cb); }
 void ApiServer::on_crypto_daily_experiment_trades(ApiDataCallback cb) { impl_->crypto_daily_experiment_trades_cb = std::move(cb); }
 void ApiServer::on_crypto_daily_experiment_all_trades(ApiDataCallback cb) { impl_->crypto_daily_experiment_all_trades_cb = std::move(cb); }
+void ApiServer::on_trend_v2_experiment_status(ApiDataCallback cb) { impl_->trend_v2_experiment_status_cb = std::move(cb); }
+void ApiServer::on_trend_v2_experiment_trades(ApiDataCallback cb) { impl_->trend_v2_experiment_trades_cb = std::move(cb); }
+void ApiServer::on_trend_v2_experiment_all_trades(ApiDataCallback cb) { impl_->trend_v2_experiment_all_trades_cb = std::move(cb); }
 void ApiServer::on_shutdown(ApiDataCallback cb) { impl_->shutdown_cb = std::move(cb); }
 void ApiServer::set_dashboard_html(const std::string& html) { impl_->dashboard_html = html; }
 

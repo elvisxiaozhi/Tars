@@ -23,7 +23,7 @@
 
 ---
 
-## 二、当前活跃的 5 个实验策略
+## 二、当前活跃的 6 个实验策略
 
 ### 总表（按 main.cpp 实例化顺序）
 
@@ -34,8 +34,10 @@
 | `finance_experiment` | `finance_updown_v1` | `F` | `experiment_finance_updown_v1_trades.jsonl` | Finance 当日（FIN:SPX/GOLD） | `evaluate_finance_updown_v1` (L909) |
 | `crypto_4h_experiment` | `crypto_4h_updown_v1` | `H` | `experiment_crypto_4h_updown_v1_trades.jsonl` | Crypto 4h | `evaluate_crypto_duration_updown_v1` (L1007, daily=false) |
 | `crypto_daily_experiment` | `crypto_daily_updown_v1` | `D` | `experiment_crypto_daily_updown_v1_trades.jsonl` | Crypto daily | 同上 (daily=true) |
+| **`trend_v2_experiment`** | `trend_follow` | `T` | `experiment_trend_v2_trades.jsonl` | Crypto 1h（仅 BTC/ETH/BNB） | `evaluate_trend_follow` (L329) |
 
 > 变量名 `trend_experiment` 历史遗留——实际跑的是 `eth_late_cheap_v1`，不是 trend_follow。
+> 真正的 `trend_follow` 在 `trend_v2_experiment` 中跑——2026-05-17 复活，基于历史 148 笔数据分析（详见 [`steps/step-trend-v2-revive.md`](./steps/step-trend-v2-revive.md)）显示其当前 code 在排除事故段后实际为 +$1.44 / 77 笔 / wr 78%。
 
 ---
 
@@ -162,6 +164,50 @@
 
 ---
 
+### 2.6 `trend_follow` v2 复活（`trend_v2_experiment`）
+
+`evaluate_trend_follow` @ L329-461
+
+| 条件 | 规则 |
+|---|---|
+| 支持币种 | 仅 BTC / ETH / BNB |
+| 时间窗口 | `41 ≤ minutes_remaining ≤ 45`（很窄，每 candle 仅 5min 入场窗口）|
+| 方向选择 | dev 同方向追强边 |
+| **方向确认** | 上一 tick 同向（`direction_confirmed`），防假突破 |
+| dev 阈值 | `abs(dev) ≥ 0.18%` |
+| spread | `≤ 0.01` |
+| ask 区间 | `0.65 ≤ ask ≤ 0.68` |
+| 入场价 | `0.64 ≤ entry ≤ 0.67`（= ask − 0.01） |
+| confidence 评分 | 9 条 components，必须 `≥ 4`（详 confidence_components 字段） |
+| 仓位 | DOWN `$1.25` / UP `$1.00` |
+
+**TP（`compute_trend_follow_tp_levels` @ L1089）**：
+
+| 档 | 触发价 | 卖比例 |
+|---|---|---|
+| TP0 | `min(0.90, entry+0.10)` | 50% |
+| TP1 | `min(0.90, entry+0.15)` | 50% |
+| TP2 | `0.90` | 100% |
+
+**Exit（`evaluate_trend_follow_exit` @ L1285）**：
+
+| 触发 | 条件 | exit_reason |
+|---|---|---|
+| 严格止损 | `current ≤ entry − 0.08` | `stop_price` |
+| 动量衰减 | `\|dev − entry_dev\| ≥ 0.08` 反向 | `stop_btc` |
+| 启动失败 | `elapsed≥150s` AND `mfe<0.03` AND `current≤entry-0.03` | `no_start_exit` |
+| 跨币种反向 | BTC/ETH 与持仓方向 opposed 且未浮盈 | `no_start_exit` |
+| TP 后保护 | has_tp AND `current ≤ entry + 0.02` | `trailing_stop` |
+| 死水 | `elapsed≥480s` AND `mfe<0.03` | `dead_water_exit` |
+| trailing (mfe≥0.12) | `current ≤ max(entry+0.05, max-0.04)` | `trailing_stop` |
+| trailing (mfe≥0.08) | `current ≤ max(entry+0.02, max-0.05)` | `trailing_stop` |
+| 末段 5min | `mr≤5` + (`current<0.88` 或 dev 反向) | `stop_time` |
+| 末段 8min | `mr≤8` + (`current<0.78` 或 dev 反向) | `stop_time` |
+
+**复活依据**：历史 `experiment_trend_trades.jsonl` 148 笔表面亏 −$4.11，但分析（按 commit 时间窗切片）显示损失 100% 来自 R2 段 (2026-05-07~05-08) 的过松配置（mr 无上限 / dev≥0.12 / 含 SOL/XRP/DOGE）。当前 code 已通过 mr 41-45、dev≥0.18、BTC/ETH/BNB only、direction_confirmed、confidence≥4 等过滤封堵了所有 R2 漏洞。反事实回放（排除 R2 + 仅 BTC/ETH/BNB）= **+$1.44 / 77 笔 / wr 78%**。
+
+详细分析见 `docs/steps/step-trend-v2-revive.md`。
+
 ### 2.5 `crypto_daily_updown_v1`（Crypto 全日 UP/DOWN）
 
 同 2.4，差异：
@@ -188,9 +234,9 @@
 | `FIN:*`（标普 / 黄金 / WTI …） | `finance_experiment` | L1258-1329 |
 | Crypto 4h 市场 | `crypto_4h_experiment` | L1249-1250 |
 | Crypto daily 市场 | `crypto_daily_experiment` | L1252 |
-| Crypto 1h（常规） | `experiment` + `trend_experiment`（两个同时跑！）| L1441-1442 |
+| Crypto 1h（常规） | `experiment` + `trend_experiment` + `trend_v2_experiment`（三个同时跑！）| L1441-1443 |
 
-注意 Crypto 1h 走 **双 engine 并行**——`eth_cheap_v1` 和 `eth_late_cheap_v1` 用同一份 tick 各自评估。
+注意 Crypto 1h 走 **三 engine 并行**——`eth_cheap_v1`、`eth_late_cheap_v1`、`trend_follow` 用同一份 tick 各自评估。
 
 ---
 
@@ -201,7 +247,7 @@
 | strategy_name | 历史 jsonl | 说明 |
 |---|---|---|
 | `regime`（默认 `evaluate_entry` L218） | `experiment_trades.jsonl` (14 笔) | 早期三态机（trend/reversal/quiet），现已弃用 |
-| `trend_follow` | `experiment_trend_trades.jsonl` (148 笔) | 多币种 trend follow，commit c8d2e8a 加入，5/09 后被替换 |
+| ~~`trend_follow`~~ | `experiment_trend_trades.jsonl` (148 笔) | **2026-05-17 已复活**，新 jsonl `experiment_trend_v2_trades.jsonl`。历史日志保留用作回放参考 |
 | `legacy_cheap_v2` | `experiment_legacy_cheap_v2_trades.jsonl` (27 笔) | legacy_cheap 加分制 v2，5/09 commit 8e3f399 后弃用 |
 | `eth_only_v1` | `experiment_eth_only_v1_trades.jsonl` (12 笔) | ETH 单币种 trend+cheap 混合，5/12-13 短测 |
 | `late_window_v1` | 无 jsonl | BTC/ETH 末 10-20 分钟 trend，从未活跃 |
@@ -248,6 +294,7 @@ ExperimentEngine 内置：
 - `Experiment: finance_updown_v1`
 - `Experiment: crypto_4h_updown_v1`
 - `Experiment: crypto_daily_updown_v1`
+- `Experiment: trend_v2` (`Trend Follow v2 Experiment` 面板)
 
 每个 scope 独立显示资金曲线、胜率、PnL 分布、exit_reason 分桶、MFE 捕获率等指标。
 

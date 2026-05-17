@@ -411,6 +411,24 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div id="crypto-daily-exp-positions" style="margin-top:12px;"></div>
   <div id="crypto-daily-exp-trades" style="margin-top:12px;"></div>
 </details>
+
+<details class="section" id="trend-v2-experiment-details" open>
+  <summary class="section-title" style="cursor:pointer;list-style:none;">
+    <span>Trend Follow v2 Experiment</span>
+    <span id="trend-v2-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+  </summary>
+  <div class="stats-grid" style="margin-top:8px;">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="trend-v2-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="trend-v2-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="trend-v2-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="trend-v2-exp-trades-count">--</div></div>
+  </div>
+  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
+  <div id="trend-v2-exp-coin-pnl"></div>
+  <div id="trend-v2-exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="trend-v2-exp-positions" style="margin-top:12px;"></div>
+  <div id="trend-v2-exp-trades" style="margin-top:12px;"></div>
+</details>
 </div>
 
 <script>
@@ -491,6 +509,7 @@ document.addEventListener('DOMContentLoaded', () => {
   persistDetails('finance-experiment-details', true);
   persistDetails('crypto-4h-experiment-details', true);
   persistDetails('crypto-daily-experiment-details', true);
+  persistDetails('trend-v2-experiment-details', true);
 
   // Stop Bot 按钮
   const stopBtn = document.getElementById('stop-bot-btn');
@@ -901,7 +920,8 @@ async function refresh() {
     trendExpStatus, trendExpTrades, trendExpAllTrades,
     financeExpStatus, financeExpTrades, financeExpAllTrades,
     crypto4hExpStatus, crypto4hExpTrades, crypto4hExpAllTrades,
-    cryptoDailyExpStatus, cryptoDailyExpTrades, cryptoDailyExpAllTrades
+    cryptoDailyExpStatus, cryptoDailyExpTrades, cryptoDailyExpAllTrades,
+    trendV2ExpStatus, trendV2ExpTrades, trendV2ExpAllTrades
   ] = await Promise.all([
     fetchJSON('/api/status'),
     fetchJSON('/api/trades'),
@@ -919,7 +939,10 @@ async function refresh() {
     fetchJSON('/api/experiment-crypto-4h/all-trades'),
     fetchJSON('/api/experiment-crypto-daily/status'),
     fetchJSON('/api/experiment-crypto-daily/trades'),
-    fetchJSON('/api/experiment-crypto-daily/all-trades')
+    fetchJSON('/api/experiment-crypto-daily/all-trades'),
+    fetchJSON('/api/experiment-trend-v2/status'),
+    fetchJSON('/api/experiment-trend-v2/trades'),
+    fetchJSON('/api/experiment-trend-v2/all-trades')
   ]);
 
   if (status) {
@@ -1027,12 +1050,14 @@ async function refresh() {
   renderExperiment('finance-exp', financeExpStatus, selectScope(financeExpTrades, financeExpAllTrades));
   renderExperiment('crypto-4h-exp', crypto4hExpStatus, selectScope(crypto4hExpTrades, crypto4hExpAllTrades));
   renderExperiment('crypto-daily-exp', cryptoDailyExpStatus, selectScope(cryptoDailyExpTrades, cryptoDailyExpAllTrades));
+  renderExperiment('trend-v2-exp', trendV2ExpStatus, selectScope(trendV2ExpTrades, trendV2ExpAllTrades));
   renderCoinPnl('main-coin-pnl', filterByMode(sessionAllMainTrades), filterByMode(allMainTrades));
   renderCoinPnl('exp-coin-pnl', Array.isArray(expTrades) ? expTrades : [], Array.isArray(expAllTrades) ? expAllTrades : (Array.isArray(expTrades) ? expTrades : []));
   renderCoinPnl('trend-exp-coin-pnl', Array.isArray(trendExpTrades) ? trendExpTrades : [], Array.isArray(trendExpAllTrades) ? trendExpAllTrades : (Array.isArray(trendExpTrades) ? trendExpTrades : []));
   renderCoinPnl('finance-exp-coin-pnl', Array.isArray(financeExpTrades) ? financeExpTrades : [], Array.isArray(financeExpAllTrades) ? financeExpAllTrades : (Array.isArray(financeExpTrades) ? financeExpTrades : []));
   renderCoinPnl('crypto-4h-exp-coin-pnl', Array.isArray(crypto4hExpTrades) ? crypto4hExpTrades : [], Array.isArray(crypto4hExpAllTrades) ? crypto4hExpAllTrades : (Array.isArray(crypto4hExpTrades) ? crypto4hExpTrades : []));
   renderCoinPnl('crypto-daily-exp-coin-pnl', Array.isArray(cryptoDailyExpTrades) ? cryptoDailyExpTrades : [], Array.isArray(cryptoDailyExpAllTrades) ? cryptoDailyExpAllTrades : (Array.isArray(cryptoDailyExpTrades) ? cryptoDailyExpTrades : []));
+  renderCoinPnl('trend-v2-exp-coin-pnl', Array.isArray(trendV2ExpTrades) ? trendV2ExpTrades : [], Array.isArray(trendV2ExpAllTrades) ? trendV2ExpAllTrades : (Array.isArray(trendV2ExpTrades) ? trendV2ExpTrades : []));
 
   const pnlEl = document.getElementById('total-pnl');
   pnlEl.textContent = formatPnl(mainSummary.pnl);
