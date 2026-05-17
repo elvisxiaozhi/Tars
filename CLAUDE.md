@@ -11,6 +11,8 @@ C++17 / Boost.Beast / OpenSSL / spdlog / nlohmann-json，运行于 macOS。
 | 想做的事 | 去哪看 |
 |---|---|
 | 改策略逻辑（入场/TP/止损/死水）| `src/core/strategy.{h,cpp}` |
+| 改 / 加实验（shadow）策略 | `src/core/experiment_engine.{h,cpp}`；当前 5 个活跃实验见 `docs/strategy-experiments.md` |
+| 分析策略日志（trades.jsonl / experiment_*.jsonl） | `prompts/analyze_strategy.md`（v2 标准化 prompt） |
 | 改实盘下单/对账/链上读 | `src/core/live_trader.{h,cpp}` |
 | 改风控（单仓制、本场锁、每日损） | `src/core/risk_manager.{h,cpp}` |
 | 改主循环 / 线程编排 / 共享状态 | `src/main.cpp`（1389 行，`SharedState` 在 L152，`main()` 在 L166）|
