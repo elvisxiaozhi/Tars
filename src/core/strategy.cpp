@@ -94,7 +94,7 @@ EntrySignal Strategy::evaluate_cheap_rebound(
         sig.reject_reason = "cheap_rebound_coin_filter";
         return sig;
     }
-    if (minutes_remaining <= 30 || minutes_remaining > 50) {
+    if (minutes_remaining <= 30 || minutes_remaining >= 45) {
         sig.reject_reason = "cheap_rebound_time_window";
         return sig;
     }
@@ -262,7 +262,7 @@ EntrySignal Strategy::evaluate_momentum_follow(
         sig.reject_reason = "momentum_sol_filter";
         return sig;
     }
-    if (minutes_remaining < 25 || minutes_remaining > 50) {
+    if (minutes_remaining < 25 || minutes_remaining >= 45) {
         sig.reject_reason = "momentum_time_window";
         return sig;
     }
