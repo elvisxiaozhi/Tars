@@ -1,0 +1,21 @@
+[Unit]
+Description=Polymarket bot manager (dashboard + lifecycle)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/polymarket
+ExecStart=/usr/bin/python3 /root/polymarket/tools/manager.py \
+    --host 0.0.0.0 \
+    --port 9090 \
+    --bot-bin /root/polymarket/build/polymarket-arb \
+    --config /root/polymarket/config/config.json
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

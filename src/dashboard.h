@@ -60,6 +60,8 @@ inline const std::string DASHBOARD_HTML = R"html(
   .tab-panel.active { display:block; }
   .uptime { font-size: 0.8em; color: #7d8590; }
   .refresh { font-size: 0.7em; color: #484f58; }
+  .bot-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#484f58; flex-shrink:0; }
+  .bot-status-text { font-size:0.8em; color:#7d8590; }
   .pnl-bar { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
   .pnl-bar-fill { height: 4px; border-radius: 2px; min-width: 2px; }
 
@@ -95,9 +97,11 @@ inline const std::string DASHBOARD_HTML = R"html(
     <button class="scope-filter" data-scope="all">All Time</button>
     <span class="mode" id="mode-badge">--</span>
     <span class="refresh" id="refresh-info">auto 5s</span>
-    <button id="stop-bot-btn" title="优雅停止 bot（触发 emergency_close_all 兜底）"
-      style="cursor:pointer;padding:5px 12px;border:1px solid #6e1a1a;background:#3a1a1a;color:#f85149;border-radius:4px;font-size:0.8em;font-weight:bold;">
-      ⏹ Stop Bot
+    <span class="bot-dot" id="bot-status-dot"></span>
+    <span class="bot-status-text" id="bot-status-text">--</span>
+    <button id="bot-control-btn" title="启动 / 停止 bot"
+      style="cursor:pointer;padding:5px 12px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;">
+      --
     </button>
   </div>
 </div>
@@ -511,26 +515,81 @@ document.addEventListener('DOMContentLoaded', () => {
   persistDetails('crypto-daily-experiment-details', true);
   persistDetails('trend-v2-experiment-details', true);
 
-  // Stop Bot 按钮
-  const stopBtn = document.getElementById('stop-bot-btn');
-  if (stopBtn) {
-    stopBtn.addEventListener('click', async () => {
-      if (!confirm('确认停止 bot？\n\n会触发 emergency_close_all：\n· cancel 所有未平仓订单\n· SELL FOK 所有持仓平仓\n\n之后程序退出。')) return;
-      stopBtn.disabled = true;
-      stopBtn.textContent = '⏳ Stopping...';
-      try {
-        const res = await fetch('/api/shutdown', { method: 'POST' });
-        const data = await res.json();
-        stopBtn.textContent = '✓ ' + (data.message || 'Stopped');
-        stopBtn.style.background = '#1a3a2a';
-        stopBtn.style.color = '#3fb950';
-      } catch (e) {
-        stopBtn.textContent = '✗ Failed';
-        alert('Stop failed: ' + e.message);
-        stopBtn.disabled = false;
+  // Bot 状态 + Start/Stop 按钮（通过 manager 代理控制）
+  let _botRunning = false;
+
+  function updateBotStatusUI(botStatus) {
+    const dot  = document.getElementById('bot-status-dot');
+    const text = document.getElementById('bot-status-text');
+    const btn  = document.getElementById('bot-control-btn');
+    const colors  = { running:'#3fb950', stopped:'#f85149', crashed:'#da3633', starting:'#d29922' };
+    const labels  = { running:'Running',  stopped:'Stopped',  crashed:'Crashed',  starting:'Starting...' };
+    if (dot)  dot.style.background = colors[botStatus] || '#484f58';
+    if (text) text.textContent = labels[botStatus] || botStatus;
+    _botRunning = (botStatus === 'running');
+    if (btn) {
+      if (botStatus === 'running') {
+        btn.textContent = '⏹ Stop Bot';
+        btn.style.cssText = 'cursor:pointer;padding:5px 12px;border:1px solid #6e1a1a;background:#3a1a1a;color:#f85149;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;';
+        btn.disabled = false;
+      } else if (botStatus === 'starting') {
+        btn.textContent = '⏳ Starting...';
+        btn.style.cssText = 'cursor:default;padding:5px 12px;border:1px solid #30363d;background:#21262d;color:#d29922;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;';
+        btn.disabled = true;
+      } else {
+        btn.textContent = '▶ Start Bot';
+        btn.style.cssText = 'cursor:pointer;padding:5px 12px;border:1px solid #2ea043;background:#1a3a2a;color:#3fb950;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;';
+        btn.disabled = false;
+      }
+    }
+  }
+
+  async function refreshManagerStatus() {
+    try {
+      const r = await fetch('/api/manager/status');
+      if (!r.ok) return;
+      const d = await r.json();
+      updateBotStatusUI(d.bot_status || 'stopped');
+    } catch(e) {}
+  }
+
+  const botControlBtn = document.getElementById('bot-control-btn');
+  if (botControlBtn) {
+    botControlBtn.addEventListener('click', async () => {
+      if (_botRunning) {
+        if (!confirm('确认停止 bot？\n\n会触发 emergency_close_all：\n· cancel 所有未平仓订单\n· SELL FOK 所有持仓平仓\n\n之后程序退出。')) return;
+        botControlBtn.disabled = true;
+        botControlBtn.textContent = '⏳ Stopping...';
+        try { await fetch('/api/shutdown', { method: 'POST' }); } catch(e) {}
+        setTimeout(refreshManagerStatus, 1500);
+        setTimeout(refreshManagerStatus, 3000);
+      } else {
+        botControlBtn.disabled = true;
+        updateBotStatusUI('starting');
+        try {
+          const res = await fetch('/api/start', { method: 'POST' });
+          if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            alert('Start failed: ' + (d.error || res.status));
+            updateBotStatusUI('stopped');
+            return;
+          }
+        } catch(e) {
+          alert('Start failed: ' + e.message);
+          updateBotStatusUI('stopped');
+          return;
+        }
+        let attempts = 0;
+        const poll = setInterval(async () => {
+          await refreshManagerStatus();
+          if (_botRunning || ++attempts > 30) clearInterval(poll);
+        }, 1000);
       }
     });
   }
+
+  setInterval(refreshManagerStatus, 3000);
+  refreshManagerStatus();
 });
 
 function formatPrice(v) { return v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '--'; }
