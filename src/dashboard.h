@@ -410,6 +410,37 @@ inline const std::string DASHBOARD_HTML = R"html(
 </div>
 
 <div id="tab-regime" class="tab-panel">
+<details class="section" id="regime-rules-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — ETH Cheap</span></summary>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:12px;">
+    <div class="card">
+      <div class="card-title" style="color:#58a6ff;margin-bottom:8px;">入场条件</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div>· Coin：<b>ETH</b> only</div>
+        <div>· 时间窗口：剩余 <b>&gt; 30 min</b></div>
+        <div>· |ETH 偏移| ∈ [0.10%, 0.24%]</div>
+        <div>· 入场价：0.20–0.26¢（买较便宜侧）</div>
+        <div>· 价差 ≤ 1¢</div>
+        <div>· 仓位：$1.00（0.25–0.26¢ 档 $0.50）</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#3fb950;margin-bottom:8px;">止盈</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div>· TP0：0.42¢ → 卖 75%</div>
+        <div>· TP1：0.62¢ → 清仓</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#f85149;margin-bottom:8px;">止损</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div>· 价格止损：≤ 入场 -7¢</div>
+        <div>· BTC 止损：|偏移| 超出范围 +5%</div>
+        <div>· 时间止损：≤12min &amp; 峰值 &lt; 0.42¢</div>
+      </div>
+    </div>
+  </div>
+</details>
 <details class="section" id="experiment-details" open>
   <summary class="section-title" style="cursor:pointer;list-style:none;">
     <span>ETH Cheap Experiment</span>
@@ -430,6 +461,37 @@ inline const std::string DASHBOARD_HTML = R"html(
 </div>
 
 <div id="tab-trend" class="tab-panel">
+<details class="section" id="trend-rules-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — ETH Late Cheap</span></summary>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:12px;">
+    <div class="card">
+      <div class="card-title" style="color:#58a6ff;margin-bottom:8px;">入场条件</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div>· Coin：<b>ETH</b> only</div>
+        <div>· 时间窗口：<b>10 ≤ 剩余 ≤ 25 min</b>（尾盘）</div>
+        <div>· |ETH 偏移| ∈ [0.12%, 0.28%]</div>
+        <div>· 入场价：0.20–0.28¢（买较便宜侧）</div>
+        <div>· 价差 ≤ 1¢</div>
+        <div>· 仓位：<b>$0.25</b>（小仓探索）</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#3fb950;margin-bottom:8px;">止盈</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div>· TP0：entry+8¢（上限 0.95¢）→ 卖 50%</div>
+        <div>· TP1：entry+16¢（上限 0.95¢）→ 卖 50%</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#f85149;margin-bottom:8px;">止损</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div>· 价格止损：≤ 入场 -7¢</div>
+        <div>· BTC 止损：偏移超出范围</div>
+        <div>· 时间止损：≤12min &amp; 峰值 &lt; 0.42¢</div>
+      </div>
+    </div>
+  </div>
+</details>
 <details class="section" id="trend-experiment-details" open>
   <summary class="section-title" style="cursor:pointer;list-style:none;">
     <span>ETH Late Cheap Experiment</span>
@@ -450,6 +512,92 @@ inline const std::string DASHBOARD_HTML = R"html(
 </div>
 
 <div id="tab-finance" class="tab-panel">
+<details class="section" id="finance-rules-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Finance &amp; Crypto Duration</span></summary>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;">
+
+    <!-- Finance SPX/GOLD -->
+    <div class="card">
+      <div class="card-title" style="color:#58a6ff;margin-bottom:8px;">Finance（SPX / GOLD）</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
+        <div>· 标的：SPX、GOLD</div>
+        <div>· 标题必须含 "up or down"</div>
+        <div>· 时间窗口：20 &lt; 剩余 ≤ 390 min</div>
+        <div>· |偏移| ≥ 0.35%（SPX）/ 0.45%（GOLD）</div>
+        <div style="margin-top:6px;color:#7d8590;font-size:0.85em;">Trend 模式（60–330min）</div>
+        <div>· 入场价 0.55–0.72¢，顺偏移，$0.50</div>
+        <div>· TP0: entry+8¢(50%)  TP1: entry+15¢(50%)</div>
+        <div style="margin-top:6px;color:#7d8590;font-size:0.85em;">极端反转（90–300min，|偏移|≥1.0/1.2%）</div>
+        <div>· 入场价 0.18–0.30¢，逆偏移，$0.25</div>
+        <div>· TP0: entry+10¢(60%)  TP1: entry+20¢(all)</div>
+        <div style="margin-top:6px;color:#f85149;font-size:0.85em;">止损</div>
+        <div>· 价格止损 ≤ entry-10¢，偏移穿零 → 清仓</div>
+        <div>· 5min 无 MFE → 死水退出</div>
+      </div>
+    </div>
+
+    <!-- Trend Follow v2 -->
+    <div class="card">
+      <div class="card-title" style="color:#d29922;margin-bottom:8px;">Trend Follow v2（BTC / ETH / BNB）</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
+        <div>· Coin：BTC / ETH / BNB</div>
+        <div>· 时间窗口：<b>41 ≤ 剩余 ≤ 45 min</b></div>
+        <div>· |偏移| ≥ 0.18%，方向连续 2 tick 确认</div>
+        <div>· 入场价：0.64–0.67¢（顺偏移）</div>
+        <div>· 价差 ≤ 1¢ · 信心分 ≥ 4</div>
+        <div>· 仓位：$1.00（DOWN 方向 $1.25）</div>
+        <div style="color:#7d8590;font-size:0.85em;margin-top:6px;">止盈</div>
+        <div>· TP0: entry+10¢(50%)  TP1: entry+15¢(50%)  TP2: 0.90¢(all)</div>
+        <div style="color:#f85149;font-size:0.85em;margin-top:6px;">止损</div>
+        <div>· 价格止损 ≤ entry-10¢</div>
+        <div>· 偏移穿零 → stop_btc</div>
+        <div>· 5min MFE&lt;3¢ → 死水退出</div>
+        <div>· Trailing: MFE≥15¢→max(入+6¢,峰-5¢)；MFE≥8¢→max(入+2¢,峰-6¢)</div>
+      </div>
+    </div>
+
+    <!-- Crypto 4H -->
+    <div class="card">
+      <div class="card-title" style="color:#3fb950;margin-bottom:8px;">Crypto 4H Up/Down</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
+        <div>· Coin：BTC / ETH / SOL / BNB / XRP</div>
+        <div>· 时间窗口：<b>60 ≤ 剩余 ≤ 210 min</b></div>
+        <div>· |偏移| ≥ 0.35%（BTC/ETH）/ 0.50%（其他）</div>
+        <div>· 入场价：0.55–0.70¢，顺偏移</div>
+        <div>· 价差 ≤ 2¢ · 仓位 $0.50</div>
+        <div style="color:#3fb950;font-size:0.85em;margin-top:6px;">止盈</div>
+        <div>· TP0: entry+8¢(40%)  TP1: entry+15¢(58%)</div>
+        <div style="color:#f85149;font-size:0.85em;margin-top:6px;">止损</div>
+        <div>· 价格止损 ≤ entry-10¢，偏移穿零 → 清仓</div>
+        <div>· 5min 无 MFE → 死水退出</div>
+        <div>· Trailing: MFE≥15¢→max(入+6¢,峰-5¢)；MFE≥8¢→max(入+2¢,峰-6¢)</div>
+      </div>
+    </div>
+
+    <!-- Crypto Daily -->
+    <div class="card">
+      <div class="card-title" style="color:#56d364;margin-bottom:8px;">Crypto Daily Up/Down</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
+        <div>· Coin：BTC / ETH / SOL / BNB</div>
+        <div>· 时间窗口：<b>180 ≤ 剩余 ≤ 900 min</b></div>
+        <div>· |偏移| ≥ 0.60%（BTC/ETH）/ 0.90%（其他）</div>
+        <div>· 入场价：0.58–0.72¢，顺偏移</div>
+        <div>· 价差 ≤ 2.5¢ · 仓位 $0.50</div>
+        <div style="color:#56d364;font-size:0.85em;margin-top:6px;">止盈</div>
+        <div>· TP0: entry+8¢(35%)  TP1: entry+16¢(54%)</div>
+        <div style="color:#f85149;font-size:0.85em;margin-top:6px;">止损</div>
+        <div>· 价格止损 ≤ entry-10¢，偏移穿零 → 清仓</div>
+        <div>· 5min 无 MFE → 死水退出</div>
+        <div>· Trailing: MFE≥15¢→max(入+6¢,峰-5¢)；MFE≥8¢→max(入+2¢,峰-6¢)</div>
+      </div>
+    </div>
+  </div>
+</details>
 <details class="section" id="finance-experiment-details" open>
   <summary class="section-title" style="cursor:pointer;list-style:none;">
     <span>Finance Experiment</span>
@@ -597,6 +745,9 @@ document.addEventListener('DOMContentLoaded', () => {
   persistDetails('ad-distribution',       false);
   persistDetails('ad-direction',          false);
   persistDetails('ad-buckets',            false);
+  persistDetails('regime-rules-details',  false);
+  persistDetails('trend-rules-details',   false);
+  persistDetails('finance-rules-details', false);
   persistDetails('experiment-details',    true);
   persistDetails('trend-experiment-details', true);
   persistDetails('finance-experiment-details', true);
