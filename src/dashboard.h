@@ -180,6 +180,94 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div id="main-coin-pnl"></div>
 </div>
 
+<!-- Strategy Rules section（默认折叠）-->
+<details class="section" id="strategy-rules-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules</span></summary>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;">
+
+    <div class="card">
+      <div class="card-title" style="color:#58a6ff;margin-bottom:10px;">① Quiet Reversion（低价回弹）</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
+        <div>· Coin：BTC / ETH</div>
+        <div>· 时间窗口：<b>30 &lt; 剩余 &lt; 45 min</b></div>
+        <div>· |BTC偏移| ∈ (0.10%, 0.12%] — 安静市场</div>
+        <div>· 入场价 0.24–0.26¢（ETH 最高 0.30¢）</div>
+        <div>· 价差 ≤ 1¢ · 信心分 ≥ 4</div>
+        <div>· 方向：买<b>较便宜侧</b>（逆偏移方向）</div>
+        <div style="color:#7d8590;font-size:0.85em;margin-top:8px;margin-bottom:4px;">止盈（入场价 &lt; 0.60¢）</div>
+        <div>· TP0: 0.45¢ → 卖 75%</div>
+        <div>· TP1: 0.70¢ → 卖剩余 50%</div>
+        <div>· TP2: 0.88¢ → 清仓</div>
+        <div style="color:#7d8590;font-size:0.85em;margin-top:8px;margin-bottom:4px;">止损</div>
+        <div>· 价格止损：亏损 ≥ 30%</div>
+        <div>· 快速失败：3min 无涨 &amp; 价格 ≤ 入场 -3¢</div>
+        <div>· 死水退出：8min MFE &lt; 2¢ &amp; 浅亏 ≤15%</div>
+        <div>· 最后10min：价格 &lt; 25¢ → 立即清仓</div>
+        <div>· 最后10min：价格 ≥ 80¢ → 持有到期</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="color:#d29922;margin-bottom:10px;">② Momentum Follow（趋势追踪）</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
+        <div>· Coin：BTC / ETH（不含 SOL）</div>
+        <div>· 时间窗口：<b>25 ≤ 剩余 &lt; 45 min</b></div>
+        <div>· |BTC偏移| ≥ 0.20% — 强趋势</div>
+        <div>· 入场价 0.64–0.67¢（已涨方向）</div>
+        <div>· 价差 ≤ 1¢</div>
+        <div>· 方向：<b>顺偏移方向</b>（跟涨/跟跌）</div>
+        <div style="color:#7d8590;font-size:0.85em;margin-top:8px;margin-bottom:4px;">止盈</div>
+        <div>· TP0: entry+8¢（上限 0.88¢）→ 卖 50%</div>
+        <div>· TP1: entry+14¢（上限 0.90¢）→ 卖剩余 50%</div>
+        <div>· TP2: 0.90¢ → 清仓</div>
+        <div style="color:#7d8590;font-size:0.85em;margin-top:8px;margin-bottom:4px;">止损</div>
+        <div>· 价格止损：价格 ≤ 入场 -7¢</div>
+        <div>· 动量熄火：偏移反向变化 &gt; 8¢</div>
+        <div>· 最后8min：&lt; 78¢ 或方向反转 → 清仓</div>
+        <div>· 最后5min：&lt; 88¢ 或方向反转 → 清仓</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px;">
+    <div class="card">
+      <div class="card-title" style="color:#7d8590;margin-bottom:8px;">禁止区间</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div>|偏移| ∈ (0.12%, 0.20%)</div>
+        <div style="color:#7d8590;">方向不明，不入场</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#d29922;margin-bottom:8px;">移动止盈 Trailing</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div>MFE ≥ 15¢ → 止损线 = max(峰-7¢, 入+8¢)</div>
+        <div>MFE ≥ 10¢ → 止损线 = max(峰-8¢, 入+4¢)</div>
+        <div style="color:#7d8590;margin-top:4px;">TP触发后回落到入场+2¢ → 保护退出</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#f85149;margin-bottom:8px;">风控</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div>单仓制：同时最多 1 仓</div>
+        <div>本 K 线止损后锁仓到下根 K</div>
+        <div>每日亏损上限保护</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 当前 K 线状态 -->
+  <div class="summary-strip" style="margin-top:12px;padding:8px 12px;background:#111827;border:1px solid #1e2d3d;border-radius:6px;">
+    <span style="color:#484f58;">当前状态</span>
+    <span>剩余 <span id="sr-minutes" class="neutral" style="font-weight:bold;">--</span> min</span>
+    <span>偏移 <span id="sr-deviation" class="neutral">--</span></span>
+    <span>波动率 <span id="sr-vol" class="neutral">--</span> / 均值 <span id="sr-avgvol" class="neutral">--</span></span>
+    <span id="sr-regime-hint" style="color:#7d8590;font-weight:bold;">--</span>
+  </div>
+</details>
+
 <!-- Open Positions section 仅在有持仓时显示（P1-4）-->
 <div class="section" id="open-positions-section" style="display:none;">
   <div class="section-title">Open Positions</div>
@@ -502,6 +590,7 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('dashboard.' + id + '.open', el.open ? '1' : '0');
     });
   };
+  persistDetails('strategy-rules-details', false);
   persistDetails('trade-history-details', true);   // 主要内容，默认展开
   persistDetails('analytics-details',     false);
   persistDetails('ad-perf',               false);
@@ -1065,6 +1154,40 @@ async function refresh() {
     document.getElementById('open-pos').textContent = status.open_positions;
     document.getElementById('consec-losses').textContent = status.consecutive_losses;
     document.getElementById('uptime').textContent = 'Uptime: ' + status.uptime + ' | Tick #' + status.tick_count;
+
+    // Strategy Rules 动态状态
+    const srMin = document.getElementById('sr-minutes');
+    const srDev = document.getElementById('sr-deviation');
+    const srVol = document.getElementById('sr-vol');
+    const srAvgVol = document.getElementById('sr-avgvol');
+    const srHint = document.getElementById('sr-regime-hint');
+    if (srMin) srMin.textContent = status.minutes_remaining;
+    if (srDev) {
+      srDev.textContent = formatPct(status.btc_deviation_pct);
+      srDev.className = pnlClass(status.btc_deviation_pct);
+    }
+    if (srVol)    srVol.textContent    = (status.current_vol * 100).toFixed(2) + '%';
+    if (srAvgVol) srAvgVol.textContent = (status.avg_vol    * 100).toFixed(2) + '%';
+    if (srHint) {
+      const min  = status.minutes_remaining || 0;
+      const absD = Math.abs(status.btc_deviation_pct || 0);
+      if (min <= 0 || min > 55) {
+        srHint.textContent = '等待下一根 K 线';
+        srHint.style.color = '#484f58';
+      } else if (absD <= 0.12 && min > 30 && min < 45) {
+        srHint.textContent = '▶ 符合 Quiet Reversion 窗口';
+        srHint.style.color = '#58a6ff';
+      } else if (absD >= 0.20 && min >= 25 && min < 45) {
+        srHint.textContent = '▶ 符合 Momentum Follow 窗口';
+        srHint.style.color = '#d29922';
+      } else if (absD > 0.12 && absD < 0.20) {
+        srHint.textContent = '⛔ 偏移在禁止区间 (0.12–0.20%)';
+        srHint.style.color = '#f85149';
+      } else {
+        srHint.textContent = '⏳ 不在入场时间窗口';
+        srHint.style.color = '#484f58';
+      }
+    }
 
     // Positions — 仅有持仓时显示整个 section（P1-4）
     const posSection   = document.getElementById('open-positions-section');
