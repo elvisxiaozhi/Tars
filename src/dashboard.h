@@ -170,7 +170,7 @@ inline const std::string DASHBOARD_HTML = R"html(
 <div class="tabs">
   <button class="tab-btn active" data-tab="main">Main Strategy</button>
   <button class="tab-btn" data-tab="trend">Trend Follow</button>
-  <button class="tab-btn" data-tab="regime">ETH Cheap</button>
+  <button class="tab-btn" data-tab="regime">Trend Follow v2</button>
   <button class="tab-btn" data-tab="finance">Finance</button>
 </div>
 
@@ -411,52 +411,54 @@ inline const std::string DASHBOARD_HTML = R"html(
 
 <div id="tab-regime" class="tab-panel">
 <details class="section" id="regime-rules-details">
-  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — ETH Cheap</span></summary>
+  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Trend Follow v2</span></summary>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:12px;">
     <div class="card">
       <div class="card-title" style="color:#58a6ff;margin-bottom:8px;">入场条件</div>
       <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div>· Coin：<b>ETH</b> only</div>
-        <div>· 时间窗口：剩余 <b>&gt; 30 min</b></div>
-        <div>· |ETH 偏移| ∈ [0.10%, 0.24%]</div>
-        <div>· 入场价：0.20–0.26¢（买较便宜侧）</div>
-        <div>· 价差 ≤ 1¢</div>
-        <div>· 仓位：$1.00（0.25–0.26¢ 档 $0.50）</div>
+        <div>· Coin：<b>BTC / ETH / BNB</b></div>
+        <div>· 时间窗口：<b>41 ≤ 剩余 ≤ 45 min</b></div>
+        <div>· |偏移| ≥ 0.18%，方向连续 2 tick 确认</div>
+        <div>· 入场价：0.64–0.67¢（顺偏移）</div>
+        <div>· 价差 ≤ 1¢ · 信心分 ≥ 4</div>
+        <div>· 仓位：$1.00（DOWN 方向 $1.25）</div>
       </div>
     </div>
     <div class="card">
       <div class="card-title" style="color:#3fb950;margin-bottom:8px;">止盈</div>
       <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div>· TP0：0.42¢ → 卖 75%</div>
-        <div>· TP1：0.62¢ → 清仓</div>
+        <div>· TP0：entry+10¢ → 卖 50%</div>
+        <div>· TP1：entry+15¢ → 卖 50%</div>
+        <div>· TP2：0.90¢ → 清仓</div>
       </div>
     </div>
     <div class="card">
       <div class="card-title" style="color:#f85149;margin-bottom:8px;">止损</div>
       <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div>· 价格止损：≤ 入场 -7¢</div>
-        <div>· BTC 止损：|偏移| 超出范围 +5%</div>
-        <div>· 时间止损：≤12min &amp; 峰值 &lt; 0.42¢</div>
+        <div>· 价格止损：≤ 入场 -10¢</div>
+        <div>· 偏移穿零 → stop_btc</div>
+        <div>· 5min MFE &lt; 3¢ → 死水退出</div>
+        <div>· Trailing：MFE≥15¢→max(入+6¢,峰-5¢)；MFE≥8¢→max(入+2¢,峰-6¢)</div>
       </div>
     </div>
   </div>
 </details>
-<details class="section" id="experiment-details" open>
+<details class="section" id="trend-v2-experiment-details" open>
   <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>ETH Cheap Experiment</span>
-    <span id="exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+    <span>Trend Follow v2 Experiment</span>
+    <span id="trend-v2-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
   </summary>
   <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="exp-trades-count">--</div></div>
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="trend-v2-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="trend-v2-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="trend-v2-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="trend-v2-exp-trades-count">--</div></div>
   </div>
   <div class="section-title" style="margin-top:12px;">Coin P&L</div>
-  <div id="exp-coin-pnl"></div>
-  <div id="exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="exp-positions" style="margin-top:12px;"></div>
-  <div id="exp-trades" style="margin-top:12px;"></div>
+  <div id="trend-v2-exp-coin-pnl"></div>
+  <div id="trend-v2-exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="trend-v2-exp-positions" style="margin-top:12px;"></div>
+  <div id="trend-v2-exp-trades" style="margin-top:12px;"></div>
 </details>
 </div>
 
@@ -538,24 +540,23 @@ inline const std::string DASHBOARD_HTML = R"html(
       </div>
     </div>
 
-    <!-- Trend Follow v2 -->
+    <!-- ETH Cheap -->
     <div class="card">
-      <div class="card-title" style="color:#d29922;margin-bottom:8px;">Trend Follow v2（BTC / ETH / BNB）</div>
+      <div class="card-title" style="color:#d29922;margin-bottom:8px;">ETH Cheap（ETH only）</div>
       <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
         <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
-        <div>· Coin：BTC / ETH / BNB</div>
-        <div>· 时间窗口：<b>41 ≤ 剩余 ≤ 45 min</b></div>
-        <div>· |偏移| ≥ 0.18%，方向连续 2 tick 确认</div>
-        <div>· 入场价：0.64–0.67¢（顺偏移）</div>
-        <div>· 价差 ≤ 1¢ · 信心分 ≥ 4</div>
-        <div>· 仓位：$1.00（DOWN 方向 $1.25）</div>
+        <div>· Coin：ETH only</div>
+        <div>· 时间窗口：剩余 <b>&gt; 30 min</b></div>
+        <div>· |ETH 偏移| ∈ [0.10%, 0.24%]</div>
+        <div>· 入场价：0.20–0.26¢（买较便宜侧）</div>
+        <div>· 价差 ≤ 1¢</div>
+        <div>· 仓位：$1.00（0.25–0.26¢ 档 $0.50）</div>
         <div style="color:#7d8590;font-size:0.85em;margin-top:6px;">止盈</div>
-        <div>· TP0: entry+10¢(50%)  TP1: entry+15¢(50%)  TP2: 0.90¢(all)</div>
+        <div>· TP0: 0.42¢(75%)  TP1: 0.62¢(清仓)</div>
         <div style="color:#f85149;font-size:0.85em;margin-top:6px;">止损</div>
-        <div>· 价格止损 ≤ entry-10¢</div>
-        <div>· 偏移穿零 → stop_btc</div>
-        <div>· 5min MFE&lt;3¢ → 死水退出</div>
-        <div>· Trailing: MFE≥15¢→max(入+6¢,峰-5¢)；MFE≥8¢→max(入+2¢,峰-6¢)</div>
+        <div>· 价格止损 ≤ 入场-7¢</div>
+        <div>· BTC 止损：|偏移| 超出范围 +5%</div>
+        <div>· 时间止损 ≤12min &amp; 峰值 &lt; 0.42¢</div>
       </div>
     </div>
 
@@ -652,22 +653,22 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div id="crypto-daily-exp-trades" style="margin-top:12px;"></div>
 </details>
 
-<details class="section" id="trend-v2-experiment-details" open>
+<details class="section" id="experiment-details" open>
   <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>Trend Follow v2 Experiment</span>
-    <span id="trend-v2-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+    <span>ETH Cheap Experiment</span>
+    <span id="exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
   </summary>
   <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="trend-v2-exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="trend-v2-exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="trend-v2-exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="trend-v2-exp-trades-count">--</div></div>
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="exp-trades-count">--</div></div>
   </div>
   <div class="section-title" style="margin-top:12px;">Coin P&L</div>
-  <div id="trend-v2-exp-coin-pnl"></div>
-  <div id="trend-v2-exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="trend-v2-exp-positions" style="margin-top:12px;"></div>
-  <div id="trend-v2-exp-trades" style="margin-top:12px;"></div>
+  <div id="exp-coin-pnl"></div>
+  <div id="exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="exp-positions" style="margin-top:12px;"></div>
+  <div id="exp-trades" style="margin-top:12px;"></div>
 </details>
 </div>
 
