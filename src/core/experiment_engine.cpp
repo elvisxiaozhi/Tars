@@ -1,5 +1,7 @@
 #include "core/experiment_engine.h"
 
+#include "core/build_info.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -158,6 +160,8 @@ void append_jsonl(const std::string& path, const TradeRecord& rec) {
     nlohmann::json j;
     j["id"] = rec.id;
     j["mode"] = rec.mode;
+    j["code_version"] = code_version();
+    j["config_hash"] = config_hash();
     j["coin"] = rec.coin;
     j["regime"] = rec.regime;
     j["market"] = rec.market_question;

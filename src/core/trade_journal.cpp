@@ -1,7 +1,12 @@
 #include "core/trade_journal.h"
 
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <map>
+#include <vector>
+
+#include "core/build_info.h"
 
 #include <json.hpp>
 #include <spdlog/spdlog.h>
@@ -21,6 +26,35 @@ TradeJournal::TradeJournal(const std::string& path) : path_(path) {
     auto dir = std::filesystem::path(path).parent_path();
     if (!dir.empty()) {
         std::filesystem::create_directories(dir);
+    }
+
+    // 启动快照：对已有非空 jsonl 做一份带时间戳的副本到 logs/backup/，保留最近 10 份。
+    // bot 本身只 append 不截断；真正的丢数据风险来自外部（迁移新机/误删/清库），
+    // 这份快照让任何此类事件可恢复，避免分析样本被清零（见 step 报告 A）。
+    try {
+        if (std::filesystem::exists(path) && std::filesystem::file_size(path) > 0) {
+            auto bdir = std::filesystem::path(path).parent_path() / "backup";
+            std::filesystem::create_directories(bdir);
+            std::string stem = std::filesystem::path(path).stem().string();
+            int64_t ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::system_clock::now().time_since_epoch()).count();
+            auto dest = bdir / (stem + "." + std::to_string(ts) + ".jsonl");
+            std::filesystem::copy_file(path, dest,
+                std::filesystem::copy_options::overwrite_existing);
+            std::vector<std::filesystem::path> snaps;
+            for (auto& e : std::filesystem::directory_iterator(bdir)) {
+                if (e.path().filename().string().rfind(stem + ".", 0) == 0)
+                    snaps.push_back(e.path());
+            }
+            if (snaps.size() > 10) {
+                std::sort(snaps.begin(), snaps.end());
+                for (size_t i = 0; i + 10 < snaps.size(); ++i)
+                    std::filesystem::remove(snaps[i]);
+            }
+            spdlog::info("TradeJournal snapshot -> {}", dest.string());
+        }
+    } catch (const std::exception& e) {
+        spdlog::warn("TradeJournal snapshot failed: {}", e.what());
     }
 
     // 启动加载历史 jsonl（容错：缺字段用默认；解析失败的行跳过）
@@ -112,6 +146,8 @@ void TradeJournal::record(const TradeRecord& trade) {
     json j;
     j["id"] = trade.id;
     j["mode"] = trade.mode;
+    j["code_version"] = code_version();
+    j["config_hash"] = config_hash();
     j["coin"] = trade.coin;
     j["regime"] = trade.regime;
     j["market"] = trade.market_question;

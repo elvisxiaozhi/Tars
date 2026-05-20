@@ -4,6 +4,11 @@
 #include <fstream>
 #include <stdexcept>
 #include <cctype>
+#include <functional>
+#include <iomanip>
+#include <sstream>
+
+#include "core/build_info.h"
 
 #include <json.hpp>
 #include <spdlog/spdlog.h>
@@ -122,7 +127,18 @@ AppConfig load_config(const std::string& path) {
         throw std::runtime_error("Cannot open config file: " + path);
     }
 
-    json root = json::parse(f);
+    // 先读原始字节算 config_hash（稳定标识本次运行用的配置版本），再解析。
+    std::stringstream raw;
+    raw << f.rdbuf();
+    std::string raw_str = raw.str();
+    {
+        std::ostringstream hh;
+        hh << std::hex << std::setw(16) << std::setfill('0')
+           << std::hash<std::string>{}(raw_str);
+        set_config_hash(hh.str());
+    }
+
+    json root = json::parse(raw_str);
     AppConfig cfg;
 
     // polymarket

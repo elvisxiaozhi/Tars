@@ -11,6 +11,22 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# --- code_version → POLY_GIT_SHA (注入交易/候选 jsonl 的 code_version 字段) ---
+# 优先用外部传入（cmake -DPOLY_GIT_SHA=...，用于非 git 部署机盖部署戳）；
+# 否则取本仓库 git short sha；都没有则 "unknown"。configure 期求值。
+if(NOT DEFINED POLY_GIT_SHA OR POLY_GIT_SHA STREQUAL "")
+    execute_process(
+        COMMAND git -C ${CMAKE_SOURCE_DIR} rev-parse --short HEAD
+        OUTPUT_VARIABLE POLY_GIT_SHA
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+endif()
+if(NOT POLY_GIT_SHA OR POLY_GIT_SHA STREQUAL "")
+    set(POLY_GIT_SHA "unknown")
+endif()
+add_compile_definitions(POLY_GIT_SHA="${POLY_GIT_SHA}")
+message(STATUS "POLY_GIT_SHA = ${POLY_GIT_SHA}")
+
 # --- Platform prefixes ---
 # macOS/Homebrew installs OpenSSL and secp256k1 outside the default SDK paths.
 # Linux packages are discovered through the system default search paths.

@@ -191,6 +191,15 @@ mv logs/bot.log logs/bot.log.$(date +%Y%m%d)
 ```
 长期：在 `init_logging` 里换成 `rotating_file_sink_mt`。
 
+### 5.5 历史样本保护（A/D）与版本标注（B/C）
+**为什么**：bot 只 append 不截断 `trades.jsonl`；真正丢数据的风险是**迁移新机/误删/外部清库**（2026-05-16 服务器迁移就丢了本地 446 笔历史，样本被清零，按 `prompts/analyze_strategy.md` n<50 规则导致无法出统计结论）。
+
+- **启动快照（A，自动）**：`TradeJournal` 启动时把非空 `trades.jsonl` 复制到 `logs/backup/trades.<ms>.jsonl`，保留最近 10 份。任何重置后从这里恢复。
+- **迁移/部署纪律（D，人工）**：换机或重部署**必须先带走 `logs/*.jsonl` + `logs/backup/`**；systemd 已用 `WorkingDirectory`，勿手动 `rm logs/*` 或在新机空目录起 bot。
+- **不要无意义重置（D）**：每次重置/改 `config.json` 都重启 regime 时钟、作废之前样本；攒满 ≥50 仓前别动配置。
+- **版本标注（B）**：每条 trade/experiment jsonl 现含 `code_version`（git short sha，CMake 配置期注入——改代码后重跑 `cmake -S . -B build` 才会刷新）+ `config_hash`（config 文件字节哈希）。分析时按这两个字段机械切 regime，不再靠 git log 手工拼。
+- **主策略候选（C）**：被 gate 拒掉的入场候选写 `logs/main_candidates.jsonl`（`reject_reason / coin / minutes_remaining / deviation_pct / entry_price / spread`），用于量化"哪个 gate 过紧"。会持续增长（类比实验的 `*_candidates.jsonl` 数 MB/天），定期 archive。
+
 ---
 
 ## 6. 紧急应急
