@@ -62,13 +62,16 @@ struct UpDownQuotes {
     std::string up_token_id, down_token_id;
 };
 
+static const char* regime_name(polymarket::StrategyRegime regime);
+
 // 主策略候选落盘：每个被策略 gate 拒掉的入场候选写一行到 logs/main_candidates.jsonl。
 // 用途：量化"哪个 gate 拦掉了多少本可入场的候选/是否过紧"——实验有 *_candidates.jsonl
 // 可做此分析，主策略此前没有。纯诊断旁路，不影响任何交易决策（见 step 报告 C）。
-static void log_main_candidate(const std::string& coin, double dev_pct,
-                               int minutes_remaining,
+static void log_main_candidate(const std::string& coin,
+                               const polymarket::BtcMarketData& md,
                                const polymarket::EntrySignal& sig,
-                               const UpDownQuotes& q) {
+                               const UpDownQuotes& q,
+                               const std::map<std::string, polymarket::BtcMarketData>& market_ctx) {
     try {
         nlohmann::json j;
         j["ts"] = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -76,13 +79,28 @@ static void log_main_candidate(const std::string& coin, double dev_pct,
         j["code_version"] = polymarket::code_version();
         j["config_hash"] = polymarket::config_hash();
         j["coin"] = coin;
-        j["minutes_remaining"] = minutes_remaining;
-        j["deviation_pct"] = dev_pct;
+        j["minutes_remaining"] = md.minutes_remaining;
+        j["deviation_pct"] = md.deviation_pct;
         j["reject_reason"] = sig.reject_reason;
+        j["regime_path"] = regime_name(sig.regime);
         j["entry_price"] = sig.entry_price;
         j["market_ask"] = sig.market_ask;
+        j["up_bid"] = q.up_bid;
+        j["up_ask"] = q.up_ask;
+        j["down_bid"] = q.down_bid;
+        j["down_ask"] = q.down_ask;
         j["up_spread"] = (q.up_ask > 0 && q.up_bid > 0) ? (q.up_ask - q.up_bid) : 0.0;
         j["down_spread"] = (q.down_ask > 0 && q.down_bid > 0) ? (q.down_ask - q.down_bid) : 0.0;
+        j["entry_confidence"] = sig.entry_confidence;
+        j["confidence_components"] = sig.confidence_components;
+        j["entry_vol_1h"] = md.current_1h_vol;
+        j["avg_vol_24h"] = md.avg_24h_vol;
+        nlohmann::json cross = nlohmann::json::object();
+        for (const auto& [sym, other] : market_ctx) {
+            if (sym == coin) continue;
+            cross[sym] = other.deviation_pct;
+        }
+        j["cross_coin_dev"] = cross;
         std::ofstream out("./logs/main_candidates.jsonl", std::ios::app);
         if (out) out << j.dump() << "\n";
     } catch (...) {
@@ -1709,8 +1727,7 @@ int main(int argc, char* argv[]) {
                     }
                 } else if (!sig.reject_reason.empty()) {
                     reject_agg.add(sig.reject_reason, md.deviation_pct);
-                    log_main_candidate(coin, md.deviation_pct,
-                                       md.minutes_remaining, sig, quotes);
+                    log_main_candidate(coin, md, sig, quotes, market_data);
                 }
             }
 
