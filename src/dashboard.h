@@ -169,7 +169,10 @@ inline const std::string DASHBOARD_HTML = R"html(
 
 <div class="tabs">
   <button class="tab-btn active" data-tab="main">Main Strategy</button>
+  <button class="tab-btn" data-tab="eth-cheap">ETH Cheap</button>
   <button class="tab-btn" data-tab="regime">Trend Follow v2</button>
+  <button class="tab-btn" data-tab="crypto-4h">Crypto 4H</button>
+  <button class="tab-btn" data-tab="crypto-daily">Crypto Daily</button>
   <button class="tab-btn" data-tab="finance">Finance</button>
 </div>
 
@@ -461,34 +464,10 @@ inline const std::string DASHBOARD_HTML = R"html(
 </details>
 </div>
 
-<div id="tab-finance" class="tab-panel">
-<details class="section" id="finance-rules-details">
-  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Finance &amp; Crypto Duration</span></summary>
-
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;">
-
-    <!-- Finance SPX/GOLD -->
-    <div class="card">
-      <div class="card-title" style="color:#58a6ff;margin-bottom:8px;">Finance（SPX / GOLD）</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
-        <div>· 标的：SPX、GOLD</div>
-        <div>· 标题必须含 "up or down"</div>
-        <div>· 时间窗口：20 &lt; 剩余 ≤ 390 min</div>
-        <div>· |偏移| ≥ 0.35%（SPX）/ 0.45%（GOLD）</div>
-        <div style="margin-top:6px;color:#7d8590;font-size:0.85em;">Trend 模式（60–330min）</div>
-        <div>· 入场价 0.55–0.72¢，顺偏移，$0.50</div>
-        <div>· TP0: entry+8¢(50%)  TP1: entry+15¢(50%)</div>
-        <div style="margin-top:6px;color:#7d8590;font-size:0.85em;">极端反转（90–300min，|偏移|≥1.0/1.2%）</div>
-        <div>· 入场价 0.18–0.30¢，逆偏移，$0.25</div>
-        <div>· TP0: entry+10¢(60%)  TP1: entry+20¢(all)</div>
-        <div style="margin-top:6px;color:#f85149;font-size:0.85em;">止损</div>
-        <div>· 价格止损 ≤ entry-10¢，偏移穿零 → 清仓</div>
-        <div>· 5min 无 MFE → 死水退出</div>
-      </div>
-    </div>
-
-    <!-- ETH Cheap -->
+<div id="tab-eth-cheap" class="tab-panel">
+<details class="section" id="eth-cheap-rules-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — ETH Cheap</span></summary>
+  <div style="margin-top:12px;max-width:520px;">
     <div class="card">
       <div class="card-title" style="color:#d29922;margin-bottom:8px;">ETH Cheap（ETH only）</div>
       <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
@@ -507,8 +486,31 @@ inline const std::string DASHBOARD_HTML = R"html(
         <div>· 时间止损 ≤12min &amp; 峰值 &lt; 0.42¢</div>
       </div>
     </div>
+  </div>
+</details>
+<details class="section" id="experiment-details" open>
+  <summary class="section-title" style="cursor:pointer;list-style:none;">
+    <span>ETH Cheap Experiment</span>
+    <span id="exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+  </summary>
+  <div class="stats-grid" style="margin-top:8px;">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="exp-trades-count">--</div></div>
+  </div>
+  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
+  <div id="exp-coin-pnl"></div>
+  <div id="exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="exp-positions" style="margin-top:12px;"></div>
+  <div id="exp-trades" style="margin-top:12px;"></div>
+</details>
+</div>
 
-    <!-- Crypto 4H -->
+<div id="tab-crypto-4h" class="tab-panel">
+<details class="section" id="crypto-4h-rules-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Crypto 4H Up/Down</span></summary>
+  <div style="margin-top:12px;max-width:520px;">
     <div class="card">
       <div class="card-title" style="color:#3fb950;margin-bottom:8px;">Crypto 4H Up/Down</div>
       <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
@@ -526,8 +528,31 @@ inline const std::string DASHBOARD_HTML = R"html(
         <div>· Trailing: MFE≥15¢→max(入+6¢,峰-5¢)；MFE≥8¢→max(入+2¢,峰-6¢)</div>
       </div>
     </div>
+  </div>
+</details>
+<details class="section" id="crypto-4h-experiment-details" open>
+  <summary class="section-title" style="cursor:pointer;list-style:none;">
+    <span>Crypto 4H Up/Down Experiment</span>
+    <span id="crypto-4h-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+  </summary>
+  <div class="stats-grid" style="margin-top:8px;">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="crypto-4h-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="crypto-4h-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="crypto-4h-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="crypto-4h-exp-trades-count">--</div></div>
+  </div>
+  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
+  <div id="crypto-4h-exp-coin-pnl"></div>
+  <div id="crypto-4h-exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="crypto-4h-exp-positions" style="margin-top:12px;"></div>
+  <div id="crypto-4h-exp-trades" style="margin-top:12px;"></div>
+</details>
+</div>
 
-    <!-- Crypto Daily -->
+<div id="tab-crypto-daily" class="tab-panel">
+<details class="section" id="crypto-daily-rules-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Crypto Daily Up/Down</span></summary>
+  <div style="margin-top:12px;max-width:520px;">
     <div class="card">
       <div class="card-title" style="color:#56d364;margin-bottom:8px;">Crypto Daily Up/Down</div>
       <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
@@ -543,6 +568,50 @@ inline const std::string DASHBOARD_HTML = R"html(
         <div>· 价格止损 ≤ entry-10¢，偏移穿零 → 清仓</div>
         <div>· 5min 无 MFE → 死水退出</div>
         <div>· Trailing: MFE≥15¢→max(入+6¢,峰-5¢)；MFE≥8¢→max(入+2¢,峰-6¢)</div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="section" id="crypto-daily-experiment-details" open>
+  <summary class="section-title" style="cursor:pointer;list-style:none;">
+    <span>Crypto Daily Up/Down Experiment</span>
+    <span id="crypto-daily-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
+  </summary>
+  <div class="stats-grid" style="margin-top:8px;">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="crypto-daily-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="crypto-daily-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="crypto-daily-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="crypto-daily-exp-trades-count">--</div></div>
+  </div>
+  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
+  <div id="crypto-daily-exp-coin-pnl"></div>
+  <div id="crypto-daily-exp-regime-stats" style="margin-top:12px;"></div>
+  <div id="crypto-daily-exp-positions" style="margin-top:12px;"></div>
+  <div id="crypto-daily-exp-trades" style="margin-top:12px;"></div>
+</details>
+</div>
+
+<div id="tab-finance" class="tab-panel">
+<details class="section" id="finance-rules-details">
+  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Finance（SPX / GOLD）</span></summary>
+  <div style="margin-top:12px;max-width:520px;">
+    <div class="card">
+      <div class="card-title" style="color:#58a6ff;margin-bottom:8px;">Finance（SPX / GOLD）</div>
+      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
+        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
+        <div>· 标的：SPX、GOLD</div>
+        <div>· 标题必须含 "up or down"</div>
+        <div>· 时间窗口：20 &lt; 剩余 ≤ 390 min</div>
+        <div>· |偏移| ≥ 0.35%（SPX）/ 0.45%（GOLD）</div>
+        <div style="margin-top:6px;color:#7d8590;font-size:0.85em;">Trend 模式（60–330min）</div>
+        <div>· 入场价 0.55–0.72¢，顺偏移，$0.50</div>
+        <div>· TP0: entry+8¢(50%)  TP1: entry+15¢(50%)</div>
+        <div style="margin-top:6px;color:#7d8590;font-size:0.85em;">极端反转（90–300min，|偏移|≥1.0/1.2%）</div>
+        <div>· 入场价 0.18–0.30¢，逆偏移，$0.25</div>
+        <div>· TP0: entry+10¢(60%)  TP1: entry+20¢(all)</div>
+        <div style="margin-top:6px;color:#f85149;font-size:0.85em;">止损</div>
+        <div>· 价格止损 ≤ entry-10¢，偏移穿零 → 清仓</div>
+        <div>· 5min 无 MFE → 死水退出</div>
       </div>
     </div>
   </div>
@@ -563,60 +632,6 @@ inline const std::string DASHBOARD_HTML = R"html(
   <div id="finance-exp-regime-stats" style="margin-top:12px;"></div>
   <div id="finance-exp-positions" style="margin-top:12px;"></div>
   <div id="finance-exp-trades" style="margin-top:12px;"></div>
-</details>
-
-<details class="section" id="crypto-4h-experiment-details" open>
-  <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>Crypto 4H Up/Down Experiment</span>
-    <span id="crypto-4h-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
-  </summary>
-  <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="crypto-4h-exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="crypto-4h-exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="crypto-4h-exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="crypto-4h-exp-trades-count">--</div></div>
-  </div>
-  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
-  <div id="crypto-4h-exp-coin-pnl"></div>
-  <div id="crypto-4h-exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="crypto-4h-exp-positions" style="margin-top:12px;"></div>
-  <div id="crypto-4h-exp-trades" style="margin-top:12px;"></div>
-</details>
-
-<details class="section" id="crypto-daily-experiment-details" open>
-  <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>Crypto Daily Up/Down Experiment</span>
-    <span id="crypto-daily-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
-  </summary>
-  <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="crypto-daily-exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="crypto-daily-exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="crypto-daily-exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="crypto-daily-exp-trades-count">--</div></div>
-  </div>
-  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
-  <div id="crypto-daily-exp-coin-pnl"></div>
-  <div id="crypto-daily-exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="crypto-daily-exp-positions" style="margin-top:12px;"></div>
-  <div id="crypto-daily-exp-trades" style="margin-top:12px;"></div>
-</details>
-
-<details class="section" id="experiment-details" open>
-  <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>ETH Cheap Experiment</span>
-    <span id="exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
-  </summary>
-  <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="exp-trades-count">--</div></div>
-  </div>
-  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
-  <div id="exp-coin-pnl"></div>
-  <div id="exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="exp-positions" style="margin-top:12px;"></div>
-  <div id="exp-trades" style="margin-top:12px;"></div>
 </details>
 </div>
 
@@ -695,7 +710,9 @@ document.addEventListener('DOMContentLoaded', () => {
   persistDetails('ad-direction',          false);
   persistDetails('ad-buckets',            false);
   persistDetails('regime-rules-details',  false);
-  persistDetails('trend-rules-details',   false);
+  persistDetails('eth-cheap-rules-details', false);
+  persistDetails('crypto-4h-rules-details', false);
+  persistDetails('crypto-daily-rules-details', false);
   persistDetails('finance-rules-details', false);
   persistDetails('experiment-details',    true);
   persistDetails('finance-experiment-details', true);
