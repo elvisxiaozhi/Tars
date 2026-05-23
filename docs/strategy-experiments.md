@@ -23,20 +23,19 @@
 
 ---
 
-## 二、当前活跃的 6 个实验策略
+## 二、当前活跃的 5 个实验策略
 
 ### 总表（按 main.cpp 实例化顺序）
 
 | 变量名 | strategy_name | id 前缀 | 日志文件 | 市场类型 | 评测代码 |
 |---|---|---|---|---|---|
 | `experiment` | `eth_cheap_v1` | `C` | `experiment_eth_cheap_v1_trades.jsonl` | Crypto 1h（仅 ETH） | `evaluate_eth_cheap_v1` (L612) |
-| `trend_experiment` | `eth_late_cheap_v1` | `L` | `experiment_eth_late_cheap_v1_trades.jsonl` | Crypto 1h（仅 ETH） | `evaluate_eth_late_cheap_v1` (L841) |
 | `finance_experiment` | `finance_updown_v1` | `F` | `experiment_finance_updown_v1_trades.jsonl` | Finance 当日（FIN:SPX/GOLD） | `evaluate_finance_updown_v1` (L909) |
 | `crypto_4h_experiment` | `crypto_4h_updown_v1` | `H` | `experiment_crypto_4h_updown_v1_trades.jsonl` | Crypto 4h | `evaluate_crypto_duration_updown_v1` (L1007, daily=false) |
 | `crypto_daily_experiment` | `crypto_daily_updown_v1` | `D` | `experiment_crypto_daily_updown_v1_trades.jsonl` | Crypto daily | 同上 (daily=true) |
 | **`trend_v2_experiment`** | `trend_follow` | `T` | `experiment_trend_v2_trades.jsonl` | Crypto 1h（仅 BTC/ETH/BNB） | `evaluate_trend_follow` (L329) |
 
-> 变量名 `trend_experiment` 历史遗留——实际跑的是 `eth_late_cheap_v1`，不是 trend_follow。
+> **2026-05-23 退役 `eth_late_cheap_v1`**（原变量名 `trend_experiment`，id 前缀 `L`）。净负、被 `eth_cheap_v1` 严格压制、无可改杠杆。证据与"不要重蹈的模式"见 [`steps/step-retire-eth-late-cheap-v1.md`](./steps/step-retire-eth-late-cheap-v1.md)。dashboard 的 "Trend Follow" tab 一并移除。
 > 真正的 `trend_follow` 在 `trend_v2_experiment` 中跑——2026-05-17 复活，基于历史 148 笔数据分析（详见 [`steps/step-trend-v2-revive.md`](./steps/step-trend-v2-revive.md)）显示其当前 code 在排除事故段后实际为 +$1.44 / 77 笔 / wr 78%。
 
 ---
@@ -71,7 +70,11 @@
 
 ---
 
-### 2.2 `eth_late_cheap_v1`（ETH 末段便宜入场）
+### 2.2 `eth_late_cheap_v1`（ETH 末段便宜入场）—— ⚠️ 2026-05-23 已退役
+
+> **已退役,不再实例化。** 净负(−$0.475/46笔/28%胜率)、被 `eth_cheap_v1` 严格压制、无可改杠杆。
+> 退役证据 + "不要重蹈的模式" 见 [`steps/step-retire-eth-late-cheap-v1.md`](./steps/step-retire-eth-late-cheap-v1.md)。
+> 以下规则仅作历史记录;`evaluate_eth_late_cheap_*` 代码按惯例保留在 experiment_engine.cpp 作回放参考。
 
 `evaluate_eth_late_cheap_v1` @ L841-907
 
@@ -234,9 +237,9 @@
 | `FIN:*`（标普 / 黄金 / WTI …） | `finance_experiment` | L1258-1329 |
 | Crypto 4h 市场 | `crypto_4h_experiment` | L1249-1250 |
 | Crypto daily 市场 | `crypto_daily_experiment` | L1252 |
-| Crypto 1h（常规） | `experiment` + `trend_experiment` + `trend_v2_experiment`（三个同时跑！）| L1441-1443 |
+| Crypto 1h（常规） | `experiment` + `trend_v2_experiment`（两个同时跑）| L1539-1540 |
 
-注意 Crypto 1h 走 **三 engine 并行**——`eth_cheap_v1`、`eth_late_cheap_v1`、`trend_follow` 用同一份 tick 各自评估。
+注意 Crypto 1h 走 **双 engine 并行**——`eth_cheap_v1`、`trend_follow` 用同一份 tick 各自评估。（`eth_late_cheap_v1` 已于 2026-05-23 退役。）
 
 ---
 
@@ -246,6 +249,7 @@
 
 | strategy_name | 历史 jsonl | 说明 |
 |---|---|---|
+| `eth_late_cheap_v1` | `experiment_eth_late_cheap_v1_trades.jsonl` (46 笔) | **2026-05-23 退役**。净负/被 eth_cheap_v1 压制/无杠杆。详 [`steps/step-retire-eth-late-cheap-v1.md`](./steps/step-retire-eth-late-cheap-v1.md) |
 | `regime`（默认 `evaluate_entry` L218） | `experiment_trades.jsonl` (14 笔) | 早期三态机（trend/reversal/quiet），现已弃用 |
 | ~~`trend_follow`~~ | `experiment_trend_trades.jsonl` (148 笔) | **2026-05-17 已复活**，新 jsonl `experiment_trend_v2_trades.jsonl`。历史日志保留用作回放参考 |
 | `legacy_cheap_v2` | `experiment_legacy_cheap_v2_trades.jsonl` (27 笔) | legacy_cheap 加分制 v2，5/09 commit 8e3f399 后弃用 |
@@ -290,7 +294,6 @@ ExperimentEngine 内置：
 
 - `Main`（`logs/trades.jsonl`，主策略）
 - `Experiment: eth_cheap_v1`
-- `Experiment: eth_late_cheap_v1`
 - `Experiment: finance_updown_v1`
 - `Experiment: crypto_4h_updown_v1`
 - `Experiment: crypto_daily_updown_v1`

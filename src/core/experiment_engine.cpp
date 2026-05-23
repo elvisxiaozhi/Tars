@@ -194,6 +194,8 @@ void append_jsonl(const std::string& path, const TradeRecord& rec) {
     j["mfe5_gain_pct"] = rec.mfe5_gain_pct;
     j["mfe10_gain_pct"] = rec.mfe10_gain_pct;
     j["mfe15_gain_pct"] = rec.mfe15_gain_pct;
+    j["armed_at_ms"] = rec.armed_at_ms;
+    j["min_price_after_arm"] = rec.min_price_after_arm;
     j["strategy"] = rec.strategy;
     j["entry_confidence"] = rec.entry_confidence;
     j["btc_alignment"] = rec.btc_alignment;
@@ -1832,6 +1834,14 @@ void ExperimentEngine::on_market(const std::string& coin,
         pos.current_price = current_price;
         pos.max_price = std::max(pos.max_price, current_price);
         pos.min_price = std::min(pos.min_price, current_price);
+        // Trail 评估埋点：影子策略没有 trail，价格路径完整跑完，正好用来反演 trail 会不会
+        // 误杀赢家。首次到 entry+0.05 记武装时刻，之后跟踪武装后最低 bid。
+        if (pos.armed_at_ms == 0 && current_price >= pos.entry_price + 0.05) {
+            pos.armed_at_ms = now_ms;
+            pos.min_price_after_arm = current_price;
+        } else if (pos.armed_at_ms != 0 && current_price < pos.min_price_after_arm) {
+            pos.min_price_after_arm = current_price;
+        }
         int64_t elapsed_sec = (now_ms - pos.entry_time) / 1000;
         if (elapsed_sec <= 300 && current_price > pos.mfe_at_5min) {
             pos.mfe_at_5min = current_price;
@@ -2111,6 +2121,8 @@ void ExperimentEngine::fill_record_analytics(TradeRecord& rec, const Position& p
     rec.mfe_at_5min = pos.mfe_at_5min;
     rec.mfe_at_10min = pos.mfe_at_10min;
     rec.mfe_at_15min = pos.mfe_at_15min;
+    rec.armed_at_ms = pos.armed_at_ms;
+    rec.min_price_after_arm = pos.min_price_after_arm;
     if (pos.entry_price > 0) {
         rec.mfe5_gain_pct = (pos.mfe_at_5min - pos.entry_price) / pos.entry_price;
         rec.mfe10_gain_pct = (pos.mfe_at_10min - pos.entry_price) / pos.entry_price;

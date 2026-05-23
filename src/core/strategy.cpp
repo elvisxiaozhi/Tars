@@ -464,6 +464,23 @@ ExitSignal Strategy::evaluate_exit(
 
     if (pos.regime == StrategyRegime::QUIET_REVERSION) {
         double max_adverse = pos.entry_price - pos.min_price;
+
+        // QR breakeven trail：跑过 +0.05 后跌回 +0.02 以内就退出，锁小利。
+        // 依据：截至 2026-05-21 的 12 笔 QR 中 10 笔亏损，5 笔 max_price 触及 0.30+
+        // 但 TP0=0.42 永不到，最终走 cheap_fail_stop / adverse_expansion_stop，
+        // 把 +0.05~0.10 浮盈全交还。反事实回放本规则可把 -$0.70 → +$1.07。
+        // mfe_gain ≥ 0.05 + current ≤ entry+0.02 同时成立时触发，不影响超 0.42 的大赢家。
+        if (mfe_gain >= 0.05 && current_contract_price <= pos.entry_price + 0.02) {
+            exit.should_exit = true;
+            exit.reason = "qr_breakeven_trail";
+            exit.exit_price = current_contract_price;
+            exit.use_market_order = true;
+            spdlog::warn("QR BREAKEVEN TRAIL: {} mfe={:+.3f} entry={:.3f} now={:.3f}",
+                         pos.market_question, mfe_gain,
+                         pos.entry_price, current_contract_price);
+            return exit;
+        }
+
         if (elapsed_sec >= 150 && mfe_gain < 0.03 &&
             current_contract_price <= pos.entry_price - 0.03) {
             exit.should_exit = true;

@@ -1,6 +1,8 @@
 #include <chrono>
 #include <csignal>
 #include <cctype>
+#include <cerrno>
+#include <cstring>
 #include <ctime>
 #include <algorithm>
 #include <filesystem>
@@ -11,6 +13,10 @@
 #include <set>
 #include <thread>
 #include <vector>
+
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 #include <json.hpp>
 #include <spdlog/fmt/fmt.h>
@@ -212,6 +218,8 @@ static void fill_analytics(polymarket::TradeRecord& rec,
     rec.mfe_at_5min = pos.mfe_at_5min;
     rec.mfe_at_10min = pos.mfe_at_10min;
     rec.mfe_at_15min = pos.mfe_at_15min;
+    rec.armed_at_ms = pos.armed_at_ms;
+    rec.min_price_after_arm = pos.min_price_after_arm;
     if (pos.entry_price > 0) {
         rec.mfe5_gain_pct  = (pos.mfe_at_5min  - pos.entry_price) / pos.entry_price;
         rec.mfe10_gain_pct = (pos.mfe_at_10min - pos.entry_price) / pos.entry_price;
@@ -266,6 +274,48 @@ int main(int argc, char* argv[]) {
     polymarket::init_logging(cfg.logging);
     spdlog::info("polymarket-arb v0.3.0 [{}]",
                  cfg.strategy.mode == "live" ? "LIVE" : "DRY RUN");
+
+    // 单实例 flock：阻止 systemd + manager 并发 spawn 两个 bot 都写同一份 trades.jsonl。
+    // 2026-05-21 14:16 实证：双开导致同条 BTC 被两个独立 next_position_id=1 的进程各开一次，
+    // 同 P-id 双 entry、共享日志与 jsonl，亏损翻倍且账本互相覆盖。fd 终生持有不显式关闭，
+    // 进程退出时 OS 自动释放锁；exec 系列调用不会继承 flock（每次启动重新争抢，正确）。
+    {
+        namespace fs = std::filesystem;
+        fs::path log_file_path(cfg.logging.file);
+        fs::path log_dir = log_file_path.parent_path();
+        if (log_dir.empty()) log_dir = fs::path(".");
+        std::error_code ec;
+        fs::create_directories(log_dir, ec);  // 失败也无妨，open 会再报错
+        fs::path lock_path = log_dir / "polymarket-arb.pid";
+        int lock_fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR, 0644);
+        if (lock_fd < 0) {
+            spdlog::error("Cannot open instance lock {}: {}", lock_path.string(), std::strerror(errno));
+            return 1;
+        }
+        if (::flock(lock_fd, LOCK_EX | LOCK_NB) < 0) {
+            char buf[64] = {0};
+            ssize_t n = ::read(lock_fd, buf, sizeof(buf) - 1);
+            std::string holder = (n > 0) ? std::string(buf, static_cast<size_t>(n)) : std::string("?");
+            spdlog::error("Another polymarket-arb instance already holds {} (pid={}). "
+                          "Refusing to start to avoid duplicate orders / log corruption.",
+                          lock_path.string(), holder);
+            ::close(lock_fd);
+            return 1;
+        }
+        if (::ftruncate(lock_fd, 0) != 0) {
+            spdlog::warn("ftruncate({}) failed: {}", lock_path.string(), std::strerror(errno));
+        }
+        ::lseek(lock_fd, 0, SEEK_SET);
+        std::string pid_str = std::to_string(static_cast<long>(::getpid())) + "\n";
+        if (::write(lock_fd, pid_str.data(), pid_str.size()) < 0) {
+            spdlog::warn("write pid to {} failed: {}", lock_path.string(), std::strerror(errno));
+        }
+        spdlog::info("acquired single-instance lock {} (pid={})", lock_path.string(),
+                     static_cast<long>(::getpid()));
+        // lock_fd 故意泄露到 main 作用域结束（进程退出时自动释放）。
+        static int s_lock_fd = lock_fd;
+        (void)s_lock_fd;
+    }
 
     // LIVE 模式下持有的 trader（unique_ptr，main 作用域；mode==live 才创建）
     std::unique_ptr<polymarket::LiveTrader> live_trader;
@@ -394,8 +444,8 @@ int main(int argc, char* argv[]) {
     polymarket::TradeJournal journal("./logs/trades.jsonl");
     polymarket::ExperimentEngine experiment(
         cfg, "eth_cheap_v1", "./logs/experiment_eth_cheap_v1_trades.jsonl", "C");
-    polymarket::ExperimentEngine trend_experiment(
-        cfg, "eth_late_cheap_v1", "./logs/experiment_eth_late_cheap_v1_trades.jsonl", "L");
+    // eth_late_cheap_v1 已于 2026-05-23 退役（净负、被 eth_cheap_v1 严格压制、无可改杠杆）。
+    // 详见 docs/steps/step-retire-eth-late-cheap-v1.md。不要重新实例化。
     polymarket::ExperimentEngine finance_experiment(
         cfg, "finance_updown_v1", "./logs/experiment_finance_updown_v1_trades.jsonl", "F");
     polymarket::ExperimentEngine crypto_4h_experiment(
@@ -931,17 +981,6 @@ int main(int argc, char* argv[]) {
         return experiment.all_trades_json();
     });
 
-    api.on_trend_experiment_status([&]() -> std::string {
-        return trend_experiment.status_json();
-    });
-
-    api.on_trend_experiment_trades([&]() -> std::string {
-        return trend_experiment.trades_json();
-    });
-
-    api.on_trend_experiment_all_trades([&]() -> std::string {
-        return trend_experiment.all_trades_json();
-    });
     api.on_finance_experiment_status([&]() -> std::string {
         return finance_experiment.status_json();
     });
@@ -1084,7 +1123,6 @@ int main(int argc, char* argv[]) {
                     last_it->second != md.candle_open_time) {
                     risk.reset_candle(result.coin);
                     experiment.reset_candle(result.coin);
-                    trend_experiment.reset_candle(result.coin);
                     finance_experiment.reset_candle(result.coin);
                     crypto_4h_experiment.reset_candle(result.coin);
                     crypto_daily_experiment.reset_candle(result.coin);
@@ -1101,7 +1139,6 @@ int main(int argc, char* argv[]) {
                 newest_candle_open != last_global_candle_open) {
                 risk.reset_global_hour();
                 experiment.reset_global_hour();
-                trend_experiment.reset_global_hour();
                 finance_experiment.reset_global_hour();
                 crypto_4h_experiment.reset_global_hour();
                 crypto_daily_experiment.reset_global_hour();
@@ -1500,7 +1537,6 @@ int main(int argc, char* argv[]) {
                 exp_quotes.up_token_id = quotes.up_token_id;
                 exp_quotes.down_token_id = quotes.down_token_id;
                 experiment.on_market(coin, md, entry, exp_quotes, now_ms());
-                trend_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
                 trend_v2_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
 
                 if (!entry_window) {
@@ -1807,6 +1843,14 @@ int main(int argc, char* argv[]) {
                 if (current_price > pos.max_price) pos.max_price = current_price;
                 if (current_price < pos.min_price) pos.min_price = current_price;
 
+                // Trail 评估埋点：首次到达 entry+0.05 记武装时刻，之后跟踪武装后最低 bid
+                if (pos.armed_at_ms == 0 && current_price >= pos.entry_price + 0.05) {
+                    pos.armed_at_ms = now_ms();
+                    pos.min_price_after_arm = current_price;
+                } else if (pos.armed_at_ms != 0 && current_price < pos.min_price_after_arm) {
+                    pos.min_price_after_arm = current_price;
+                }
+
                 // 时间窗口快照：入场后 ≤N 分钟时持续刷新，超过则冻结
                 int64_t elapsed_sec = (now_ms() - pos.entry_time) / 1000;
                 if (elapsed_sec <= 300 && current_price > pos.mfe_at_5min)
@@ -2031,7 +2075,6 @@ int main(int argc, char* argv[]) {
                                [](const polymarket::Position& p) { return p.closed; }),
                 positions.end());
             experiment.prune_closed();
-            trend_experiment.prune_closed();
             finance_experiment.prune_closed();
             crypto_4h_experiment.prune_closed();
             crypto_daily_experiment.prune_closed();

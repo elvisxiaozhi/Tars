@@ -74,6 +74,12 @@ struct Position {
     double mfe_at_5min = 0;
     double mfe_at_10min = 0;
     double mfe_at_15min = 0;
+    // Trail 评估埋点：首次到达 entry+0.05（已部署 QR trail 的 arm 参考线）的时刻，
+    // 以及武装之后出现的最低 bid。配合 max_price/exit 可离线判断 trail 会不会误杀赢家
+    // （逆势 cheap-value 典型路径是"先更跌→再反弹"，回踩发生在武装前还是后无法从全局
+    //  min/max 还原，必须单独记）。armed_at_ms==0 表示从未武装。
+    int64_t armed_at_ms = 0;
+    double min_price_after_arm = 0;
     double spread_at_entry = 0;        // 入场时买卖价差
     double ask_depth_at_entry = 0;     // 入场时 ask 侧总挂单量
     int hour_et = -1;                  // 入场小时 (ET, 0-23)

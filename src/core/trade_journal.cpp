@@ -109,6 +109,8 @@ TradeJournal::TradeJournal(const std::string& path) : path_(path) {
             r.mfe5_gain_pct               = j.value("mfe5_gain_pct", 0.0);
             r.mfe10_gain_pct              = j.value("mfe10_gain_pct", 0.0);
             r.mfe15_gain_pct              = j.value("mfe15_gain_pct", 0.0);
+            r.armed_at_ms                 = j.value("armed_at_ms", (int64_t)0);
+            r.min_price_after_arm         = j.value("min_price_after_arm", 0.0);
             r.has_tp_before_exit          = j.value("has_tp_before_exit", false);
             r.tp_count_before_exit        = j.value("tp_count_before_exit", 0);
             r.dw_btc_dev_pct              = j.value("dw_btc_dev_pct", 0.0);
@@ -188,6 +190,8 @@ void TradeJournal::record(const TradeRecord& trade) {
     j["mfe5_gain_pct"] = trade.mfe5_gain_pct;
     j["mfe10_gain_pct"] = trade.mfe10_gain_pct;
     j["mfe15_gain_pct"] = trade.mfe15_gain_pct;
+    j["armed_at_ms"] = trade.armed_at_ms;
+    j["min_price_after_arm"] = trade.min_price_after_arm;
     j["has_tp_before_exit"] = trade.has_tp_before_exit;
     j["tp_count_before_exit"] = trade.tp_count_before_exit;
     // dead_water 触发时的上下文埋点（仅 dead_water_exit 时有意义；其它 exit 全为默认 0/false）

@@ -21,9 +21,6 @@ struct ApiServer::Impl {
     ApiDataCallback experiment_status_cb;
     ApiDataCallback experiment_trades_cb;
     ApiDataCallback experiment_all_trades_cb;
-    ApiDataCallback trend_experiment_status_cb;
-    ApiDataCallback trend_experiment_trades_cb;
-    ApiDataCallback trend_experiment_all_trades_cb;
     ApiDataCallback finance_experiment_status_cb;
     ApiDataCallback finance_experiment_trades_cb;
     ApiDataCallback finance_experiment_all_trades_cb;
@@ -67,15 +64,6 @@ struct ApiServer::Impl {
         }
         if (target == "/api/experiment/all-trades" && experiment_all_trades_cb) {
             return make_response(http::status::ok, experiment_all_trades_cb(), "application/json");
-        }
-        if (target == "/api/experiment-trend/status" && trend_experiment_status_cb) {
-            return make_response(http::status::ok, trend_experiment_status_cb(), "application/json");
-        }
-        if (target == "/api/experiment-trend/trades" && trend_experiment_trades_cb) {
-            return make_response(http::status::ok, trend_experiment_trades_cb(), "application/json");
-        }
-        if (target == "/api/experiment-trend/all-trades" && trend_experiment_all_trades_cb) {
-            return make_response(http::status::ok, trend_experiment_all_trades_cb(), "application/json");
         }
         if (target == "/api/experiment-finance/status" && finance_experiment_status_cb) {
             return make_response(http::status::ok, finance_experiment_status_cb(), "application/json");
@@ -165,9 +153,6 @@ void ApiServer::on_analytics(ApiDataCallback cb) { impl_->analytics_cb = std::mo
 void ApiServer::on_experiment_status(ApiDataCallback cb) { impl_->experiment_status_cb = std::move(cb); }
 void ApiServer::on_experiment_trades(ApiDataCallback cb) { impl_->experiment_trades_cb = std::move(cb); }
 void ApiServer::on_experiment_all_trades(ApiDataCallback cb) { impl_->experiment_all_trades_cb = std::move(cb); }
-void ApiServer::on_trend_experiment_status(ApiDataCallback cb) { impl_->trend_experiment_status_cb = std::move(cb); }
-void ApiServer::on_trend_experiment_trades(ApiDataCallback cb) { impl_->trend_experiment_trades_cb = std::move(cb); }
-void ApiServer::on_trend_experiment_all_trades(ApiDataCallback cb) { impl_->trend_experiment_all_trades_cb = std::move(cb); }
 void ApiServer::on_finance_experiment_status(ApiDataCallback cb) { impl_->finance_experiment_status_cb = std::move(cb); }
 void ApiServer::on_finance_experiment_trades(ApiDataCallback cb) { impl_->finance_experiment_trades_cb = std::move(cb); }
 void ApiServer::on_finance_experiment_all_trades(ApiDataCallback cb) { impl_->finance_experiment_all_trades_cb = std::move(cb); }
