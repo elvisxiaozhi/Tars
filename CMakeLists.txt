@@ -11,6 +11,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# 默认带调试符号的发布构建（-O2 -g -DNDEBUG）：性能等同 Release，但崩溃时
+# addr2line / core dump 能定位到具体源码行（2026-05-24 段错误只能拿到函数名的教训）。
+# 仍可用 -DCMAKE_BUILD_TYPE=Release 等显式覆盖。
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+message(STATUS "Build type = ${CMAKE_BUILD_TYPE}")
+
 # --- code_version → POLY_GIT_SHA (注入交易/候选 jsonl 的 code_version 字段) ---
 # 优先用外部传入（cmake -DPOLY_GIT_SHA=...，用于非 git 部署机盖部署戳）；
 # 否则取本仓库 git short sha；都没有则 "unknown"。configure 期求值。

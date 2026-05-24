@@ -36,6 +36,15 @@ _lock = threading.Lock()
 _bot_proc = None          # subprocess.Popen | None
 _bot_status = "stopped"   # "stopped" | "starting" | "running" | "crashed"
 _bot_exit_code = None     # int | None
+_bot_start_time = 0.0     # monotonic ts of last spawn (for crash-loop backoff)
+_bot_restart_count = 0    # consecutive rapid crashes
+_bot_log_fd = None        # open file handle for bot stdout/stderr
+_auto_restart = True      # cleared on intentional shutdown, re-set on manual start
+
+# auto-restart crash-loop backoff
+_RESTART_MIN_UPTIME = 60.0    # crash sooner than this (s) counts as a crash-loop
+_RESTART_BACKOFF_BASE = 5.0   # first backoff delay (s)
+_RESTART_BACKOFF_CAP = 300.0  # max backoff delay (s)
 
 _bot_port = 5819
 _bot_bin = None
@@ -93,12 +102,44 @@ def _check_bot_alive():
 # Bot lifecycle monitor
 # ---------------------------------------------------------------------------
 
+def _spawn_bot():
+    """Spawn the bot subprocess. CALLER MUST HOLD _lock.
+    Returns (pid, None) on success or (None, error_str) on failure."""
+    global _bot_proc, _bot_status, _bot_exit_code, _bot_start_time, _bot_log_fd
+    if not _bot_bin:
+        return None, "bot binary not found; use --bot-bin"
+    cmd = [_bot_bin]
+    if _bot_config:
+        cmd.append(_bot_config)
+    try:
+        log_path = ROOT / "logs" / "bot.log"
+        log_path.parent.mkdir(exist_ok=True)
+        # stdout/stderr → bot.log so nothing is lost. Close the previous handle
+        # (the child holds its own dup) so restarts don't leak fds.
+        if _bot_log_fd is not None:
+            try:
+                _bot_log_fd.close()
+            except Exception:
+                pass
+        _bot_log_fd = open(log_path, "a")
+        proc = subprocess.Popen(cmd, stdout=_bot_log_fd, stderr=_bot_log_fd)
+    except Exception as e:
+        return None, str(e)
+    _bot_proc = proc
+    _bot_status = "starting"
+    _bot_exit_code = None
+    _bot_start_time = time.monotonic()
+    return proc.pid, None
+
+
 def _monitor_loop():
-    global _bot_status, _bot_exit_code, _bot_proc
+    global _bot_status, _bot_exit_code, _bot_proc, _bot_restart_count
     while True:
         with _lock:
             proc = _bot_proc
             status = _bot_status
+            auto = _auto_restart
+            uptime = time.monotonic() - _bot_start_time
 
         if proc is not None:
             ret = proc.poll()
@@ -107,6 +148,29 @@ def _monitor_loop():
                     _bot_exit_code = ret
                     _bot_status = "crashed" if ret != 0 else "stopped"
                     _bot_proc = None
+
+                if ret == 0 or not auto:
+                    # clean exit or intentional shutdown → leave it stopped
+                    print(f"[manager] bot exited (code={ret}); no auto-restart", flush=True)
+                else:
+                    # crash (non-zero / signal) → auto-restart with crash-loop backoff
+                    if uptime < _RESTART_MIN_UPTIME:
+                        _bot_restart_count += 1
+                    else:
+                        _bot_restart_count = 1  # healthy run then crashed: reset
+                    delay = min(_RESTART_BACKOFF_BASE * (2 ** (_bot_restart_count - 1)),
+                                _RESTART_BACKOFF_CAP)
+                    print(f"[manager] bot crashed (code={ret}, uptime={uptime:.0f}s); "
+                          f"restart #{_bot_restart_count} in {delay:.0f}s", flush=True)
+                    time.sleep(delay)
+                    with _lock:
+                        # skip if a manual start/shutdown intervened during backoff
+                        if _bot_proc is None and _auto_restart:
+                            pid, err = _spawn_bot()
+                            if err:
+                                print(f"[manager] auto-restart failed: {err}", flush=True)
+                            else:
+                                print(f"[manager] bot auto-restarted pid={pid}", flush=True)
             elif status == "starting":
                 if _check_bot_alive():
                     with _lock:
@@ -141,7 +205,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         p = self.path.split("?")[0]
         if p in ("/", "/index.html"):
-            html = _dashboard_cache or load_dashboard_html()
+            html = load_dashboard_html()  # 每次读取，确保 dashboard.h 更新后立即生效
             self._send(200, "text/html; charset=utf-8", html)
         elif p == "/api/manager/status":
             self._manager_status()
@@ -175,35 +239,25 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         })
 
     def _start_bot(self):
-        global _bot_proc, _bot_status, _bot_exit_code
+        global _auto_restart, _bot_restart_count
         with _lock:
             if _bot_status in ("running", "starting"):
                 self._json(409, {"error": "bot already running", "bot_status": _bot_status})
                 return
-            if not _bot_bin:
-                self._json(500, {"error": "bot binary not found; use --bot-bin"})
+            _auto_restart = True       # a manual start re-enables auto-restart
+            _bot_restart_count = 0
+            pid, err = _spawn_bot()
+            if err:
+                self._json(500, {"error": err})
                 return
-            cmd = [_bot_bin]
-            if _bot_config:
-                cmd.append(_bot_config)
-            try:
-                log_path = ROOT / "logs" / "bot.log"
-                log_path.parent.mkdir(exist_ok=True)
-                # stdout/stderr → bot.log so nothing is lost
-                log_fd = open(log_path, "a")
-                proc = subprocess.Popen(cmd, stdout=log_fd, stderr=log_fd)
-                _bot_proc = proc
-                _bot_status = "starting"
-                _bot_exit_code = None
-                pid = proc.pid
-            except Exception as e:
-                self._json(500, {"error": str(e)})
-                return
+            cmd = [_bot_bin] + ([_bot_config] if _bot_config else [])
         print(f"[manager] bot started  pid={pid}  cmd={cmd}", flush=True)
         self._json(200, {"message": "bot starting", "pid": pid})
 
     def _shutdown_bot(self):
-        global _bot_status
+        global _bot_status, _auto_restart
+        with _lock:
+            _auto_restart = False      # intentional stop: do not auto-restart
         sc, ct, body = _proxy_to_bot("/api/shutdown", "POST")
         if sc is not None:
             with _lock:
