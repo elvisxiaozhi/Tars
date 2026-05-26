@@ -287,7 +287,15 @@ EntrySignal Strategy::evaluate_momentum_follow(
     }
 
     double entry_price = std::max(0.01, ask - 0.01);
-    if (entry_price < 0.64 || entry_price > 0.67) {
+    // 2026-05-26 上沿从 0.67 扩到 0.84：原 3¢ 窄缝只捕捉行情刚启动的几秒；
+    // 当 BTC 已经移动 >=0.20% 时 favored 侧通常已被定价到 0.70-0.95（新 30h
+    // 错过 786 个 ≥0.85 候选）。回测 71 笔 / 6 天 / 90% 胜率 / EV +$0.084/笔
+    // （真实 TP 模型；不清晰市场 50% 灌回仍 +$0.075；多日均正；BTC-only
+    // 93% 胜率），详见 docs/steps/step-widen-momentum-band.md。
+    // 0.84 是 TP `min(0.88, E+0.08)` cap 决定的物理终点——再往上 TP0 被强行
+    // cap 后胜的赔付 < 输的赔付（E=0.88 +$0.011 / E=0.90 −$0.011 "胜也亏"）。
+    // 任何想往 0.85+ 扩的人必须先重做 TP 规则。
+    if (entry_price < 0.64 || entry_price > 0.84) {
         sig.reject_reason = "momentum_entry_range";
         return sig;
     }
@@ -320,9 +328,21 @@ EntrySignal Strategy::evaluate_entry(
 
     double abs_dev = std::abs(btc.deviation_pct);
     if (abs_dev <= 0.12) {
-        return evaluate_cheap_rebound(btc, up_bid, up_ask, down_bid, down_ask,
-                                      up_token_id, down_token_id, condition_id,
-                                      question, minutes_remaining, market_context);
+        EntrySignal sig = evaluate_cheap_rebound(
+            btc, up_bid, up_ask, down_bid, down_ask,
+            up_token_id, down_token_id, condition_id,
+            question, minutes_remaining, market_context);
+        // 2026-05-26 退役 QUIET_REVERSION（cheap_rebound）：净 -$0.51/21 仓、24% 胜率，
+        // 与 2026-05-23 退役的 eth_late_cheap_v1 同族同负 edge（同打 QUIET_REVERSION 标签、
+        // 同"抄便宜侧赌反弹"思路）。证据见 docs/steps/step-retire-quiet-reversion.md。
+        // 仍调用 evaluate_cheap_rebound 以保留 main_candidates.jsonl 候选/回放数据，
+        // 但开关关闭时把本应成交的信号置为 retired 拒绝，绝不开主仓。
+        // 恢复方式：config strategy.quiet_reversion_enabled=true（仅用于复测，勿用于实盘）。
+        if (sig.valid && !cfg_.strategy.quiet_reversion_enabled) {
+            sig.valid = false;
+            sig.reject_reason = "quiet_reversion_retired";
+        }
+        return sig;
     }
     if (abs_dev >= 0.20) {
         return evaluate_momentum_follow(btc, up_bid, up_ask, down_bid, down_ask,

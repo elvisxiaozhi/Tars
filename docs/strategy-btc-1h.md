@@ -1,7 +1,9 @@
 # Polymarket 1小时 UP/DOWN 交易策略
 
-> 最后更新：2026-05-17（branch `experimental-simulator`，commit 0f827fb 入场时间窗收紧到 mr < 45）。
-> 当前主策略 `regime_adaptive` 由 `src/core/strategy.cpp` 提供：先按 `abs(dev)` 拆 quiet / uncertain / momentum 三态，再走两个独立 sub-strategy（`cheap_rebound` / `momentum_follow`）；中间不确定区间不交易。
+> 最后更新：2026-05-26（branch `experimental-simulator`）。
+> 当前主策略 `regime_adaptive` 由 `src/core/strategy.cpp` 提供：先按 `abs(dev)` 拆 quiet / uncertain / momentum 三态。
+> **⚠️ 2026-05-26 起 quiet（`cheap_rebound` / QUIET_REVERSION）已退役**（见 §2.1 + [`steps/step-retire-quiet-reversion.md`](./steps/step-retire-quiet-reversion.md)），唯一活跃入场是 `momentum_follow`。
+> **同日 momentum 入场上沿从 0.67 扩到 0.84**（见 §2.2 + [`steps/step-widen-momentum-band.md`](./steps/step-widen-momentum-band.md)），回测预期成交频率提升 ~10 倍。
 > 实验/影子策略另见 [`strategy-experiments.md`](./strategy-experiments.md)。
 
 ---
@@ -23,11 +25,19 @@
 
 | Regime | 条件 | 路由 |
 |---|---|---|
-| quiet | `abs(dev) ≤ 0.12%` | `evaluate_cheap_rebound` |
+| quiet | `abs(dev) ≤ 0.12%` | ~~`evaluate_cheap_rebound`~~ **已退役**，恒 reject `quiet_reversion_retired` |
 | uncertain | `0.12% < abs(dev) < 0.20%` | reject `regime_uncertain` |
 | momentum | `abs(dev) ≥ 0.20%` | `evaluate_momentum_follow` |
 
-### 2.1 cheap_rebound 入场条件（L77-245）
+> **退役后实际行为**：`abs(dev) ≤ 0.20%` 的所有情况都不再开主仓——quiet 区被退役、uncertain 区本就不交易。即主策略现在**只在 `abs(dev) ≥ 0.20%` 的 momentum 区入场**。这会显著降低成交频率（低波动日可能整天 0 单），是有意取舍：用频率换掉 QR 的负 edge。
+
+### 2.1 cheap_rebound 入场条件 —— ⚠️ 2026-05-26 已退役
+
+> **已退役，主策略不再开 QR 仓。** 净 −$0.51 / 21 仓 / 24% 胜率，与 2026-05-23 退役的 `eth_late_cheap_v1` 同族同负 edge（同打 `QUIET_REVERSION` 标签、同"抄便宜侧赌反弹"思路，只是时间窗早/晚之分）。退役证据 + "不要重蹈的模式" 见 [`steps/step-retire-quiet-reversion.md`](./steps/step-retire-quiet-reversion.md)。
+> 机制：`evaluate_entry` 仍调用 `evaluate_cheap_rebound`（保留 `main_candidates.jsonl` 候选/回放数据），但开关 `strategy.quiet_reversion_enabled`（默认 `false`）关闭时把本应成交的信号改判为 `quiet_reversion_retired`。**代码休眠保留作回放，不要重新启用上实盘。**
+> 以下规则仅作历史记录：
+
+#### （历史）cheap_rebound 原入场条件（L77-245）
 
 | 条件 | 当前规则 |
 |---|---|
@@ -58,7 +68,7 @@
 | 方向选择 | `dev > 0` 买 UP，`dev < 0` 买 DOWN（追强边）|
 | dev 阈值 | `abs(dev) ≥ 0.20%` |
 | spread 过滤 | `≤ 0.01` |
-| 入场价区间 | `0.64 ≤ entry ≤ 0.67` |
+| 入场价区间 | `0.64 ≤ entry ≤ 0.84`（2026-05-26 从 0.64-0.67 扩到 0.64-0.84，见 [`steps/step-widen-momentum-band.md`](./steps/step-widen-momentum-band.md)；0.84 是 TP `min(0.88, E+0.08)` cap 的物理终点）|
 | 非 BTC 加严 | `coin != BTC` 时要求 `abs(dev) ≥ 0.24%` |
 | 挂单价格 | `entry = ask - 0.01` |
 | 单笔成本 | `$1.00` |

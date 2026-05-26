@@ -38,6 +38,8 @@
 > **2026-05-23 退役 `eth_late_cheap_v1`**（原变量名 `trend_experiment`，id 前缀 `L`）。净负、被 `eth_cheap_v1` 严格压制、无可改杠杆。证据与"不要重蹈的模式"见 [`steps/step-retire-eth-late-cheap-v1.md`](./steps/step-retire-eth-late-cheap-v1.md)。dashboard 的 "Trend Follow" tab 一并移除。
 > 真正的 `trend_follow` 在 `trend_v2_experiment` 中跑——2026-05-17 复活，基于历史 148 笔数据分析（详见 [`steps/step-trend-v2-revive.md`](./steps/step-trend-v2-revive.md)）显示其当前 code 在排除事故段后实际为 +$1.44 / 77 笔 / wr 78%。
 
+> **2026-05-26 退役主策略 `QUIET_REVERSION` / `cheap_rebound`**（不是实验、是主策略 regime；这里只作交叉记录）。它是 `eth_late_cheap_v1` 的早窗亲兄弟（同 `QUIET_REVERSION` 标签、同"抄便宜侧赌反弹"），同属"逆势 cheap-value"失败族，净 −$0.51/21 仓/24%。上面那条"不要重蹈的模式"判据同样适用。证据见 [`steps/step-retire-quiet-reversion.md`](./steps/step-retire-quiet-reversion.md)。
+
 ---
 
 ### 2.1 `eth_cheap_v1`（ETH 便宜便宜的逆势加仓）

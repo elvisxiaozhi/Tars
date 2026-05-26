@@ -167,6 +167,7 @@ AppConfig load_config(const std::string& path) {
         cfg.strategy.max_global_trades_per_hour = jint(s, "max_global_trades_per_hour", 2);
         cfg.strategy.max_global_open_positions = jint(s, "max_global_open_positions", 2);
         cfg.strategy.max_quiet_trades_per_hour = jint(s, "max_quiet_trades_per_hour", 2);
+        cfg.strategy.quiet_reversion_enabled = jbool(s, "quiet_reversion_enabled", false);
         if (s.contains("crypto_symbols") && s["crypto_symbols"].is_array()) {
             cfg.strategy.crypto_symbols.clear();
             for (const auto& t : s["crypto_symbols"]) {

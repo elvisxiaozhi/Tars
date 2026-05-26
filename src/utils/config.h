@@ -34,6 +34,9 @@ struct StrategyConfig {
     int max_global_trades_per_hour = 2;
     int max_global_open_positions = 2;
     int max_quiet_trades_per_hour = 2;
+    // QUIET_REVERSION（cheap_rebound）已于 2026-05-26 退役（净负 edge，与 eth_late_cheap_v1 同族）。
+    // 默认 false = 主策略不再开 QR 仓；置 true 可恢复（仅用于回放/复测）。
+    bool quiet_reversion_enabled = false;
 };
 
 struct CoinStrategyConfig {

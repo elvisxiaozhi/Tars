@@ -20,7 +20,8 @@
         "min_volume_24h": 1000.0,
         "max_markets_to_scan": 100,
         "market_filter": "btc-updown",
-        "crypto_symbols": ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB"]
+        "crypto_symbols": ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB"],
+        "quiet_reversion_enabled": false
     },
 
     "experiment": {
