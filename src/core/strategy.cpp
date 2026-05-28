@@ -287,15 +287,17 @@ EntrySignal Strategy::evaluate_momentum_follow(
     }
 
     double entry_price = std::max(0.01, ask - 0.01);
-    // 2026-05-26 上沿从 0.67 扩到 0.84：原 3¢ 窄缝只捕捉行情刚启动的几秒；
-    // 当 BTC 已经移动 >=0.20% 时 favored 侧通常已被定价到 0.70-0.95（新 30h
-    // 错过 786 个 ≥0.85 候选）。回测 71 笔 / 6 天 / 90% 胜率 / EV +$0.084/笔
-    // （真实 TP 模型；不清晰市场 50% 灌回仍 +$0.075；多日均正；BTC-only
-    // 93% 胜率），详见 docs/steps/step-widen-momentum-band.md。
-    // 0.84 是 TP `min(0.88, E+0.08)` cap 决定的物理终点——再往上 TP0 被强行
+    // 2026-05-26 上沿从 0.67 扩到 0.84（全币种）。2026-05-29 实盘 dry-run 复核
+    // （服务器 trades.jsonl，按 entry_time 去重的仓位级口径）发现 BTC trend 的
+    // 0.80-0.84 子带 16 仓 / 56% 胜 / EV −$0.011 / 净 −$0.179，是唯一负 EV 带。
+    // 故把 BTC 上沿收到 0.79（coin-aware）：BTC cap0.79 = 26 仓 / 73% 胜 /
+    // EV +$0.069（较 0.84 的 +$0.038 翻 ~1.8 倍）/ 净 +$1.79。其余币种暂维持
+    // 0.84，按 BTC→XRP→DOGE→ETH 逐个收口（见 momentum-band-postmortem / DECISIONS）。
+    // 0.84 仍是 TP `min(0.88, E+0.08)` cap 决定的物理终点——再往上 TP0 被强行
     // cap 后胜的赔付 < 输的赔付（E=0.88 +$0.011 / E=0.90 −$0.011 "胜也亏"）。
     // 任何想往 0.85+ 扩的人必须先重做 TP 规则。
-    if (entry_price < 0.64 || entry_price > 0.84) {
+    double entry_upper = (coin_ == "BTC") ? 0.79 : 0.84;
+    if (entry_price < 0.64 || entry_price > entry_upper + 1e-9) {
         sig.reject_reason = "momentum_entry_range";
         return sig;
     }
