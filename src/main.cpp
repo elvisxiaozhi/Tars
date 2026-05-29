@@ -442,10 +442,10 @@ int main(int argc, char* argv[]) {
     }
     polymarket::RiskManager risk(cfg);
     polymarket::TradeJournal journal("./logs/trades.jsonl");
-    polymarket::ExperimentEngine experiment(
-        cfg, "eth_cheap_v1", "./logs/experiment_eth_cheap_v1_trades.jsonl", "C");
-    // eth_late_cheap_v1 已于 2026-05-23 退役（净负、被 eth_cheap_v1 严格压制、无可改杠杆）。
-    // 详见 docs/steps/step-retire-eth-late-cheap-v1.md。不要重新实例化。
+    // eth_cheap_v1 已于 2026-05-30 退役（全量 202 仓净 −$11.84/37% 胜率，逆势 cheap-value 失败族
+    // 第 3 例，前两个亲兄弟 eth_late_cheap_v1 / QUIET_REVERSION 已退役）。
+    // 详见 docs/steps/step-retire-eth-cheap-v1.md。evaluate_eth_cheap_v1 代码保留作回放，不要重新实例化。
+    // eth_late_cheap_v1 已于 2026-05-23 退役。详见 docs/steps/step-retire-eth-late-cheap-v1.md。
     polymarket::ExperimentEngine finance_experiment(
         cfg, "finance_updown_v1", "./logs/experiment_finance_updown_v1_trades.jsonl", "F");
     polymarket::ExperimentEngine crypto_4h_experiment(
@@ -969,18 +969,6 @@ int main(int argc, char* argv[]) {
         return j.dump();
     });
 
-    api.on_experiment_status([&]() -> std::string {
-        return experiment.status_json();
-    });
-
-    api.on_experiment_trades([&]() -> std::string {
-        return experiment.trades_json();
-    });
-
-    api.on_experiment_all_trades([&]() -> std::string {
-        return experiment.all_trades_json();
-    });
-
     api.on_finance_experiment_status([&]() -> std::string {
         return finance_experiment.status_json();
     });
@@ -1122,7 +1110,6 @@ int main(int argc, char* argv[]) {
                 if (last_it != last_candle_open_by_coin.end() &&
                     last_it->second != md.candle_open_time) {
                     risk.reset_candle(result.coin);
-                    experiment.reset_candle(result.coin);
                     finance_experiment.reset_candle(result.coin);
                     crypto_4h_experiment.reset_candle(result.coin);
                     crypto_daily_experiment.reset_candle(result.coin);
@@ -1138,7 +1125,6 @@ int main(int argc, char* argv[]) {
             if (last_global_candle_open != 0 && newest_candle_open != 0 &&
                 newest_candle_open != last_global_candle_open) {
                 risk.reset_global_hour();
-                experiment.reset_global_hour();
                 finance_experiment.reset_global_hour();
                 crypto_4h_experiment.reset_global_hour();
                 crypto_daily_experiment.reset_global_hour();
@@ -1536,7 +1522,6 @@ int main(int argc, char* argv[]) {
                 exp_quotes.down_ask = quotes.down_ask;
                 exp_quotes.up_token_id = quotes.up_token_id;
                 exp_quotes.down_token_id = quotes.down_token_id;
-                experiment.on_market(coin, md, entry, exp_quotes, now_ms());
                 trend_v2_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
 
                 if (!entry_window) {
@@ -2074,7 +2059,6 @@ int main(int argc, char* argv[]) {
                 std::remove_if(positions.begin(), positions.end(),
                                [](const polymarket::Position& p) { return p.closed; }),
                 positions.end());
-            experiment.prune_closed();
             finance_experiment.prune_closed();
             crypto_4h_experiment.prune_closed();
             crypto_daily_experiment.prune_closed();

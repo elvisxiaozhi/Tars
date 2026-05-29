@@ -169,7 +169,6 @@ inline const std::string DASHBOARD_HTML = R"html(
 
 <div class="tabs">
   <button class="tab-btn active" data-tab="main">Main Strategy</button>
-  <button class="tab-btn" data-tab="eth-cheap">ETH Cheap</button>
   <button class="tab-btn" data-tab="regime">Trend Follow v2</button>
   <button class="tab-btn" data-tab="crypto-4h">Crypto 4H</button>
   <button class="tab-btn" data-tab="crypto-daily">Crypto Daily</button>
@@ -464,49 +463,6 @@ inline const std::string DASHBOARD_HTML = R"html(
 </details>
 </div>
 
-<div id="tab-eth-cheap" class="tab-panel">
-<details class="section" id="eth-cheap-rules-details">
-  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — ETH Cheap</span></summary>
-  <div style="margin-top:12px;max-width:520px;">
-    <div class="card">
-      <div class="card-title" style="color:#d29922;margin-bottom:8px;">ETH Cheap（ETH only）</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
-        <div>· Coin：ETH only</div>
-        <div>· 时间窗口：剩余 <b>&gt; 30 min</b></div>
-        <div>· |ETH 偏移| ∈ [0.10%, 0.24%]</div>
-        <div>· 入场价：0.20–0.26¢（买较便宜侧）</div>
-        <div>· 价差 ≤ 1¢</div>
-        <div>· 仓位：$1.00（0.25–0.26¢ 档 $0.50）</div>
-        <div style="color:#7d8590;font-size:0.85em;margin-top:6px;">止盈</div>
-        <div>· TP0: 0.42¢(75%)  TP1: 0.62¢(清仓)</div>
-        <div style="color:#f85149;font-size:0.85em;margin-top:6px;">止损</div>
-        <div>· 价格止损 ≤ 入场-7¢</div>
-        <div>· BTC 止损：|偏移| 超出范围 +5%</div>
-        <div>· 时间止损 ≤12min &amp; 峰值 &lt; 0.42¢</div>
-      </div>
-    </div>
-  </div>
-</details>
-<details class="section" id="experiment-details" open>
-  <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>ETH Cheap Experiment</span>
-    <span id="exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
-  </summary>
-  <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="exp-trades-count">--</div></div>
-  </div>
-  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
-  <div id="exp-coin-pnl"></div>
-  <div id="exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="exp-positions" style="margin-top:12px;"></div>
-  <div id="exp-trades" style="margin-top:12px;"></div>
-</details>
-</div>
-
 <div id="tab-crypto-4h" class="tab-panel">
 <details class="section" id="crypto-4h-rules-details">
   <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Crypto 4H Up/Down</span></summary>
@@ -710,7 +666,6 @@ document.addEventListener('DOMContentLoaded', () => {
   persistDetails('ad-direction',          false);
   persistDetails('ad-buckets',            false);
   persistDetails('regime-rules-details',  false);
-  persistDetails('eth-cheap-rules-details', false);
   persistDetails('crypto-4h-rules-details', false);
   persistDetails('crypto-daily-rules-details', false);
   persistDetails('finance-rules-details', false);
@@ -1180,7 +1135,6 @@ function analyticsFromTrades(records) {
 async function refresh() {
   let [
     status, trades,
-    expStatus, expTrades, expAllTrades,
     financeExpStatus, financeExpTrades, financeExpAllTrades,
     crypto4hExpStatus, crypto4hExpTrades, crypto4hExpAllTrades,
     cryptoDailyExpStatus, cryptoDailyExpTrades, cryptoDailyExpAllTrades,
@@ -1188,9 +1142,6 @@ async function refresh() {
   ] = await Promise.all([
     fetchJSON('/api/status'),
     fetchJSON('/api/trades'),
-    fetchJSON('/api/experiment/status'),
-    fetchJSON('/api/experiment/trades'),
-    fetchJSON('/api/experiment/all-trades'),
     fetchJSON('/api/experiment-finance/status'),
     fetchJSON('/api/experiment-finance/trades'),
     fetchJSON('/api/experiment-finance/all-trades'),
@@ -1339,13 +1290,11 @@ async function refresh() {
   });
   const scopedMainTrades = filterByMode(selectScope(sessionAllMainTrades, allMainTrades));
   const mainSummary = summarizeTradeRecords(scopedMainTrades);
-  renderExperiment('exp', expStatus, selectScope(expTrades, expAllTrades));
   renderExperiment('finance-exp', financeExpStatus, selectScope(financeExpTrades, financeExpAllTrades));
   renderExperiment('crypto-4h-exp', crypto4hExpStatus, selectScope(crypto4hExpTrades, crypto4hExpAllTrades));
   renderExperiment('crypto-daily-exp', cryptoDailyExpStatus, selectScope(cryptoDailyExpTrades, cryptoDailyExpAllTrades));
   renderExperiment('trend-v2-exp', trendV2ExpStatus, selectScope(trendV2ExpTrades, trendV2ExpAllTrades));
   renderCoinPnl('main-coin-pnl', filterByMode(sessionAllMainTrades), filterByMode(allMainTrades));
-  renderCoinPnl('exp-coin-pnl', Array.isArray(expTrades) ? expTrades : [], Array.isArray(expAllTrades) ? expAllTrades : (Array.isArray(expTrades) ? expTrades : []));
   renderCoinPnl('finance-exp-coin-pnl', Array.isArray(financeExpTrades) ? financeExpTrades : [], Array.isArray(financeExpAllTrades) ? financeExpAllTrades : (Array.isArray(financeExpTrades) ? financeExpTrades : []));
   renderCoinPnl('crypto-4h-exp-coin-pnl', Array.isArray(crypto4hExpTrades) ? crypto4hExpTrades : [], Array.isArray(crypto4hExpAllTrades) ? crypto4hExpAllTrades : (Array.isArray(crypto4hExpTrades) ? crypto4hExpTrades : []));
   renderCoinPnl('crypto-daily-exp-coin-pnl', Array.isArray(cryptoDailyExpTrades) ? cryptoDailyExpTrades : [], Array.isArray(cryptoDailyExpAllTrades) ? cryptoDailyExpAllTrades : (Array.isArray(cryptoDailyExpTrades) ? cryptoDailyExpTrades : []));

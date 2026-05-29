@@ -23,26 +23,33 @@
 
 ---
 
-## 二、当前活跃的 5 个实验策略
+## 二、当前活跃的 4 个实验策略
 
 ### 总表（按 main.cpp 实例化顺序）
 
 | 变量名 | strategy_name | id 前缀 | 日志文件 | 市场类型 | 评测代码 |
 |---|---|---|---|---|---|
-| `experiment` | `eth_cheap_v1` | `C` | `experiment_eth_cheap_v1_trades.jsonl` | Crypto 1h（仅 ETH） | `evaluate_eth_cheap_v1` (L612) |
 | `finance_experiment` | `finance_updown_v1` | `F` | `experiment_finance_updown_v1_trades.jsonl` | Finance 当日（FIN:SPX/GOLD） | `evaluate_finance_updown_v1` (L909) |
 | `crypto_4h_experiment` | `crypto_4h_updown_v1` | `H` | `experiment_crypto_4h_updown_v1_trades.jsonl` | Crypto 4h | `evaluate_crypto_duration_updown_v1` (L1007, daily=false) |
 | `crypto_daily_experiment` | `crypto_daily_updown_v1` | `D` | `experiment_crypto_daily_updown_v1_trades.jsonl` | Crypto daily | 同上 (daily=true) |
 | **`trend_v2_experiment`** | `trend_follow` | `T` | `experiment_trend_v2_trades.jsonl` | Crypto 1h（仅 BTC/ETH/BNB） | `evaluate_trend_follow` (L329) |
 
-> **2026-05-23 退役 `eth_late_cheap_v1`**（原变量名 `trend_experiment`，id 前缀 `L`）。净负、被 `eth_cheap_v1` 严格压制、无可改杠杆。证据与"不要重蹈的模式"见 [`steps/step-retire-eth-late-cheap-v1.md`](./steps/step-retire-eth-late-cheap-v1.md)。dashboard 的 "Trend Follow" tab 一并移除。
+> **2026-05-30 退役 `eth_cheap_v1`**（原变量名 `experiment`，id 前缀 `C`，原占用 `/api/experiment/*` 路由）。逆势 cheap-value 失败族**第 3 例**，全量服务器日志（202 仓 / 05-16~05-29）净 **−$11.84 / 37% 胜率 / 每仓 −$0.059**。**非肥尾结构**——剔掉最大 2 笔反而 −$14.88，是 `stop_price` 持续放血（81 腿 −$27.83）。05-23 时还约平（+$0.078），W22（05-25~29 ETH 急跌段）单周崩 −$11.60，逆势抄便宜侧在趋势/高波动 regime 被直接碾过。与已退役的 `eth_late_cheap_v1` / `QUIET_REVERSION` 同族同结构，无可改杠杆。证据见 [`steps/step-retire-eth-cheap-v1.md`](./steps/step-retire-eth-cheap-v1.md)。dashboard 的 "ETH Cheap" tab + `/api/experiment/*` 路由一并移除。
+
+> **2026-05-23 退役 `eth_late_cheap_v1`**（原变量名 `trend_experiment`，id 前缀 `L`）。净负、无可改杠杆。证据与"不要重蹈的模式"见 [`steps/step-retire-eth-late-cheap-v1.md`](./steps/step-retire-eth-late-cheap-v1.md)。dashboard 的 "Trend Follow" tab 一并移除。
 > 真正的 `trend_follow` 在 `trend_v2_experiment` 中跑——2026-05-17 复活，基于历史 148 笔数据分析（详见 [`steps/step-trend-v2-revive.md`](./steps/step-trend-v2-revive.md)）显示其当前 code 在排除事故段后实际为 +$1.44 / 77 笔 / wr 78%。
 
 > **2026-05-26 退役主策略 `QUIET_REVERSION` / `cheap_rebound`**（不是实验、是主策略 regime；这里只作交叉记录）。它是 `eth_late_cheap_v1` 的早窗亲兄弟（同 `QUIET_REVERSION` 标签、同"抄便宜侧赌反弹"），同属"逆势 cheap-value"失败族，净 −$0.51/21 仓/24%。上面那条"不要重蹈的模式"判据同样适用。证据见 [`steps/step-retire-quiet-reversion.md`](./steps/step-retire-quiet-reversion.md)。
 
+> ⚠️ **"逆势 cheap-value 失败族"已全员退役**（`eth_cheap_v1` −$11.84/202、`eth_late_cheap_v1` −$0.475/46、`QUIET_REVERSION` −$0.51/21，合计约 **−$12.8 / 269 仓 / ~35% 胜率**）。三者共享同一论点——在 0.20–0.28¢ 抄较便宜侧赌反弹。**不要再以任何变体重做这一族**，便宜侧不反弹是结构性死结、无杠杆可改，且在趋势/高波动 regime（如 05 月末 ETH 急跌）会被放大成大额 `stop_price` 亏损。新 cheap-value 变体上线前必须先在影子样本里证明胜率与每笔均值同时优于全族，否则直接否决。
+
 ---
 
-### 2.1 `eth_cheap_v1`（ETH 便宜便宜的逆势加仓）
+### 2.1 `eth_cheap_v1`（ETH 便宜侧逆势加仓）—— ⚠️ 2026-05-30 已退役
+
+> **已退役，不再实例化。** 逆势 cheap-value 失败族第 3 例：全量 202 仓净 −$11.84 / 37% 胜率 / 每仓 −$0.059，非肥尾结构（剔掉最大 2 笔反而更亏）；`stop_price` 81 腿放血 −$27.83、`no_start_exit` 45 腿 −$8.25（便宜侧压根不反弹）。05-23 还约平，W22 ETH 急跌段单周崩 −$11.60。
+> 退役证据见 [`steps/step-retire-eth-cheap-v1.md`](./steps/step-retire-eth-cheap-v1.md)。
+> 以下规则仅作历史记录；`evaluate_eth_cheap_v1` 代码按惯例保留在 experiment_engine.cpp 作回放参考，**不要重新实例化**。
 
 `evaluate_eth_cheap_v1` @ L612-694
 
@@ -239,9 +246,9 @@
 | `FIN:*`（标普 / 黄金 / WTI …） | `finance_experiment` | L1258-1329 |
 | Crypto 4h 市场 | `crypto_4h_experiment` | L1249-1250 |
 | Crypto daily 市场 | `crypto_daily_experiment` | L1252 |
-| Crypto 1h（常规） | `experiment` + `trend_v2_experiment`（两个同时跑）| L1539-1540 |
+| Crypto 1h（常规） | `trend_v2_experiment`（单 engine）| L1539 |
 
-注意 Crypto 1h 走 **双 engine 并行**——`eth_cheap_v1`、`trend_follow` 用同一份 tick 各自评估。（`eth_late_cheap_v1` 已于 2026-05-23 退役。）
+注意 Crypto 1h 现在只剩 `trend_follow`（`trend_v2_experiment`）一个 engine 评估。曾经的双 engine 并行（`eth_cheap_v1` + `trend_follow`）已随 `eth_cheap_v1` 于 2026-05-30 退役而结束；`eth_late_cheap_v1` 更早于 2026-05-23 退役。
 
 ---
 
@@ -251,7 +258,8 @@
 
 | strategy_name | 历史 jsonl | 说明 |
 |---|---|---|
-| `eth_late_cheap_v1` | `experiment_eth_late_cheap_v1_trades.jsonl` (46 笔) | **2026-05-23 退役**。净负/被 eth_cheap_v1 压制/无杠杆。详 [`steps/step-retire-eth-late-cheap-v1.md`](./steps/step-retire-eth-late-cheap-v1.md) |
+| `eth_cheap_v1` | `experiment_eth_cheap_v1_trades.jsonl` (202 仓) | **2026-05-30 退役**。逆势 cheap-value 失败族第 3 例，净 −$11.84/37% 胜率/非肥尾，W22 ETH 急跌段单周崩 −$11.60。详 [`steps/step-retire-eth-cheap-v1.md`](./steps/step-retire-eth-cheap-v1.md) |
+| `eth_late_cheap_v1` | `experiment_eth_late_cheap_v1_trades.jsonl` (46 笔) | **2026-05-23 退役**。净负/无杠杆。详 [`steps/step-retire-eth-late-cheap-v1.md`](./steps/step-retire-eth-late-cheap-v1.md) |
 | `regime`（默认 `evaluate_entry` L218） | `experiment_trades.jsonl` (14 笔) | 早期三态机（trend/reversal/quiet），现已弃用 |
 | ~~`trend_follow`~~ | `experiment_trend_trades.jsonl` (148 笔) | **2026-05-17 已复活**，新 jsonl `experiment_trend_v2_trades.jsonl`。历史日志保留用作回放参考 |
 | `legacy_cheap_v2` | `experiment_legacy_cheap_v2_trades.jsonl` (27 笔) | legacy_cheap 加分制 v2，5/09 commit 8e3f399 后弃用 |
@@ -295,7 +303,6 @@ ExperimentEngine 内置：
 `localhost:9090` Dashboard 提供 dropdown 切换数据 scope：
 
 - `Main`（`logs/trades.jsonl`，主策略）
-- `Experiment: eth_cheap_v1`
 - `Experiment: finance_updown_v1`
 - `Experiment: crypto_4h_updown_v1`
 - `Experiment: crypto_daily_updown_v1`

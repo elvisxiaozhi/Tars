@@ -615,6 +615,9 @@ EntrySignal ExperimentStrategy::evaluate_legacy_cheap_v2(
     return sig;
 }
 
+// 【已退役 2026-05-30】逆势 cheap-value 失败族第 3 例（全量 202 仓净 −$11.84/37% 胜率），
+// 与已退役的 eth_late_cheap_v1 / QUIET_REVERSION 同族同结构。main.cpp 不再实例化。
+// 代码保留仅作回放参考，不要重新上线。详见 docs/steps/step-retire-eth-cheap-v1.md。
 EntrySignal ExperimentStrategy::evaluate_eth_cheap_v1(
     const BtcMarketData& md,
     const ExperimentQuotes& quotes,

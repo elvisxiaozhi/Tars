@@ -24,9 +24,6 @@ public:
     void on_trades(ApiDataCallback cb);
     void on_stats(ApiDataCallback cb);
     void on_analytics(ApiDataCallback cb);
-    void on_experiment_status(ApiDataCallback cb);
-    void on_experiment_trades(ApiDataCallback cb);
-    void on_experiment_all_trades(ApiDataCallback cb);
     void on_finance_experiment_status(ApiDataCallback cb);
     void on_finance_experiment_trades(ApiDataCallback cb);
     void on_finance_experiment_all_trades(ApiDataCallback cb);
