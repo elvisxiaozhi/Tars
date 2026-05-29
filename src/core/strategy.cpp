@@ -258,11 +258,17 @@ EntrySignal Strategy::evaluate_momentum_follow(
     sig.coin = coin_;
     sig.regime = StrategyRegime::TREND;
 
-    if (coin_ == "SOL") {
-        sig.reject_reason = "momentum_sol_filter";
+    // 2026-05-30 momentum 收口为 BTC-only：跨币复核（dry-run，仓位级）DOGE 全带负 EV
+    // （34 仓 26% 胜 / 净 −2.38）、ETH 打平、XRP 边际正但样本不稳；BTC 是唯一跨时段
+    // 稳定正 EV 的币（66 仓合并 67% 胜 / EV +0.040）。其余币种全部退出 momentum。
+    if (coin_ != "BTC") {
+        sig.reject_reason = "momentum_coin_filter";
         return sig;
     }
-    if (minutes_remaining < 25 || minutes_remaining >= 45) {
+    // 2026-05-30 下沿从 25 收到 35：跨币池化 <35min 入场 36 仓 / 36% 胜 / 净 −1.28
+    // （p=0.018 显著），机制清晰——剩余 <35min 动量来不及走到 TP 就到期结算。BTC 在
+    // 保留带内历史上从无 <35min 入场，故此条对 BTC 回测零影响，是纯防御安全栏。
+    if (minutes_remaining < 35 || minutes_remaining >= 45) {
         sig.reject_reason = "momentum_time_window";
         return sig;
     }
@@ -287,22 +293,14 @@ EntrySignal Strategy::evaluate_momentum_follow(
     }
 
     double entry_price = std::max(0.01, ask - 0.01);
-    // 2026-05-26 上沿从 0.67 扩到 0.84（全币种）。2026-05-29 实盘 dry-run 复核
-    // （服务器 trades.jsonl，按 entry_time 去重的仓位级口径）发现 BTC trend 的
-    // 0.80-0.84 子带 16 仓 / 56% 胜 / EV −$0.011 / 净 −$0.179，是唯一负 EV 带。
-    // 故把 BTC 上沿收到 0.79（coin-aware）：BTC cap0.79 = 26 仓 / 73% 胜 /
-    // EV +$0.069（较 0.84 的 +$0.038 翻 ~1.8 倍）/ 净 +$1.79。其余币种暂维持
-    // 0.84，按 BTC→XRP→DOGE→ETH 逐个收口（见 momentum-band-postmortem / DECISIONS）。
-    // 0.84 仍是 TP `min(0.88, E+0.08)` cap 决定的物理终点——再往上 TP0 被强行
-    // cap 后胜的赔付 < 输的赔付（E=0.88 +$0.011 / E=0.90 −$0.011 "胜也亏"）。
-    // 任何想往 0.85+ 扩的人必须先重做 TP 规则。
-    double entry_upper = (coin_ == "BTC") ? 0.79 : 0.84;
-    if (entry_price < 0.64 || entry_price > entry_upper + 1e-9) {
+    // 入场带 [0.64, 0.79]（BTC-only）。0.79 上沿：2026-05-29 复核 BTC 0.80-0.84
+    // 子带负 EV（合并 66 仓口径下 0.79-0.84 = 50% 胜 / 净 −0.11，最弱带），且 0.84 是
+    // TP `min(0.88, E+0.08)` cap 的物理终点——再往上 TP0 被 cap 后"胜也亏"
+    // （E=0.88 +$0.011 / E=0.90 −$0.011）。任何想往 0.85+ 扩的人必须先重做 TP 规则。
+    // 注：曾考虑砍 0.70-0.74"死区"，但样本扩大后（66 仓）该带回到 56% 胜 / 正 EV，
+    // 证明是小样本噪音，未采纳；入场带保持完整 0.64-0.79 不细切。
+    if (entry_price < 0.64 || entry_price > 0.79 + 1e-9) {
         sig.reject_reason = "momentum_entry_range";
-        return sig;
-    }
-    if (coin_ != "BTC" && abs_dev < 0.24) {
-        sig.reject_reason = "momentum_non_btc_dev_weak";
         return sig;
     }
 
