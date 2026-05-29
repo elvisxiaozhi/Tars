@@ -12,1586 +12,715 @@ inline const std::string DASHBOARD_HTML = R"html(
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Polymarket BTC 1h Bot</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; background: #0a0e17; color: #e0e6ed; padding: 20px; }
-  h1 { font-size: 1.3em; color: #58a6ff; margin-bottom: 8px; }
-  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #1e2d3d; padding-bottom: 12px; }
-  .mode { padding: 4px 12px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
-  .mode-dry { background: #1a3a2a; color: #3fb950; }
-  .mode-live { background: #3a1a1a; color: #f85149; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
-  .card { background: #111827; border: 1px solid #1e2d3d; border-radius: 8px; padding: 16px; }
-  .card-title { font-size: 0.75em; color: #7d8590; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
-  .card-value { font-size: 1.8em; font-weight: bold; }
-  .positive { color: #3fb950; }
-  .negative { color: #f85149; }
-  .neutral { color: #58a6ff; }
-  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
-  .stat { background: #111827; border: 1px solid #1e2d3d; border-radius: 6px; padding: 12px; text-align: center; }
-  .stat-label { font-size: 0.7em; color: #7d8590; margin-bottom: 4px; }
-  .stat-value { font-size: 1.2em; font-weight: bold; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
-  th { text-align: left; padding: 8px 12px; color: #7d8590; font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #1e2d3d; }
-  td { padding: 8px 12px; border-bottom: 1px solid #0d1117; }
-  tr:hover { background: #161b22; }
-  .side-up { color: #3fb950; font-weight: bold; }
-  .side-down { color: #f85149; font-weight: bold; }
-  .section { margin-bottom: 20px; }
-  .section-title { font-size: 0.9em; color: #58a6ff; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #1e2d3d; }
-  details > summary::-webkit-details-marker { display: none; }
-  details[open] > summary > span:first-child::before { content: '▾ '; }
-  details:not([open]) > summary > span:first-child::before { content: '▸ '; }
-  .positions-empty { color: #7d8590; padding: 20px; text-align: center; }
-  .summary-strip { font-size:0.75em; color:#7d8590; margin-bottom:16px; display:flex; flex-wrap:wrap; gap:18px; align-items:center; }
-  .reason-badge { display:inline-block; padding:2px 8px; border-radius:4px; background:#1e2d3d; color:#e0e6ed; font-size:0.9em; white-space:nowrap; }
-  .reason-profit { background:#14351f; color:#56d364; }
-  .reason-risk { background:#3a1a1a; color:#f85149; }
-  .reason-protect { background:#332b13; color:#d29922; }
-  .trade-detail-row td { background:#0d1117; padding:0 12px 12px 12px; }
-  .trade-detail { margin-top:6px; border:1px solid #1e2d3d; border-radius:6px; overflow:hidden; }
-  .trade-detail summary { cursor:pointer; color:#58a6ff; padding:8px 10px; list-style:none; user-select:none; }
-  .trade-detail summary::-webkit-details-marker { display:none; }
-  .trade-detail[open] summary { border-bottom:1px solid #1e2d3d; }
-  .tabs { display:flex; gap:6px; margin:16px 0; border-bottom:1px solid #1e2d3d; }
-  .tab-btn { cursor:pointer; padding:8px 14px; border:1px solid #30363d; border-bottom:none; background:#111827; color:#c9d1d9; border-radius:6px 6px 0 0; font-size:0.85em; }
-  .tab-btn.active { background:#1f6feb; color:#fff; border-color:#388bfd; }
-  .scope-filter, .mode-filter { cursor:pointer; padding:2px 10px; border:1px solid #30363d; background:#21262d; color:#c9d1d9; border-radius:4px; font-size:0.85em; }
-  .tab-panel { display:none; }
-  .tab-panel.active { display:block; }
-  .uptime { font-size: 0.8em; color: #7d8590; }
-  .refresh { font-size: 0.7em; color: #484f58; }
-  .bot-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#484f58; flex-shrink:0; }
-  .bot-status-text { font-size:0.8em; color:#7d8590; }
-  .pnl-bar { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-  .pnl-bar-fill { height: 4px; border-radius: 2px; min-width: 2px; }
-
-  /* === P0/P1/P2 紧凑布局 === */
-  /* metric-row: 顶部一排 8 个紧凑 metric（替代原 grid + stats-grid 双层）*/
-  .metric-row { display: grid; grid-template-columns: repeat(8, 1fr); gap: 1px; background: #1e2d3d; border: 1px solid #1e2d3d; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
-  .metric { background: #111827; padding: 10px 14px; min-height: 64px; display: flex; flex-direction: column; justify-content: center; }
-  .metric-label { font-size: 0.65em; color: #7d8590; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; }
-  .metric-value { font-size: 1.15em; font-weight: bold; line-height: 1.1; }
-  .metric-sub { font-size: 0.65em; color: #7d8590; margin-top: 2px; }
-  .metric-spark { margin-top: 4px; height: 16px; }
-  /* 嵌套 details（Analytics 内子折叠）*/
-  details details { margin-top: 12px; }
-  details details > summary { padding: 6px 0; font-size: 0.85em; color: #58a6ff; cursor: pointer; list-style: none; user-select: none; }
-  /* 响应式：窄屏 metric-row 折叠成 2 行 */
-  @media (max-width: 900px) {
-    .metric-row { grid-template-columns: repeat(4, 1fr); }
-  }
-  @media (max-width: 500px) {
-    .metric-row { grid-template-columns: repeat(2, 1fr); }
-  }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'SF Mono','Menlo','Consolas',monospace; background: #0a0e17; color: #e0e6ed; padding: 20px; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #1e2d3d; padding-bottom: 12px; }
+h1 { font-size: 1.2em; color: #58a6ff; }
+.uptime { font-size: 0.75em; color: #7d8590; margin-top: 4px; }
+.mode { padding: 4px 10px; border-radius: 4px; font-size: 0.82em; font-weight: bold; }
+.mode-dry  { background: #1a3a2a; color: #3fb950; }
+.mode-live { background: #3a1a1a; color: #f85149; }
+.bot-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #484f58; flex-shrink: 0; }
+.bot-status-text { font-size: 0.8em; color: #7d8590; }
+.metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 1px; background: #1e2d3d; border: 1px solid #1e2d3d; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+.metric { background: #111827; padding: 12px 16px; }
+.metric-label { font-size: 0.65em; color: #7d8590; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px; }
+.metric-value { font-size: 1.5em; font-weight: bold; line-height: 1; }
+.metric-sub { font-size: 0.72em; color: #7d8590; margin-top: 4px; }
+.bar { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; background: #111827; border: 1px solid #1e2d3d; border-radius: 6px; padding: 9px 14px; margin-bottom: 10px; font-size: 0.82em; }
+.lbl { color: #484f58; }
+.scope-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.82em; }
+.scope-btn, .filter-btn { cursor: pointer; padding: 3px 12px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; border-radius: 4px; font-size: 0.82em; }
+.scope-btn.active, .filter-btn.active { background: #388bfd; color: #fff; border-color: #388bfd; }
+.tabs { display: flex; gap: 6px; margin-bottom: 16px; border-bottom: 1px solid #1e2d3d; }
+.tab-btn { cursor: pointer; padding: 7px 14px; border: 1px solid #30363d; border-bottom: none; background: #111827; color: #c9d1d9; border-radius: 6px 6px 0 0; font-size: 0.85em; }
+.tab-btn.active { background: #1f6feb; color: #fff; border-color: #388bfd; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+.section { margin-bottom: 18px; }
+.sec-title { font-size: 0.88em; color: #58a6ff; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #1e2d3d; display: flex; align-items: center; gap: 10px; }
+details.dsec > summary { font-size: 0.88em; color: #58a6ff; padding-bottom: 6px; border-bottom: 1px solid #1e2d3d; margin-bottom: 10px; cursor: pointer; list-style: none; user-select: none; display: flex; align-items: center; gap: 6px; }
+details.dsec > summary::-webkit-details-marker { display: none; }
+details.dsec > summary::before { content: '▸ '; }
+details.dsec[open] > summary::before { content: '▾ '; }
+.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+.card { background: #111827; border: 1px solid #1e2d3d; border-radius: 6px; padding: 14px; }
+.card-title { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
+.card-body { font-size: 0.82em; line-height: 1.9; color: #c9d1d9; }
+.card-body .sub { color: #7d8590; font-size: 0.88em; }
+.stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 14px; }
+.stat { background: #111827; border: 1px solid #1e2d3d; border-radius: 6px; padding: 10px; text-align: center; }
+.stat-label { font-size: 0.68em; color: #7d8590; margin-bottom: 4px; }
+.stat-value { font-size: 1.1em; font-weight: bold; }
+table { width: 100%; border-collapse: collapse; font-size: 0.82em; }
+th { text-align: left; padding: 7px 10px; color: #7d8590; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.8px; border-bottom: 1px solid #1e2d3d; }
+td { padding: 7px 10px; border-bottom: 1px solid #0d1117; }
+tr:hover td { background: #161b22; }
+.side-up   { color: #3fb950; font-weight: bold; }
+.side-down { color: #f85149; font-weight: bold; }
+.positive { color: #3fb950; }
+.negative { color: #f85149; }
+.neutral  { color: #58a6ff; }
+.empty { color: #7d8590; padding: 20px; text-align: center; }
+.rb { display: inline-block; padding: 1px 7px; border-radius: 4px; background: #1e2d3d; color: #e0e6ed; font-size: 0.88em; white-space: nowrap; }
+.rb-profit  { background: #14351f; color: #56d364; }
+.rb-risk    { background: #3a1a1a; color: #f85149; }
+.rb-protect { background: #332b13; color: #d29922; }
+.split-row td { background: #0d1117; padding: 0 10px 10px; }
+.split-det { margin-top: 6px; border: 1px solid #1e2d3d; border-radius: 6px; overflow: hidden; }
+.split-det summary { cursor: pointer; color: #58a6ff; padding: 7px 10px; list-style: none; user-select: none; }
+.split-det summary::-webkit-details-marker { display: none; }
+.split-det[open] summary { border-bottom: 1px solid #1e2d3d; }
+@media (max-width: 700px) {
+  .metrics { grid-template-columns: repeat(2,1fr); }
+  .cards   { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: repeat(2,1fr); }
+}
 </style>
 </head>
 <body>
+
 <div class="header">
   <div>
     <h1>Polymarket BTC 1h Bot</h1>
-    <span class="uptime" id="uptime">--</span>
+    <div class="uptime" id="uptime">--</div>
   </div>
-  <div style="display:flex;align-items:center;gap:12px;">
-    <span style="font-size:0.75em;color:#7d8590;">Data</span>
-    <button class="scope-filter" data-scope="session">This Run</button>
-    <button class="scope-filter" data-scope="all">All Time</button>
+  <div style="display:flex;align-items:center;gap:10px;">
     <span class="mode" id="mode-badge">--</span>
-    <span class="refresh" id="refresh-info">auto 5s</span>
     <span class="bot-dot" id="bot-status-dot"></span>
     <span class="bot-status-text" id="bot-status-text">--</span>
-    <button id="bot-control-btn" title="启动 / 停止 bot"
-      style="cursor:pointer;padding:5px 12px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;">
-      --
-    </button>
+    <button id="bot-control-btn" style="cursor:pointer;padding:5px 12px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;">--</button>
   </div>
 </div>
 
-<!-- 顶部 8 metric 紧凑一排（P0-1 + P2-5）-->
-<div class="metric-row">
+<div class="metrics">
+  <div class="metric">
+    <div class="metric-label">Win Rate</div>
+    <div class="metric-value neutral" id="win-rate">--%</div>
+    <div class="metric-sub" id="win-loss">0W / 0L</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Realized P&amp;L</div>
+    <div class="metric-value" id="total-pnl">$0.00</div>
+    <div class="metric-sub" id="pnl-sub">0 trades</div>
+  </div>
   <div class="metric">
     <div class="metric-label">Balance</div>
     <div class="metric-value neutral" id="account-balance">--</div>
     <div class="metric-sub">BTC <span id="btc-price">--</span></div>
   </div>
   <div class="metric">
-    <div class="metric-label">Position Cost</div>
-    <div class="metric-value neutral" id="total-cost">$0.00</div>
+    <div class="metric-label">Open Position</div>
+    <div class="metric-value neutral" id="open-pos">0</div>
     <div class="metric-sub">UPnL <span id="unrealized-pnl">$0.00</span></div>
   </div>
-  <div class="metric">
-    <div class="metric-label">Realized P&L</div>
-    <div class="metric-value" id="total-pnl">$0.00</div>
-    <div class="metric-sub">Scope <span id="daily-pnl">This Run</span></div>
-    <svg class="metric-spark" id="pnl-spark" width="100%" height="16" preserveAspectRatio="none" viewBox="0 0 100 16"></svg>
-  </div>
-  <div class="metric">
-    <div class="metric-label">Win Rate</div>
-    <div class="metric-value neutral" id="win-rate">--%</div>
-    <div class="metric-sub"><span id="win-loss">0W/0L</span> · <span id="total-trades">0</span></div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">Open</div>
-    <div class="metric-value neutral" id="open-pos">0</div>
-    <div class="metric-sub">positions</div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">Volatility</div>
-    <div class="metric-value" id="volatility">--</div>
-    <div class="metric-sub">BTC 1h</div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">Remaining</div>
-    <div class="metric-value" id="remaining">--</div>
-    <div class="metric-sub">candle</div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">Cons Losses</div>
-    <div class="metric-value" id="consec-losses">0</div>
-    <div class="metric-sub">streak</div>
-  </div>
 </div>
 
-<!-- 主市场快照：只保留主交易市场的快速状态，多币种明细在 Markets 表 -->
-<div class="summary-strip">
-  <span style="color:#484f58;">Primary</span>
-  <span id="market-name" style="color:#58a6ff;font-weight:bold;">--</span>
-  <span>BTC dev <span id="btc-dev">--</span></span>
+<div class="scope-row">
+  <span class="lbl">Data:</span>
+  <button class="scope-btn" data-scope="session">This Run</button>
+  <button class="scope-btn" data-scope="all">All Time</button>
+</div>
+
+<div class="bar">
+  <span><span class="lbl">BTC</span> <span id="btc-price-bar">--</span></span>
+  <span><span class="lbl">偏移</span> <span id="btc-dev">--</span></span>
+  <span><span class="lbl">剩余</span> <span id="remaining">--</span> min</span>
+  <span><span class="lbl">WS</span> <span id="clob-ws">--</span></span>
+  <span id="regime-hint" style="font-weight:bold;color:#484f58;">--</span>
+</div>
+
+<div class="bar">
+  <span class="lbl">Primary</span>
+  <span style="color:#58a6ff;font-weight:bold;" id="market-name">--</span>
   <span>UP <span class="positive" id="up-bid">--</span>/<span class="positive" id="up-ask">--</span></span>
   <span>DN <span class="negative" id="down-bid">--</span>/<span class="negative" id="down-ask">--</span></span>
-  <span>WS <span id="clob-ws">--</span></span>
-  <span style="color:#484f58;font-size:0.85em;">(bid/ask)</span>
-</div>
-
-<div class="section">
-  <div class="section-title">Markets</div>
-  <div id="markets-container"></div>
+  <span class="lbl">(bid/ask)</span>
 </div>
 
 <div class="tabs">
-  <button class="tab-btn active" data-tab="main">Main Strategy</button>
+  <button class="tab-btn" data-tab="main">Main Strategy</button>
   <button class="tab-btn" data-tab="regime">Trend Follow v2</button>
   <button class="tab-btn" data-tab="crypto-4h">Crypto 4H</button>
   <button class="tab-btn" data-tab="crypto-daily">Crypto Daily</button>
   <button class="tab-btn" data-tab="finance">Finance</button>
 </div>
 
-<div id="tab-main" class="tab-panel active">
+<!-- ===== Main Tab ===== -->
+<div id="tab-main" class="tab-panel">
+
 <div class="section">
-  <div class="section-title">Coin P&L</div>
+  <div class="sec-title">Coin P&amp;L</div>
   <div id="main-coin-pnl"></div>
 </div>
 
-<!-- Strategy Rules section（默认折叠）-->
-<details class="section" id="strategy-rules-details">
-  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules</span></summary>
-
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;">
-
+<details class="dsec section" id="dd-strategy-rules">
+  <summary>当前策略规则</summary>
+  <div class="cards">
     <div class="card">
-      <div class="card-title" style="color:#58a6ff;margin-bottom:10px;">① Quiet Reversion（低价回弹）</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
-        <div>· Coin：BTC / ETH</div>
-        <div>· 时间窗口：<b>30 &lt; 剩余 &lt; 45 min</b></div>
-        <div>· |BTC偏移| ∈ (0.10%, 0.12%] — 安静市场</div>
-        <div>· 入场价 0.24–0.26¢（ETH 最高 0.30¢）</div>
-        <div>· 价差 ≤ 1¢ · 信心分 ≥ 4</div>
-        <div>· 方向：买<b>较便宜侧</b>（逆偏移方向）</div>
-        <div style="color:#7d8590;font-size:0.85em;margin-top:8px;margin-bottom:4px;">止盈（入场价 &lt; 0.60¢）</div>
-        <div>· TP0: 0.45¢ → 卖 75%</div>
-        <div>· TP1: 0.70¢ → 卖剩余 50%</div>
-        <div>· TP2: 0.88¢ → 清仓</div>
-        <div style="color:#7d8590;font-size:0.85em;margin-top:8px;margin-bottom:4px;">止损</div>
-        <div>· 价格止损：亏损 ≥ 30%</div>
-        <div>· 快速失败：3min 无涨 &amp; 价格 ≤ 入场 -3¢</div>
-        <div>· 死水退出：8min MFE &lt; 2¢ &amp; 浅亏 ≤15%</div>
-        <div>· 最后10min：价格 &lt; 25¢ → 立即清仓</div>
-        <div>· 最后10min：价格 ≥ 80¢ → 持有到期</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title" style="color:#d29922;margin-bottom:10px;">② Momentum Follow（趋势追踪）</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
-        <div>· Coin：BTC / ETH（不含 SOL）</div>
-        <div>· 时间窗口：<b>25 ≤ 剩余 &lt; 45 min</b></div>
-        <div>· |BTC偏移| ≥ 0.20% — 强趋势</div>
-        <div>· 入场价 0.64–0.67¢（已涨方向）</div>
-        <div>· 价差 ≤ 1¢</div>
-        <div>· 方向：<b>顺偏移方向</b>（跟涨/跟跌）</div>
-        <div style="color:#7d8590;font-size:0.85em;margin-top:8px;margin-bottom:4px;">止盈</div>
-        <div>· TP0: entry+8¢（上限 0.88¢）→ 卖 50%</div>
-        <div>· TP1: entry+14¢（上限 0.90¢）→ 卖剩余 50%</div>
-        <div>· TP2: 0.90¢ → 清仓</div>
-        <div style="color:#7d8590;font-size:0.85em;margin-top:8px;margin-bottom:4px;">止损</div>
-        <div>· 价格止损：价格 ≤ 入场 -7¢</div>
+      <div class="card-title" style="color:#d29922;">Momentum Follow — BTC 趋势追踪</div>
+      <div class="card-body">
+        <div class="sub">入场条件</div>
+        <div>· Coin：<b>BTC only</b></div>
+        <div>· 时间窗口：<b>35 ≤ 剩余 &lt; 45 min</b></div>
+        <div>· |BTC偏移| ≥ 0.20%，顺偏移方向</div>
+        <div>· 入场价：0.64 – 0.79¢ &nbsp;·&nbsp; 价差 ≤ 1¢</div>
+        <div class="sub">止盈</div>
+        <div>· TP0: min(0.88, entry+8¢) → 卖 50%</div>
+        <div>· TP1: min(0.90, entry+14¢) → 卖剩余 50%</div>
+        <div class="sub">止损</div>
+        <div>· 价格止损：≤ entry −7¢</div>
         <div>· 动量熄火：偏移反向变化 &gt; 8¢</div>
-        <div>· 最后8min：&lt; 78¢ 或方向反转 → 清仓</div>
-        <div>· 最后5min：&lt; 88¢ 或方向反转 → 清仓</div>
-      </div>
-    </div>
-  </div>
-
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px;">
-    <div class="card">
-      <div class="card-title" style="color:#7d8590;margin-bottom:8px;">禁止区间</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div>|偏移| ∈ (0.12%, 0.20%)</div>
-        <div style="color:#7d8590;">方向不明，不入场</div>
+        <div>· 无启动：2.5min MFE &lt; 3¢ &amp; 浅亏 ≥ 3¢</div>
+        <div>· Trailing MFE≥12¢：max(entry+5¢, peak−4¢)</div>
+        <div>· Trailing MFE≥8¢：max(entry+2¢, peak−5¢)</div>
+        <div>· TP后回落到 entry+2¢ → 保护退出</div>
+        <div>· 最后8min &lt; 78¢ 或方向反转 → 清仓</div>
+        <div>· 最后5min &lt; 88¢ 或方向反转 → 清仓</div>
       </div>
     </div>
     <div class="card">
-      <div class="card-title" style="color:#d29922;margin-bottom:8px;">移动止盈 Trailing</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div>MFE ≥ 15¢ → 止损线 = max(峰-7¢, 入+8¢)</div>
-        <div>MFE ≥ 10¢ → 止损线 = max(峰-8¢, 入+4¢)</div>
-        <div style="color:#7d8590;margin-top:4px;">TP触发后回落到入场+2¢ → 保护退出</div>
+      <div class="card-title" style="color:#f85149;">风控</div>
+      <div class="card-body">
+        <div>· 单仓制：同时最多 1 仓</div>
+        <div>· 本 K 线止损后锁仓到下根 K</div>
+        <div>· 每日亏损上限保护</div>
+        <div class="sub">入场逻辑</div>
+        <div>· BTC 涨 → 买 UP；BTC 跌 → 买 DOWN</div>
+        <div>· 偏移 &lt; 0.20% → 不入场</div>
+        <div>· 不在 35–45min 窗口 → 等待</div>
+        <div class="sub">已退役</div>
+        <div>· Quiet Reversion（逆势低价）→ 退役</div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title" style="color:#f85149;margin-bottom:8px;">风控</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div>单仓制：同时最多 1 仓</div>
-        <div>本 K 线止损后锁仓到下根 K</div>
-        <div>每日亏损上限保护</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 当前 K 线状态 -->
-  <div class="summary-strip" style="margin-top:12px;padding:8px 12px;background:#111827;border:1px solid #1e2d3d;border-radius:6px;">
-    <span style="color:#484f58;">当前状态</span>
-    <span>剩余 <span id="sr-minutes" class="neutral" style="font-weight:bold;">--</span> min</span>
-    <span>偏移 <span id="sr-deviation" class="neutral">--</span></span>
-    <span>波动率 <span id="sr-vol" class="neutral">--</span> / 均值 <span id="sr-avgvol" class="neutral">--</span></span>
-    <span id="sr-regime-hint" style="color:#7d8590;font-weight:bold;">--</span>
   </div>
 </details>
 
-<!-- Open Positions section 仅在有持仓时显示（P1-4）-->
 <div class="section" id="open-positions-section" style="display:none;">
-  <div class="section-title">Open Positions</div>
+  <div class="sec-title">持仓中</div>
   <div id="positions-container"></div>
 </div>
 
-<details class="section" id="trade-history-details">
-  <summary class="section-title" style="display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none;">
-    <span style="user-select:none;">Trade History</span>
-    <span id="th-count" style="font-size:0.75em;font-weight:normal;color:#7d8590;">--</span>
-    <span style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:auto;">filter:</span>
-    <button class="mode-filter" data-filter="all"     style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;" onclick="event.stopPropagation();">All</button>
-    <button class="mode-filter" data-filter="live"    style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;" onclick="event.stopPropagation();">Live</button>
-    <button class="mode-filter" data-filter="dry_run" style="cursor:pointer;padding:2px 10px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;border-radius:4px;" onclick="event.stopPropagation();">Dry</button>
+<details class="dsec section" id="dd-trade-history">
+  <summary>
+    交易记录
+    <span id="th-count" style="font-size:0.85em;font-weight:normal;color:#7d8590;margin-left:4px;"></span>
+    <span style="margin-left:auto;display:flex;gap:6px;" onclick="event.stopPropagation()">
+      <button class="filter-btn" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="live">Live</button>
+      <button class="filter-btn" data-filter="dry_run">Dry</button>
+    </span>
   </summary>
-  <table>
-    <thead>
-      <tr>
-        <th>Time</th>
-        <th>Coin</th>
-        <th>Period</th>
-        <th>Side</th>
-        <th>Entry</th>
-        <th>Exit</th>
-        <th>Shares</th>
-        <th>Cost</th>
-        <th>Revenue</th>
-        <th>Fee</th>
-        <th>Reason</th>
-        <th>P&L</th>
-        <th>MFE</th>
-        <th>MAE</th>
-        <th>Duration</th>
-      </tr>
-    </thead>
-    <tbody id="trades-body">
-      <tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>
-    </tbody>
+  <table style="margin-top:10px;">
+    <thead><tr>
+      <th>时间</th><th>Coin</th><th>方向</th><th>入场</th><th>出场</th><th>成本</th><th>盈亏</th><th>退出原因</th><th>时长</th>
+    </tr></thead>
+    <tbody id="trades-body"><tr><td colspan="9" class="empty">No trades yet</td></tr></tbody>
   </table>
 </details>
 
-<!-- Analytics 整块默认折叠（P0-2），内部分 4 个子 details（P1-3）-->
-<details class="section" id="analytics-details">
-  <summary class="section-title" style="cursor:pointer;list-style:none;"><span>Analytics</span></summary>
+</div><!-- /tab-main -->
 
-  <details id="ad-perf">
-    <summary><span>Performance &amp; MFE/MAE</span></summary>
-    <div class="stats-grid" id="analytics-cards" style="margin-top:8px;">
-      <div class="stat"><div class="stat-label">Avg MFE</div><div class="stat-value positive" id="a-avg-mfe">--</div></div>
-      <div class="stat"><div class="stat-label">Avg MAE</div><div class="stat-value negative" id="a-avg-mae">--</div></div>
-      <div class="stat"><div class="stat-label">MFE:MAE Ratio</div><div class="stat-value neutral" id="a-ratio">--</div></div>
-      <div class="stat"><div class="stat-label">Max MFE</div><div class="stat-value positive" id="a-max-mfe">--</div></div>
-    </div>
-    <div class="stats-grid" id="analytics-duration">
-      <div class="stat"><div class="stat-label">Avg Hold</div><div class="stat-value" id="a-avg-dur">--</div></div>
-      <div class="stat"><div class="stat-label">Min Hold</div><div class="stat-value" id="a-min-dur">--</div></div>
-      <div class="stat"><div class="stat-label">Max Hold</div><div class="stat-value" id="a-max-dur">--</div></div>
-      <div class="stat"><div class="stat-label">Spread (W vs L)</div><div class="stat-value" id="a-spread">--</div></div>
-    </div>
-    <div class="stats-grid" id="analytics-core">
-      <div class="stat"><div class="stat-label">Profit Factor</div><div class="stat-value neutral" id="a-pf">--</div></div>
-      <div class="stat"><div class="stat-label">EV / Trade</div><div class="stat-value" id="a-ev">--</div></div>
-      <div class="stat"><div class="stat-label">Avg Win / Avg Loss</div><div class="stat-value" id="a-wl">--</div></div>
-      <div class="stat"><div class="stat-label">Max Drawdown</div><div class="stat-value negative" id="a-dd">--</div></div>
-    </div>
-    <div class="stats-grid" id="analytics-capture">
-      <div class="stat"><div class="stat-label">MFE Capture (All)</div><div class="stat-value neutral" id="a-cap-all">--</div></div>
-      <div class="stat"><div class="stat-label">MFE Capture (Win)</div><div class="stat-value positive" id="a-cap-win">--</div></div>
-      <div class="stat"><div class="stat-label">MFE Capture (Loss)</div><div class="stat-value negative" id="a-cap-lose">--</div></div>
-      <div class="stat"><div class="stat-label">Trailing Stop Avg</div><div class="stat-value" id="a-ts-avg">--</div></div>
-    </div>
-  </details>
-
-  <details id="ad-distribution">
-    <summary><span>Time &amp; Distribution</span></summary>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;margin-bottom:12px;">
-      <div class="card">
-        <div class="card-title">P&L by Hour (ET)</div>
-        <div id="hour-heatmap" style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-top:8px;"></div>
-      </div>
-      <div class="card">
-        <div class="card-title">Exit Reason Distribution</div>
-        <div id="exit-reasons" style="margin-top:8px;"></div>
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-      <div class="card">
-        <div class="card-title">P&L by Day of Week</div>
-        <div id="day-of-week" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:8px;"></div>
-      </div>
-      <div class="card">
-        <div class="card-title">Streak Analysis</div>
-        <div id="streak-analysis" style="margin-top:8px;font-size:0.85em;"></div>
-      </div>
-    </div>
-  </details>
-
-  <details id="ad-direction">
-    <summary><span>Direction, TP &amp; Equity</span></summary>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;margin-bottom:12px;">
-      <div class="card">
-        <div class="card-title">Direction Analysis (Candle Level)</div>
-        <div id="direction-analysis" style="margin-top:8px;"></div>
-      </div>
-      <div class="card">
-        <div class="card-title">TP Hit Rates (% of candles)</div>
-        <div id="tp-hit-rates" style="margin-top:8px;"></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Equity Curve</div>
-      <div id="equity-curve" style="margin-top:8px;height:160px;position:relative;"></div>
-    </div>
-  </details>
-
-  <details id="ad-buckets">
-    <summary><span>P&amp;L Buckets</span></summary>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;margin-bottom:12px;">
-      <div class="card">
-        <div class="card-title">P&L by Entry Price</div>
-        <div id="entry-price-buckets" style="margin-top:8px;"></div>
-      </div>
-      <div class="card">
-        <div class="card-title">P&L by BTC Deviation</div>
-        <div id="btc-dev-buckets" style="margin-top:8px;"></div>
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-      <div class="card">
-        <div class="card-title">P&L by Hold Duration</div>
-        <div id="duration-buckets" style="margin-top:8px;"></div>
-      </div>
-      <div class="card">
-        <div class="card-title">Trailing Stop vs Price Stop</div>
-        <div id="trailing-vs-stop" style="margin-top:8px;font-size:0.85em;"></div>
-      </div>
-    </div>
-  </details>
-</details>
-</div>
-
+<!-- ===== Trend Follow v2 ===== -->
 <div id="tab-regime" class="tab-panel">
-<details class="section" id="regime-rules-details">
-  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Trend Follow v2</span></summary>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:12px;">
+<details class="dsec section" id="dd-regime-rules">
+  <summary>Strategy Rules — Trend Follow v2</summary>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px;">
     <div class="card">
-      <div class="card-title" style="color:#58a6ff;margin-bottom:8px;">入场条件</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div>· Coin：<b>BTC / ETH / BNB</b></div>
-        <div>· 时间窗口：<b>41 ≤ 剩余 ≤ 45 min</b></div>
-        <div>· |偏移| ≥ 0.18%，方向连续 2 tick 确认</div>
+      <div class="card-title" style="color:#58a6ff;">入场条件</div>
+      <div class="card-body">
+        <div>· Coin：BTC / ETH / BNB</div>
+        <div>· 时间窗口：41 ≤ 剩余 ≤ 45 min</div>
+        <div>· |偏移| ≥ 0.18%，连续 2 tick 确认</div>
         <div>· 入场价：0.64–0.67¢（顺偏移）</div>
-        <div>· 价差 ≤ 1¢ · 信心分 ≥ 4</div>
-        <div>· 仓位：$1.00（DOWN 方向 $1.25）</div>
+        <div>· 价差 ≤ 1¢ · 仓位 $1.00</div>
       </div>
     </div>
     <div class="card">
-      <div class="card-title" style="color:#3fb950;margin-bottom:8px;">止盈</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div>· TP0：entry+10¢ → 卖 50%</div>
-        <div>· TP1：entry+15¢ → 卖 50%</div>
+      <div class="card-title" style="color:#3fb950;">止盈</div>
+      <div class="card-body">
+        <div>· TP0：entry+10¢ → 50%</div>
+        <div>· TP1：entry+15¢ → 50%</div>
         <div>· TP2：0.90¢ → 清仓</div>
       </div>
     </div>
     <div class="card">
-      <div class="card-title" style="color:#f85149;margin-bottom:8px;">止损</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div>· 价格止损：≤ 入场 -10¢</div>
+      <div class="card-title" style="color:#f85149;">止损</div>
+      <div class="card-body">
+        <div>· 价格止损：≤ entry −10¢</div>
         <div>· 偏移穿零 → stop_btc</div>
         <div>· 5min MFE &lt; 3¢ → 死水退出</div>
-        <div>· Trailing：MFE≥15¢→max(入+6¢,峰-5¢)；MFE≥8¢→max(入+2¢,峰-6¢)</div>
+        <div>· Trailing MFE≥15¢：max(入+6¢,峰-5¢)</div>
+        <div>· Trailing MFE≥8¢：max(入+2¢,峰-6¢)</div>
       </div>
     </div>
   </div>
 </details>
-<details class="section" id="trend-v2-experiment-details" open>
-  <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>Trend Follow v2 Experiment</span>
-    <span id="trend-v2-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
-  </summary>
-  <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="trend-v2-exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="trend-v2-exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="trend-v2-exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="trend-v2-exp-trades-count">--</div></div>
+<div class="section">
+  <div class="sec-title">Trend Follow v2 <span id="trend-v2-exp-summary" style="font-size:0.82em;font-weight:normal;color:#7d8590;"></span></div>
+  <div class="stats-grid">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value neutral" id="trend-v2-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&amp;L</div><div class="stat-value" id="trend-v2-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value neutral" id="trend-v2-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value neutral" id="trend-v2-exp-trades-count">--</div></div>
   </div>
-  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
-  <div id="trend-v2-exp-coin-pnl"></div>
-  <div id="trend-v2-exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="trend-v2-exp-positions" style="margin-top:12px;"></div>
-  <div id="trend-v2-exp-trades" style="margin-top:12px;"></div>
-</details>
+  <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="trend-v2-exp-coin-pnl"></div></div>
+  <div id="trend-v2-exp-positions"></div>
+  <div id="trend-v2-exp-trades" style="margin-top:10px;"></div>
+</div>
 </div>
 
+<!-- ===== Crypto 4H ===== -->
 <div id="tab-crypto-4h" class="tab-panel">
-<details class="section" id="crypto-4h-rules-details">
-  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Crypto 4H Up/Down</span></summary>
-  <div style="margin-top:12px;max-width:520px;">
+<details class="dsec section" id="dd-crypto4h-rules">
+  <summary>Strategy Rules — Crypto 4H Up/Down</summary>
+  <div style="margin-top:10px;max-width:500px;">
     <div class="card">
-      <div class="card-title" style="color:#3fb950;margin-bottom:8px;">Crypto 4H Up/Down</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
+      <div class="card-title" style="color:#3fb950;">Crypto 4H Up/Down</div>
+      <div class="card-body">
+        <div class="sub">入场条件</div>
         <div>· Coin：BTC / ETH / SOL / BNB / XRP</div>
-        <div>· 时间窗口：<b>60 ≤ 剩余 ≤ 210 min</b></div>
+        <div>· 时间窗口：60 ≤ 剩余 ≤ 210 min</div>
         <div>· |偏移| ≥ 0.35%（BTC/ETH）/ 0.50%（其他）</div>
-        <div>· 入场价：0.55–0.70¢，顺偏移</div>
-        <div>· 价差 ≤ 2¢ · 仓位 $0.50</div>
-        <div style="color:#3fb950;font-size:0.85em;margin-top:6px;">止盈</div>
+        <div>· 入场价：0.55–0.70¢，顺偏移，仓位 $0.50</div>
+        <div class="sub">止盈 / 止损</div>
         <div>· TP0: entry+8¢(40%)  TP1: entry+15¢(58%)</div>
-        <div style="color:#f85149;font-size:0.85em;margin-top:6px;">止损</div>
-        <div>· 价格止损 ≤ entry-10¢，偏移穿零 → 清仓</div>
-        <div>· 5min 无 MFE → 死水退出</div>
-        <div>· Trailing: MFE≥15¢→max(入+6¢,峰-5¢)；MFE≥8¢→max(入+2¢,峰-6¢)</div>
+        <div>· ≤ entry-10¢，偏移穿零，5min 无 MFE → 死水</div>
+        <div>· Trailing MFE≥15¢：max(入+6¢,峰-5¢)</div>
       </div>
     </div>
   </div>
 </details>
-<details class="section" id="crypto-4h-experiment-details" open>
-  <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>Crypto 4H Up/Down Experiment</span>
-    <span id="crypto-4h-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
-  </summary>
-  <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="crypto-4h-exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="crypto-4h-exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="crypto-4h-exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="crypto-4h-exp-trades-count">--</div></div>
+<div class="section">
+  <div class="sec-title">Crypto 4H <span id="crypto-4h-exp-summary" style="font-size:0.82em;font-weight:normal;color:#7d8590;"></span></div>
+  <div class="stats-grid">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value neutral" id="crypto-4h-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&amp;L</div><div class="stat-value" id="crypto-4h-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value neutral" id="crypto-4h-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value neutral" id="crypto-4h-exp-trades-count">--</div></div>
   </div>
-  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
-  <div id="crypto-4h-exp-coin-pnl"></div>
-  <div id="crypto-4h-exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="crypto-4h-exp-positions" style="margin-top:12px;"></div>
-  <div id="crypto-4h-exp-trades" style="margin-top:12px;"></div>
-</details>
+  <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="crypto-4h-exp-coin-pnl"></div></div>
+  <div id="crypto-4h-exp-positions"></div>
+  <div id="crypto-4h-exp-trades" style="margin-top:10px;"></div>
+</div>
 </div>
 
+<!-- ===== Crypto Daily ===== -->
 <div id="tab-crypto-daily" class="tab-panel">
-<details class="section" id="crypto-daily-rules-details">
-  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Crypto Daily Up/Down</span></summary>
-  <div style="margin-top:12px;max-width:520px;">
+<details class="dsec section" id="dd-cryptodaily-rules">
+  <summary>Strategy Rules — Crypto Daily Up/Down</summary>
+  <div style="margin-top:10px;max-width:500px;">
     <div class="card">
-      <div class="card-title" style="color:#56d364;margin-bottom:8px;">Crypto Daily Up/Down</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
+      <div class="card-title" style="color:#56d364;">Crypto Daily Up/Down</div>
+      <div class="card-body">
+        <div class="sub">入场条件</div>
         <div>· Coin：BTC / ETH / SOL / BNB</div>
-        <div>· 时间窗口：<b>180 ≤ 剩余 ≤ 900 min</b></div>
+        <div>· 时间窗口：180 ≤ 剩余 ≤ 900 min</div>
         <div>· |偏移| ≥ 0.60%（BTC/ETH）/ 0.90%（其他）</div>
-        <div>· 入场价：0.58–0.72¢，顺偏移</div>
-        <div>· 价差 ≤ 2.5¢ · 仓位 $0.50</div>
-        <div style="color:#56d364;font-size:0.85em;margin-top:6px;">止盈</div>
+        <div>· 入场价：0.58–0.72¢，顺偏移，仓位 $0.50</div>
+        <div class="sub">止盈 / 止损</div>
         <div>· TP0: entry+8¢(35%)  TP1: entry+16¢(54%)</div>
-        <div style="color:#f85149;font-size:0.85em;margin-top:6px;">止损</div>
-        <div>· 价格止损 ≤ entry-10¢，偏移穿零 → 清仓</div>
-        <div>· 5min 无 MFE → 死水退出</div>
-        <div>· Trailing: MFE≥15¢→max(入+6¢,峰-5¢)；MFE≥8¢→max(入+2¢,峰-6¢)</div>
+        <div>· ≤ entry-10¢，偏移穿零，5min 无 MFE → 死水</div>
+        <div>· Trailing MFE≥15¢：max(入+6¢,峰-5¢)</div>
       </div>
     </div>
   </div>
 </details>
-<details class="section" id="crypto-daily-experiment-details" open>
-  <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>Crypto Daily Up/Down Experiment</span>
-    <span id="crypto-daily-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
-  </summary>
-  <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="crypto-daily-exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="crypto-daily-exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="crypto-daily-exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="crypto-daily-exp-trades-count">--</div></div>
+<div class="section">
+  <div class="sec-title">Crypto Daily <span id="crypto-daily-exp-summary" style="font-size:0.82em;font-weight:normal;color:#7d8590;"></span></div>
+  <div class="stats-grid">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value neutral" id="crypto-daily-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&amp;L</div><div class="stat-value" id="crypto-daily-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value neutral" id="crypto-daily-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value neutral" id="crypto-daily-exp-trades-count">--</div></div>
   </div>
-  <div class="section-title" style="margin-top:12px;">Coin P&L</div>
-  <div id="crypto-daily-exp-coin-pnl"></div>
-  <div id="crypto-daily-exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="crypto-daily-exp-positions" style="margin-top:12px;"></div>
-  <div id="crypto-daily-exp-trades" style="margin-top:12px;"></div>
-</details>
+  <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="crypto-daily-exp-coin-pnl"></div></div>
+  <div id="crypto-daily-exp-positions"></div>
+  <div id="crypto-daily-exp-trades" style="margin-top:10px;"></div>
+</div>
 </div>
 
+<!-- ===== Finance ===== -->
 <div id="tab-finance" class="tab-panel">
-<details class="section" id="finance-rules-details">
-  <summary class="section-title" style="cursor:pointer;list-style:none;user-select:none;"><span>Strategy Rules — Finance（SPX / GOLD）</span></summary>
-  <div style="margin-top:12px;max-width:520px;">
+<details class="dsec section" id="dd-finance-rules">
+  <summary>Strategy Rules — Finance（SPX / GOLD）</summary>
+  <div style="margin-top:10px;max-width:500px;">
     <div class="card">
-      <div class="card-title" style="color:#58a6ff;margin-bottom:8px;">Finance（SPX / GOLD）</div>
-      <div style="font-size:0.8em;line-height:1.8;color:#c9d1d9;">
-        <div style="color:#7d8590;font-size:0.85em;margin-bottom:4px;">入场条件</div>
-        <div>· 标的：SPX、GOLD</div>
-        <div>· 标题必须含 "up or down"</div>
-        <div>· 时间窗口：20 &lt; 剩余 ≤ 390 min</div>
+      <div class="card-title" style="color:#58a6ff;">Finance（SPX / GOLD）</div>
+      <div class="card-body">
+        <div class="sub">入场条件</div>
+        <div>· 标的：SPX、GOLD  · 时间窗口：20 &lt; 剩余 ≤ 390 min</div>
         <div>· |偏移| ≥ 0.35%（SPX）/ 0.45%（GOLD）</div>
-        <div style="margin-top:6px;color:#7d8590;font-size:0.85em;">Trend 模式（60–330min）</div>
-        <div>· 入场价 0.55–0.72¢，顺偏移，$0.50</div>
+        <div class="sub">Trend 模式（60–330min）</div>
+        <div>· 0.55–0.72¢，顺偏移，$0.50</div>
         <div>· TP0: entry+8¢(50%)  TP1: entry+15¢(50%)</div>
-        <div style="margin-top:6px;color:#7d8590;font-size:0.85em;">极端反转（90–300min，|偏移|≥1.0/1.2%）</div>
-        <div>· 入场价 0.18–0.30¢，逆偏移，$0.25</div>
+        <div class="sub">极端反转（90–300min，|偏移|≥1.0/1.2%）</div>
+        <div>· 0.18–0.30¢，逆偏移，$0.25</div>
         <div>· TP0: entry+10¢(60%)  TP1: entry+20¢(all)</div>
-        <div style="margin-top:6px;color:#f85149;font-size:0.85em;">止损</div>
-        <div>· 价格止损 ≤ entry-10¢，偏移穿零 → 清仓</div>
-        <div>· 5min 无 MFE → 死水退出</div>
+        <div class="sub">止损</div>
+        <div>· ≤ entry-10¢，偏移穿零，5min 无 MFE → 死水</div>
       </div>
     </div>
   </div>
 </details>
-<details class="section" id="finance-experiment-details" open>
-  <summary class="section-title" style="cursor:pointer;list-style:none;">
-    <span>Finance Experiment</span>
-    <span id="finance-exp-summary" style="font-size:0.75em;font-weight:normal;color:#7d8590;margin-left:10px;">--</span>
-  </summary>
-  <div class="stats-grid" style="margin-top:8px;">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value" id="finance-exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&L</div><div class="stat-value" id="finance-exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value" id="finance-exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value" id="finance-exp-trades-count">--</div></div>
+<div class="section">
+  <div class="sec-title">Finance <span id="finance-exp-summary" style="font-size:0.82em;font-weight:normal;color:#7d8590;"></span></div>
+  <div class="stats-grid">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value neutral" id="finance-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&amp;L</div><div class="stat-value" id="finance-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value neutral" id="finance-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value neutral" id="finance-exp-trades-count">--</div></div>
   </div>
-  <div class="section-title" style="margin-top:12px;">Asset P&L</div>
-  <div id="finance-exp-coin-pnl"></div>
-  <div id="finance-exp-regime-stats" style="margin-top:12px;"></div>
-  <div id="finance-exp-positions" style="margin-top:12px;"></div>
-  <div id="finance-exp-trades" style="margin-top:12px;"></div>
-</details>
+  <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Asset P&amp;L</div><div id="finance-exp-coin-pnl"></div></div>
+  <div id="finance-exp-positions"></div>
+  <div id="finance-exp-trades" style="margin-top:10px;"></div>
+</div>
 </div>
 
 <script>
-const API_BASE = '';
 const REFRESH_MS = 5000;
-// 持久化用户偏好（filter / 折叠状态）
 let currentFilter = localStorage.getItem('dashboard.filter') || 'all';
-let currentScope = localStorage.getItem('dashboard.scope') || 'session';
+let currentScope  = localStorage.getItem('dashboard.scope')  || 'session';
 
 document.addEventListener('DOMContentLoaded', () => {
-  const buttons = document.querySelectorAll('.mode-filter');
-  function applyActive(active) {
-    buttons.forEach(b => {
-      const on = b === active;
-      b.style.background = on ? '#388bfd' : '#21262d';
-      b.style.color      = on ? '#ffffff' : '#c9d1d9';
-    });
-  }
-  buttons.forEach(btn => {
-    if (btn.dataset.filter === currentFilter) applyActive(btn);  // 恢复上次选择
-    btn.addEventListener('click', () => {
-      currentFilter = btn.dataset.filter;
-      localStorage.setItem('dashboard.filter', currentFilter);
-      applyActive(btn);
-      if (typeof refresh === 'function') refresh();
-    });
-  });
+  // Scope
+  const scopeBtns = document.querySelectorAll('.scope-btn');
+  function applyScope() { scopeBtns.forEach(b => b.classList.toggle('active', b.dataset.scope === currentScope)); }
+  applyScope();
+  scopeBtns.forEach(btn => btn.addEventListener('click', () => {
+    currentScope = btn.dataset.scope;
+    localStorage.setItem('dashboard.scope', currentScope);
+    applyScope(); refresh();
+  }));
 
-  const scopeButtons = document.querySelectorAll('.scope-filter');
-  function applyScopeActive(activeScope) {
-    scopeButtons.forEach(b => {
-      const on = b.dataset.scope === activeScope;
-      b.style.background = on ? '#388bfd' : '#21262d';
-      b.style.color = on ? '#ffffff' : '#c9d1d9';
-    });
-  }
-  applyScopeActive(currentScope);
-  scopeButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      currentScope = btn.dataset.scope;
-      localStorage.setItem('dashboard.scope', currentScope);
-      applyScopeActive(currentScope);
-      if (typeof refresh === 'function') refresh();
-    });
-  });
+  // Filter
+  const filterBtns = document.querySelectorAll('.filter-btn');
+  function applyFilter() { filterBtns.forEach(b => b.classList.toggle('active', b.dataset.filter === currentFilter)); }
+  applyFilter();
+  filterBtns.forEach(btn => btn.addEventListener('click', () => {
+    currentFilter = btn.dataset.filter;
+    localStorage.setItem('dashboard.filter', currentFilter);
+    applyFilter(); refresh();
+  }));
 
-  const tabButtons = document.querySelectorAll('.tab-btn');
+  // Tabs
+  const tabBtns   = document.querySelectorAll('.tab-btn');
   const tabPanels = document.querySelectorAll('.tab-panel');
   function activateTab(tab) {
-    tabButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
-    tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === 'tab-' + tab));
+    tabBtns.forEach(b  => b.classList.toggle('active', b.dataset.tab === tab));
+    tabPanels.forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
     localStorage.setItem('dashboard.tab', tab);
   }
   const savedTab = localStorage.getItem('dashboard.tab') || 'main';
   activateTab(document.getElementById('tab-' + savedTab) ? savedTab : 'main');
-  tabButtons.forEach(btn => {
-    btn.addEventListener('click', () => activateTab(btn.dataset.tab));
-  });
+  tabBtns.forEach(btn => btn.addEventListener('click', () => activateTab(btn.dataset.tab)));
 
-  // 折叠状态恢复（多个 details）
-  const persistDetails = (id, defaultOpen=false) => {
+  // Details persistence (all collapsed by default)
+  ['dd-strategy-rules','dd-trade-history','dd-regime-rules','dd-crypto4h-rules','dd-cryptodaily-rules','dd-finance-rules'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    const stored = localStorage.getItem('dashboard.' + id + '.open');
-    el.open = stored === null ? defaultOpen : stored === '1';
-    el.addEventListener('toggle', () => {
-      localStorage.setItem('dashboard.' + id + '.open', el.open ? '1' : '0');
-    });
-  };
-  persistDetails('strategy-rules-details', false);
-  persistDetails('trade-history-details', true);   // 主要内容，默认展开
-  persistDetails('analytics-details',     false);
-  persistDetails('ad-perf',               false);
-  persistDetails('ad-distribution',       false);
-  persistDetails('ad-direction',          false);
-  persistDetails('ad-buckets',            false);
-  persistDetails('regime-rules-details',  false);
-  persistDetails('crypto-4h-rules-details', false);
-  persistDetails('crypto-daily-rules-details', false);
-  persistDetails('finance-rules-details', false);
-  persistDetails('experiment-details',    true);
-  persistDetails('finance-experiment-details', true);
-  persistDetails('crypto-4h-experiment-details', true);
-  persistDetails('crypto-daily-experiment-details', true);
-  persistDetails('trend-v2-experiment-details', true);
+    const stored = localStorage.getItem('dd.' + id);
+    el.open = stored === '1';
+    el.addEventListener('toggle', () => localStorage.setItem('dd.' + id, el.open ? '1' : '0'));
+  });
 
-  // Bot 状态 + Start/Stop 按钮（通过 manager 代理控制）
+  // Bot control
   let _botRunning = false;
-
-  function updateBotStatusUI(botStatus) {
+  function updateBotUI(s) {
     const dot  = document.getElementById('bot-status-dot');
     const text = document.getElementById('bot-status-text');
     const btn  = document.getElementById('bot-control-btn');
-    const colors  = { running:'#3fb950', stopped:'#f85149', crashed:'#da3633', starting:'#d29922' };
-    const labels  = { running:'Running',  stopped:'Stopped',  crashed:'Crashed',  starting:'Starting...' };
-    if (dot)  dot.style.background = colors[botStatus] || '#484f58';
-    if (text) text.textContent = labels[botStatus] || botStatus;
-    _botRunning = (botStatus === 'running');
-    if (btn) {
-      if (botStatus === 'running') {
-        btn.textContent = '⏹ Stop Bot';
-        btn.style.cssText = 'cursor:pointer;padding:5px 12px;border:1px solid #6e1a1a;background:#3a1a1a;color:#f85149;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;';
-        btn.disabled = false;
-      } else if (botStatus === 'starting') {
-        btn.textContent = '⏳ Starting...';
-        btn.style.cssText = 'cursor:default;padding:5px 12px;border:1px solid #30363d;background:#21262d;color:#d29922;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;';
-        btn.disabled = true;
-      } else {
-        btn.textContent = '▶ Start Bot';
-        btn.style.cssText = 'cursor:pointer;padding:5px 12px;border:1px solid #2ea043;background:#1a3a2a;color:#3fb950;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;';
-        btn.disabled = false;
-      }
+    const colors = {running:'#3fb950',stopped:'#f85149',crashed:'#da3633',starting:'#d29922'};
+    const labels = {running:'Running',stopped:'Stopped',crashed:'Crashed',starting:'Starting...'};
+    if (dot)  dot.style.background = colors[s] || '#484f58';
+    if (text) text.textContent = labels[s] || s;
+    _botRunning = s === 'running';
+    if (!btn) return;
+    if (s === 'running') {
+      btn.textContent = '⏹ Stop Bot';
+      btn.style.cssText = 'cursor:pointer;padding:5px 12px;border:1px solid #6e1a1a;background:#3a1a1a;color:#f85149;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;';
+      btn.disabled = false;
+    } else if (s === 'starting') {
+      btn.textContent = '⏳ Starting...';
+      btn.style.cssText = 'cursor:default;padding:5px 12px;border:1px solid #30363d;background:#21262d;color:#d29922;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;';
+      btn.disabled = true;
+    } else {
+      btn.textContent = '▶ Start Bot';
+      btn.style.cssText = 'cursor:pointer;padding:5px 12px;border:1px solid #2ea043;background:#1a3a2a;color:#3fb950;border-radius:4px;font-size:0.8em;font-weight:bold;min-width:90px;';
+      btn.disabled = false;
     }
   }
-
-  async function refreshManagerStatus() {
-    try {
-      const r = await fetch('/api/manager/status');
-      if (!r.ok) return;
-      const d = await r.json();
-      updateBotStatusUI(d.bot_status || 'stopped');
-    } catch(e) {}
+  async function pollManager() {
+    try { const r = await fetch('/api/manager/status'); if (r.ok) { const d = await r.json(); updateBotUI(d.bot_status||'stopped'); } } catch(e) {}
   }
-
-  const botControlBtn = document.getElementById('bot-control-btn');
-  if (botControlBtn) {
-    botControlBtn.addEventListener('click', async () => {
-      if (_botRunning) {
-        if (!confirm('确认停止 bot？\n\n会触发 emergency_close_all：\n· cancel 所有未平仓订单\n· SELL FOK 所有持仓平仓\n\n之后程序退出。')) return;
-        botControlBtn.disabled = true;
-        botControlBtn.textContent = '⏳ Stopping...';
-        try { await fetch('/api/shutdown', { method: 'POST' }); } catch(e) {}
-        setTimeout(refreshManagerStatus, 1500);
-        setTimeout(refreshManagerStatus, 3000);
-      } else {
-        botControlBtn.disabled = true;
-        updateBotStatusUI('starting');
-        try {
-          const res = await fetch('/api/start', { method: 'POST' });
-          if (!res.ok) {
-            const d = await res.json().catch(() => ({}));
-            alert('Start failed: ' + (d.error || res.status));
-            updateBotStatusUI('stopped');
-            return;
-          }
-        } catch(e) {
-          alert('Start failed: ' + e.message);
-          updateBotStatusUI('stopped');
-          return;
-        }
-        let attempts = 0;
-        const poll = setInterval(async () => {
-          await refreshManagerStatus();
-          if (_botRunning || ++attempts > 30) clearInterval(poll);
-        }, 1000);
-      }
-    });
-  }
-
-  setInterval(refreshManagerStatus, 3000);
-  refreshManagerStatus();
+  document.getElementById('bot-control-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('bot-control-btn');
+    if (_botRunning) {
+      if (!confirm('确认停止 bot？\n\n会触发 emergency_close_all：\n· cancel 所有未平仓订单\n· SELL FOK 所有持仓平仓\n\n之后程序退出。')) return;
+      btn.disabled = true; btn.textContent = '⏳ Stopping...';
+      try { await fetch('/api/shutdown', {method:'POST'}); } catch(e) {}
+      setTimeout(pollManager,1500); setTimeout(pollManager,3000);
+    } else {
+      btn.disabled = true; updateBotUI('starting');
+      try {
+        const res = await fetch('/api/start', {method:'POST'});
+        if (!res.ok) { const d=await res.json().catch(()=>({})); alert('Start failed: '+(d.error||res.status)); updateBotUI('stopped'); return; }
+      } catch(e) { alert('Start failed: '+e.message); updateBotUI('stopped'); return; }
+      let n = 0;
+      const poll = setInterval(async () => { await pollManager(); if (_botRunning || ++n > 30) clearInterval(poll); }, 1000);
+    }
+  });
+  setInterval(pollManager, 3000);
+  pollManager();
 });
 
-function formatPrice(v) { return v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '--'; }
-function formatPct(v) { return v !== undefined ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '--'; }
-function formatPnl(v) { return (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2); }
-function pnlClass(v) { return v > 0 ? 'positive' : v < 0 ? 'negative' : 'neutral'; }
-function scopeLabel() { return currentScope === 'all' ? 'All Time' : 'This Run'; }
-function selectScope(sessionRecords, allRecords) {
-  const session = Array.isArray(sessionRecords) ? sessionRecords : [];
-  const all = Array.isArray(allRecords) ? allRecords : session;
-  return currentScope === 'all' ? all : session;
-}
-function filterByMode(records) {
-  const rows = Array.isArray(records) ? records : [];
-  if (currentFilter === 'all') return rows;
-  return rows.filter(t => (t.mode || 'dry_run') === currentFilter);
-}
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[c]));
-}
+// --- Helpers ---
+function fmtPrice(v) { return v ? '$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '--'; }
+function fmtPct(v)   { return v !== undefined ? (v>=0?'+':'')+v.toFixed(2)+'%' : '--'; }
+function fmtPnl(v)   { return (v>=0?'+$':'-$')+Math.abs(v).toFixed(2); }
+function pnlCls(v)   { return v>0?'positive':v<0?'negative':'neutral'; }
+function fmtDur(s)   { return Math.floor(s/60)+'m'+(s%60)+'s'; }
+function fmtTime(ms) { if (!ms) return '--'; return new Date(ms).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
+function esc(s) { return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function inferCoin(t) {
   if (t.coin) return String(t.coin).toUpperCase();
-  const m = (t.market || '').toLowerCase();
+  const m = (t.market||'').toLowerCase();
   if (m.includes('ethereum')) return 'ETH';
-  if (m.includes('solana')) return 'SOL';
-  if (m.includes('xrp')) return 'XRP';
+  if (m.includes('solana'))   return 'SOL';
+  if (m.includes('xrp'))      return 'XRP';
   if (m.includes('dogecoin')) return 'DOGE';
-  if (m.includes('bnb')) return 'BNB';
-  if (m.includes('hype')) return 'HYPE';
+  if (m.includes('bnb'))      return 'BNB';
   return 'BTC';
 }
-function normalizeTradeId(id) {
-  return String(id || '--').replace(/-TP\d+$/i, '');
+function normalizeId(id) { return String(id||'--').replace(/-TP\d+$/i,''); }
+function periodKey(t) {
+  const coin = inferCoin(t), mkt = String(t.market||'').trim();
+  if (mkt) return coin+'|'+mkt;
+  const ts = t.entry_time||t.exit_time||0;
+  return coin+'|'+(ts ? Math.floor(ts/3600000) : normalizeId(t.id));
 }
-function tradePeriodKey(t) {
-  const coin = inferCoin(t);
-  const market = String(t.market || '').trim();
-  if (market) return coin + '|' + market;
-  const ts = t.entry_time || t.exit_time || 0;
-  const bucket = ts ? Math.floor(ts / 3600000) : normalizeTradeId(t.id);
-  return coin + '|hour|' + bucket;
-}
-function shortMarketLabel(market, fallbackTime) {
-  const text = String(market || '').trim();
-  if (!text) return fallbackTime ? formatTime(fallbackTime) : '--';
-  const cleaned = text
-    .replace(/^will\s+/i, '')
-    .replace(/\s+be\s+above\s+/i, ' > ')
-    .replace(/\s+on\s+/i, ' ')
-    .replace(/\?/g, '');
-  return cleaned.length > 38 ? cleaned.slice(0, 35) + '...' : cleaned;
-}
-function reasonInfo(reason) {
-  const r = String(reason || '').toLowerCase();
+function reasonInfo(r) {
+  const key = String(r||'').toLowerCase();
   const map = {
-    tp0: ['第一档止盈', 'reason-profit'],
-    tp1: ['第二档止盈', 'reason-profit'],
-    tp2: ['最终止盈', 'reason-profit'],
-    tp_filled: ['止盈成交', 'reason-profit'],
-    stop_price: ['价格止损', 'reason-risk'],
-    stop_btc: ['方向反转止损', 'reason-risk'],
-    stop_time: ['临近结算撤退', 'reason-risk'],
-    expired: ['到期结算', 'reason-protect'],
-    trailing_stop: ['移动止盈回撤', 'reason-protect'],
-    dead_water_exit: ['长时间无利润退出', 'reason-protect'],
-    emergency_close: ['紧急平仓', 'reason-risk'],
-    manual_close: ['手动平仓', 'reason-protect'],
-    partial_exit: ['分批卖出', 'reason-profit']
+    tp0:['TP0 止盈','rb-profit'],tp1:['TP1 止盈','rb-profit'],tp2:['TP2 止盈','rb-profit'],
+    tp_filled:['止盈成交','rb-profit'],partial_exit:['分批卖出','rb-profit'],
+    stop_price:['价格止损','rb-risk'],stop_btc:['方向反转','rb-risk'],
+    stop_time:['临近结算','rb-risk'],emergency_close:['紧急平仓','rb-risk'],
+    trailing_stop:['移动止盈','rb-protect'],dead_water_exit:['死水退出','rb-protect'],
+    no_start_exit:['无启动退出','rb-protect'],qr_breakeven_trail:['保本出场','rb-protect'],
+    expired:['到期结算','rb-protect'],manual_close:['手动平仓','rb-protect']
   };
-  return map[r] || [reason || '--', ''];
+  return map[key]||[r||'--',''];
 }
-function renderReason(reason) {
-  const [label, cls] = reasonInfo(reason);
-  return '<span class="reason-badge ' + cls + '" title="' + (reason || '') + '">' + label + '</span>';
-}
-function summarizeTradeGroup(items) {
-  const sorted = items.slice().sort((a, b) => (a.exit_time || 0) - (b.exit_time || 0));
-  const first = sorted[0] || {};
-  const coin = inferCoin(first);
-  const shares = sorted.reduce((s, t) => s + (t.shares || 0), 0);
-  const cost = sorted.reduce((s, t) => s + ((t.shares || 0) * (t.entry_price || 0)), 0);
-  const revenue = sorted.reduce((s, t) => s + ((t.shares || 0) * (t.exit_price || 0)), 0);
-  const fee = sorted.reduce((s, t) => s + (t.fee || 0), 0);
-  const pnl = sorted.reduce((s, t) => s + (t.pnl || 0), 0);
-  const avgEntry = shares > 0 ? cost / shares : (first.entry_price || 0);
-  const avgExit = shares > 0 ? revenue / shares : (first.exit_price || 0);
-  const maxPrice = Math.max(...sorted.map(t => t.max_price || t.entry_price || 0));
-  const minPrice = Math.min(...sorted.map(t => t.min_price || t.entry_price || 0));
-  const start = first.entry_time || sorted[0]?.exit_time || 0;
-  const end = sorted[sorted.length - 1]?.exit_time || start;
-  const reasons = [...new Set(sorted.map(t => t.exit_reason || '').filter(Boolean))];
-  const sides = [...new Set(sorted.map(t => t.side || '').filter(Boolean))];
-  const market = first.market || '';
-  return {
-    id: normalizeTradeId(first.id),
-    label: sorted.length > 1
-      ? coin + ' · ' + shortMarketLabel(market, start) + ' · ' + sorted.length + ' sells'
-      : normalizeTradeId(first.id),
-    coin,
-    side: sides.length === 1 ? sides[0] : 'MIXED',
-    market,
-    entry_price: avgEntry,
-    exit_price: avgExit,
-    shares,
-    cost,
-    revenue,
-    fee,
-    pnl,
-    max_price: maxPrice,
-    min_price: minPrice,
-    entry_time: start,
-    exit_time: end,
-    hold_duration_sec: Math.max(0, Math.floor((end - start) / 1000)),
-    exit_reason: reasons.length === 1 ? reasons[0] : 'partial_exit',
-    items: sorted
-  };
+function renderReason(r) { const [l,c]=reasonInfo(r); return '<span class="rb '+c+'" title="'+esc(r||'')+'">'+l+'</span>'; }
+function summarizeGroup(items) {
+  const sorted = items.slice().sort((a,b)=>(a.exit_time||0)-(b.exit_time||0));
+  const first = sorted[0]||{};
+  const coin   = inferCoin(first);
+  const shares = sorted.reduce((s,t)=>s+(t.shares||0),0);
+  const cost   = sorted.reduce((s,t)=>s+(t.shares||0)*(t.entry_price||0),0);
+  const pnl    = sorted.reduce((s,t)=>s+(t.pnl||0),0);
+  const avgEntry = shares>0 ? cost/shares : (first.entry_price||0);
+  const avgExit  = shares>0 ? sorted.reduce((s,t)=>s+(t.shares||0)*(t.exit_price||0),0)/shares : (first.exit_price||0);
+  const start  = first.entry_time||sorted[0]?.exit_time||0;
+  const end    = sorted[sorted.length-1]?.exit_time||start;
+  const sides   = [...new Set(sorted.map(t=>t.side||'').filter(Boolean))];
+  const reasons = [...new Set(sorted.map(t=>t.exit_reason||'').filter(Boolean))];
+  return { coin, side:sides.length===1?sides[0]:'MIXED', entry_price:avgEntry, exit_price:avgExit, cost, pnl,
+    entry_time:start, exit_time:end, hold_sec:Math.max(0,Math.floor((end-start)/1000)),
+    exit_reason:reasons.length===1?reasons[0]:'partial_exit', items:sorted };
 }
 function groupTrades(records) {
-  const groupedMap = new Map();
-  for (const t of records || []) {
-    const key = tradePeriodKey(t);
-    if (!groupedMap.has(key)) groupedMap.set(key, []);
-    groupedMap.get(key).push(t);
-  }
-  return Array.from(groupedMap.values()).map(summarizeTradeGroup);
+  const map = new Map();
+  for (const t of records||[]) { const k=periodKey(t); if (!map.has(k)) map.set(k,[]); map.get(k).push(t); }
+  return Array.from(map.values()).map(summarizeGroup);
 }
-function summarizeTradeRecords(records) {
-  const groups = groupTrades(records);
-  const pnl = groups.reduce((s, g) => s + (g.pnl || 0), 0);
-  const wins = groups.filter(g => (g.pnl || 0) > 0).length;
-  const losses = groups.filter(g => (g.pnl || 0) < 0).length;
-  const closed = wins + losses;
-  return {
-    groups,
-    pnl,
-    wins,
-    losses,
-    total: groups.length,
-    winRate: closed > 0 ? wins / closed * 100 : 0,
-    avgPnl: groups.length > 0 ? pnl / groups.length : 0
-  };
+function filterByMode(recs) {
+  if (currentFilter==='all') return Array.isArray(recs)?recs:[];
+  return (Array.isArray(recs)?recs:[]).filter(t=>(t.mode||'dry_run')===currentFilter);
 }
-function formatTime(ms) {
-  if (!ms) return '--';
-  const d = new Date(ms);
-  return d.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+function selectScope(session, all) {
+  return currentScope==='all' ? (Array.isArray(all)?all:(Array.isArray(session)?session:[])) : (Array.isArray(session)?session:[]);
 }
-
 async function fetchJSON(path) {
-  try { const r = await fetch(API_BASE + path); return await r.json(); }
-  catch(e) { return null; }
+  try { const r=await fetch(path); return await r.json(); } catch(e) { return null; }
 }
 
-function fmtDur(s) { return Math.floor(s/60) + 'm' + (s%60) + 's'; }
-
-// mini sparkline: 给 SVG 元素填一条 polyline，最后点决定颜色（正绿负红）
-function renderSparkline(svgId, values) {
-  const svg = document.getElementById(svgId);
-  if (!svg) return;
-  if (!values || values.length < 2) { svg.innerHTML = ''; return; }
-  const min = Math.min(...values), max = Math.max(...values);
-  const range = max - min || 1;
-  const w = 100, h = 16;
-  let path = '';
-  for (let i = 0; i < values.length; i++) {
-    const x = (i / (values.length - 1)) * w;
-    const y = h - ((values[i] - min) / range) * h;
-    path += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
-  }
-  const last = values[values.length - 1];
-  const color = last >= 0 ? '#3fb950' : '#f85149';
-  svg.innerHTML = '<path d="' + path.trim() + '" stroke="' + color + '" stroke-width="1.4" fill="none"/>';
-}
-
-function renderExperiment(prefix, expStatus, expTrades) {
-  const tradeSummary = summarizeTradeRecords(expTrades || []);
-  if (expStatus) {
-    const expSummary = document.getElementById(prefix + '-summary');
-    if (expSummary) expSummary.textContent = (expStatus.enabled ? (expStatus.strategy || 'regime') : 'disabled') + ' · ' + scopeLabel();
-    document.getElementById(prefix + '-balance').textContent = '$' + Number(expStatus.balance || 0).toFixed(2);
-    const expPnl = document.getElementById(prefix + '-pnl');
-    expPnl.textContent = formatPnl(tradeSummary.pnl || 0);
-    expPnl.className = 'stat-value ' + pnlClass(tradeSummary.pnl || 0);
-    document.getElementById(prefix + '-open').textContent = expStatus.open_positions || 0;
-    document.getElementById(prefix + '-trades-count').textContent = tradeSummary.total || 0;
-
-    const regimeEl = document.getElementById(prefix + '-regime-stats');
-    if (regimeEl) {
-      let html = '<table><thead><tr><th>Regime</th><th>Trades</th><th>Win Rate</th><th>P&L</th></tr></thead><tbody>';
-      const stats = {};
-      for (const g of tradeSummary.groups) {
-        const regime = (g.items && g.items[0] && g.items[0].regime) || 'none';
-        if (!stats[regime]) stats[regime] = { trades: 0, wins: 0, losses: 0, pnl: 0 };
-        stats[regime].trades += 1;
-        stats[regime].pnl += g.pnl || 0;
-        if ((g.pnl || 0) > 0) stats[regime].wins += 1;
-        if ((g.pnl || 0) < 0) stats[regime].losses += 1;
-      }
-      const keys = Object.keys(stats);
-      if (keys.length === 0) {
-        html += '<tr><td colspan="4" style="text-align:center;color:#7d8590;">No experiment trades yet</td></tr>';
-      } else {
-        for (const k of keys) {
-          const s = stats[k] || {};
-          const closed = (s.wins || 0) + (s.losses || 0);
-          const wr = closed > 0 ? (s.wins / closed * 100) : 0;
-          html += '<tr><td>' + k + '</td><td>' + (s.trades || 0) + '</td><td>' + wr.toFixed(1) + '%</td><td class="' + pnlClass(s.pnl || 0) + '">' + formatPnl(s.pnl || 0) + '</td></tr>';
-        }
-      }
-      html += '</tbody></table>';
-      regimeEl.innerHTML = html;
-    }
-
-    const expPosEl = document.getElementById(prefix + '-positions');
-    if (expPosEl) {
-      const positions = expStatus.positions || [];
-      if (positions.length === 0) {
-        expPosEl.innerHTML = '<div class="positions-empty">No experiment positions</div>';
-      } else {
-        let html = '<table><thead><tr><th>ID</th><th>Coin</th><th>Market</th><th>Regime</th><th>Side</th><th>Entry</th><th>Current</th><th>Remaining</th><th>MFE</th></tr></thead><tbody>';
-        for (const p of positions) {
-          html += '<tr><td>' + p.id + '</td><td>' + p.coin + '</td><td title="' + esc(p.market || '') + '">' + esc(shortMarketLabel(p.market || '', 0)) + '</td><td>' + p.regime + '</td><td class="side-' + String(p.side).toLowerCase() + '">' + p.side + '</td><td>' + Number(p.entry_price || 0).toFixed(3) + '</td><td>' + Number(p.current_price || 0).toFixed(3) + '</td><td>' + Number((p.remaining_pct || 0) * 100).toFixed(0) + '%</td><td class="positive">+' + Number(((p.max_price || 0) - (p.entry_price || 0)) * 100).toFixed(1) + 'c</td></tr>';
-        }
-        html += '</tbody></table>';
-        expPosEl.innerHTML = html;
-      }
-    }
-  }
-
-  if (expTrades) {
-    const expTradesEl = document.getElementById(prefix + '-trades');
-    if (expTradesEl) {
-      let html = '<table><thead><tr><th>Time</th><th>Coin</th><th>Regime</th><th>Side</th><th>Entry</th><th>Exit</th><th>Reason</th><th>P&L</th></tr></thead><tbody>';
-      if (expTrades.length === 0) {
-        html += '<tr><td colspan="8" style="text-align:center;color:#7d8590;">No experiment trades yet</td></tr>';
-      } else {
-        for (const t of expTrades.slice().reverse().slice(0, 30)) {
-          html += '<tr><td>' + formatTime(t.exit_time || t.entry_time) + '</td><td>' + (t.coin || '--') + '</td><td>' + (t.regime || '') + '</td><td class="side-' + String(t.side).toLowerCase() + '">' + t.side + '</td><td>' + Number(t.entry_price || 0).toFixed(3) + '</td><td>' + Number(t.exit_price || 0).toFixed(3) + '</td><td>' + renderReason(t.exit_reason) + '</td><td class="' + pnlClass(t.pnl || 0) + '">' + formatPnl(t.pnl || 0) + '</td></tr>';
-        }
-      }
-      html += '</tbody></table>';
-      expTradesEl.innerHTML = html;
-    }
-  }
-}
-
-function renderCoinPnl(containerId, sessionTrades, allTrades) {
-  const el = document.getElementById(containerId);
-  if (!el) return;
-
-  function aggregate(records) {
-    const grouped = new Map();
-    for (const t of records || []) {
-      const key = tradePeriodKey(t);
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key).push(t);
-    }
-
-    const byCoin = new Map();
-    for (const items of grouped.values()) {
-      const summary = summarizeTradeGroup(items);
-      const coin = summary.coin || 'BTC';
-      if (!byCoin.has(coin)) {
-        byCoin.set(coin, { coin, pnl: 0, positions: 0, wins: 0, losses: 0, volume: 0 });
-      }
-      const row = byCoin.get(coin);
-      row.pnl += summary.pnl || 0;
-      row.positions += 1;
-      row.volume += summary.cost || 0;
-      if ((summary.pnl || 0) > 0) row.wins += 1;
-      if ((summary.pnl || 0) < 0) row.losses += 1;
-    }
-    return byCoin;
-  }
-
-  const scoped = aggregate(selectScope(sessionTrades, allTrades));
-  const coins = Array.from(scoped.keys()).sort();
-  if (coins.length === 0) {
-    el.innerHTML = '<div class="positions-empty">No closed trades yet</div>';
-    return;
-  }
-
-  let html = '<div class="summary-strip" style="margin-bottom:8px;"><span style="color:#484f58;">Scope</span><span>' + scopeLabel() + '</span></div>';
-  html += '<table><thead><tr><th>Coin</th><th>P&L</th><th>Entries</th><th>Win Rate</th><th>Avg P&L</th></tr></thead><tbody>';
-  for (const coin of coins) {
-    const s = scoped.get(coin) || { pnl: 0, positions: 0, wins: 0, losses: 0 };
-    const closed = s.wins + s.losses;
-    const wr = closed > 0 ? (s.wins / closed * 100).toFixed(1) + '%' : '--';
-    const avg = s.positions > 0 ? s.pnl / s.positions : 0;
-    html += '<tr>';
-    html += '<td style="font-weight:bold;color:#58a6ff;">' + esc(coin) + '</td>';
-    html += '<td class="' + pnlClass(s.pnl) + '">' + formatPnl(s.pnl) + '</td>';
-    html += '<td>' + s.positions + '</td>';
-    html += '<td>' + wr + '</td>';
-    html += '<td class="' + pnlClass(avg) + '">' + formatPnl(avg) + '</td>';
-    html += '</tr>';
-  }
-  html += '</tbody></table>';
-  el.innerHTML = html;
-}
-
-function analyticsFromTrades(records) {
-  const groups = groupTrades(records || []);
-  if (groups.length === 0) return { has_data: false };
-  const values = groups.map(g => g.pnl || 0);
-  const wins = values.filter(v => v > 0);
-  const losses = values.filter(v => v < 0);
-  const grossWin = wins.reduce((a, b) => a + b, 0);
-  const grossLoss = Math.abs(losses.reduce((a, b) => a + b, 0));
-  const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
-  const mfeVals = groups.map(g => Math.max(0, (g.max_price || g.entry_price || 0) - (g.entry_price || 0)));
-  const maeVals = groups.map(g => Math.max(0, (g.entry_price || 0) - (g.min_price || g.entry_price || 0)));
-  const hours = {};
-  for (let h = 0; h < 24; h++) hours[String(h)] = { count: 0, total_pnl: 0, avg_pnl: 0 };
-  const days = {};
-  for (const d of ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']) days[d] = { count: 0, total_pnl: 0, avg_pnl: 0 };
-  const exits = {};
-  const direction = { UP: {count:0,wins:0,total_pnl:0,avg_pnl:0,win_rate:0}, DOWN: {count:0,wins:0,total_pnl:0,avg_pnl:0,win_rate:0} };
-  const equity = [];
-  let balance = 0, peak = 0, maxDd = 0;
-  for (const g of groups.slice().sort((a,b)=>(a.exit_time||0)-(b.exit_time||0))) {
-    const d = new Date(g.exit_time || g.entry_time || 0);
-    const h = d.getHours();
-    const dn = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
-    hours[String(h)].count++; hours[String(h)].total_pnl += g.pnl || 0;
-    days[dn].count++; days[dn].total_pnl += g.pnl || 0;
-    exits[g.exit_reason || 'unknown'] = (exits[g.exit_reason || 'unknown'] || 0) + 1;
-    if (direction[g.side]) {
-      direction[g.side].count++;
-      direction[g.side].total_pnl += g.pnl || 0;
-      if ((g.pnl || 0) > 0) direction[g.side].wins++;
-    }
-    balance += g.pnl || 0;
-    peak = Math.max(peak, balance);
-    maxDd = Math.max(maxDd, peak - balance);
-    equity.push({ time: g.exit_time || g.entry_time || 0, balance });
-  }
-  for (const h of Object.values(hours)) h.avg_pnl = h.count ? h.total_pnl / h.count : 0;
-  for (const d of Object.values(days)) d.avg_pnl = d.count ? d.total_pnl / d.count : 0;
-  for (const s of Object.values(direction)) {
-    s.avg_pnl = s.count ? s.total_pnl / s.count : 0;
-    s.win_rate = s.count ? s.wins / s.count * 100 : 0;
-  }
-  const bucket = () => ({ count: 0, wins: 0, sum_pnl: 0, avg_pnl: 0, win_rate: 0 });
-  const entryBuckets = {'<=0.18':bucket(),'0.18-0.24':bucket(),'0.24-0.30':bucket(),'>0.30':bucket()};
-  const devBuckets = {'low':bucket(),'mid':bucket(),'high':bucket()};
-  const durBuckets = {'<10m':bucket(),'10-20m':bucket(),'20m+':bucket()};
+function renderCoinPnl(elId, records) {
+  const el = document.getElementById(elId); if (!el) return;
+  const groups = groupTrades(records||[]);
+  const byCoin = new Map();
   for (const g of groups) {
-    const add = (b) => { b.count++; if ((g.pnl||0)>0) b.wins++; b.sum_pnl += g.pnl || 0; };
-    add(g.entry_price <= 0.18 ? entryBuckets['<=0.18'] : g.entry_price <= 0.24 ? entryBuckets['0.18-0.24'] : g.entry_price <= 0.30 ? entryBuckets['0.24-0.30'] : entryBuckets['>0.30']);
-    const dev = Math.abs((g.items && g.items[0] && g.items[0].btc_deviation_pct) || 0);
-    add(dev < 0.15 ? devBuckets.low : dev < 0.30 ? devBuckets.mid : devBuckets.high);
-    const mins = (g.hold_duration_sec || 0) / 60;
-    add(mins < 10 ? durBuckets['<10m'] : mins < 20 ? durBuckets['10-20m'] : durBuckets['20m+']);
+    if (!byCoin.has(g.coin)) byCoin.set(g.coin,{pnl:0,n:0,wins:0,losses:0});
+    const r = byCoin.get(g.coin);
+    r.pnl+=g.pnl; r.n++;
+    if (g.pnl>0) r.wins++; else if (g.pnl<0) r.losses++;
   }
-  for (const map of [entryBuckets, devBuckets, durBuckets]) {
-    for (const b of Object.values(map)) {
-      b.avg_pnl = b.count ? b.sum_pnl / b.count : 0;
-      b.win_rate = b.count ? b.wins / b.count * 100 : 0;
+  if (byCoin.size===0) { el.innerHTML='<div class="empty">No closed trades yet</div>'; return; }
+  let html='<table><thead><tr><th>Coin</th><th>P&L</th><th>Entries</th><th>Win Rate</th><th>EV</th></tr></thead><tbody>';
+  for (const [coin,s] of [...byCoin].sort((a,b)=>a[0].localeCompare(b[0]))) {
+    const closed=s.wins+s.losses;
+    html+='<tr><td style="font-weight:bold;color:#58a6ff;">'+esc(coin)+'</td>';
+    html+='<td class="'+pnlCls(s.pnl)+'">'+fmtPnl(s.pnl)+'</td>';
+    html+='<td>'+s.n+'</td>';
+    html+='<td>'+(closed>0?(s.wins/closed*100).toFixed(1)+'%':'--')+'</td>';
+    html+='<td class="'+pnlCls(s.pnl/s.n)+'">'+fmtPnl(s.pnl/s.n)+'</td></tr>';
+  }
+  el.innerHTML=html+'</tbody></table>';
+}
+
+function renderExperiment(prefix, expStatus, records) {
+  const groups = groupTrades(records||[]);
+  const wins=groups.filter(g=>g.pnl>0).length, losses=groups.filter(g=>g.pnl<0).length;
+  const closed=wins+losses, pnl=groups.reduce((s,g)=>s+g.pnl,0);
+  const wr=closed>0?(wins/closed*100).toFixed(1)+'%':'--';
+  const summaryEl=document.getElementById(prefix+'-summary');
+  if (summaryEl) summaryEl.textContent=wr+(expStatus?' · '+(expStatus.strategy||'exp'):'');
+  if (expStatus) {
+    document.getElementById(prefix+'-balance').textContent='$'+Number(expStatus.balance||0).toFixed(2);
+    const pe=document.getElementById(prefix+'-pnl'); pe.textContent=fmtPnl(pnl); pe.className='stat-value '+pnlCls(pnl);
+    document.getElementById(prefix+'-open').textContent=expStatus.open_positions||0;
+    document.getElementById(prefix+'-trades-count').textContent=groups.length;
+    const posEl=document.getElementById(prefix+'-positions');
+    if (posEl) {
+      const positions=expStatus.positions||[];
+      if (!positions.length) { posEl.innerHTML=''; }
+      else {
+        let h='<table><thead><tr><th>Coin</th><th>Side</th><th>Entry</th><th>Current</th><th>MFE</th></tr></thead><tbody>';
+        for (const p of positions) {
+          h+='<tr><td style="color:#58a6ff;font-weight:bold;">'+esc(p.coin||'--')+'</td>';
+          h+='<td class="side-'+String(p.side).toLowerCase()+'">'+p.side+'</td>';
+          h+='<td>'+Number(p.entry_price||0).toFixed(3)+'</td><td>'+Number(p.current_price||0).toFixed(3)+'</td>';
+          h+='<td class="positive">+'+Number(((p.max_price||0)-(p.entry_price||0))*100).toFixed(1)+'c</td></tr>';
+        }
+        posEl.innerHTML=h+'</tbody></table>';
+      }
     }
   }
-  const trailing = groups.filter(g => g.exit_reason === 'trailing_stop').map(g => g.pnl || 0);
-  const priceStops = groups.filter(g => g.exit_reason === 'stop_price').map(g => g.pnl || 0);
-  return {
-    has_data: true,
-    mfe_mae: { avg_mfe: avg(mfeVals), avg_mae: avg(maeVals), max_mfe: Math.max(...mfeVals, 0), ratio: avg(maeVals) > 0 ? avg(mfeVals) / avg(maeVals) : 0 },
-    duration: { avg: Math.round(avg(groups.map(g => g.hold_duration_sec || 0))), min: Math.min(...groups.map(g => g.hold_duration_sec || 0)), max: Math.max(...groups.map(g => g.hold_duration_sec || 0)) },
-    spread: { avg_spread_winners: 0, avg_spread_losers: 0 },
-    hours, days, exit_reasons: exits, streak: { after_2loss_avg_pnl: 0, after_2loss_count: 0, normal_avg_pnl: avg(values), normal_count: groups.length },
-    profit_factor: grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? 99 : 0,
-    ev_per_trade: avg(values), avg_win: avg(wins), avg_loss: avg(losses), win_loss_ratio: Math.abs(avg(losses)) > 0 ? avg(wins) / Math.abs(avg(losses)) : 0,
-    max_drawdown: maxDd, max_drawdown_pct: 0,
-    mfe_capture: { avg: 0, avg_winners: 0, avg_losers: 0 },
-    trailing_stop_stats: { count: trailing.length, avg_pnl: avg(trailing), stop_price_avg_pnl: avg(priceStops) },
-    direction, tp_hit_rates: Object.fromEntries(Object.entries(exits).map(([k,v]) => [k, {count:v, pct:v/groups.length*100}])),
-    equity_curve: equity,
-    entry_price_buckets: entryBuckets, btc_deviation_buckets: devBuckets, duration_buckets: durBuckets
-  };
+  renderCoinPnl(prefix+'-coin-pnl', records);
+  const tradesEl=document.getElementById(prefix+'-trades');
+  if (tradesEl) {
+    const recent=groups.slice().sort((a,b)=>(b.exit_time||0)-(a.exit_time||0)).slice(0,30);
+    if (!recent.length) { tradesEl.innerHTML='<div class="empty">No trades yet</div>'; return; }
+    let h='<table><thead><tr><th>时间</th><th>Coin</th><th>方向</th><th>入场</th><th>出场</th><th>盈亏</th><th>退出原因</th></tr></thead><tbody>';
+    for (const t of recent) {
+      h+='<tr><td>'+fmtTime(t.exit_time||t.entry_time)+'</td>';
+      h+='<td style="color:#58a6ff;font-weight:bold;">'+esc(t.coin)+'</td>';
+      h+='<td class="side-'+String(t.side).toLowerCase()+'">'+esc(t.side)+'</td>';
+      h+='<td>'+t.entry_price.toFixed(3)+'</td><td>'+t.exit_price.toFixed(3)+'</td>';
+      h+='<td class="'+pnlCls(t.pnl)+'">'+fmtPnl(t.pnl)+'</td><td>'+renderReason(t.exit_reason)+'</td></tr>';
+    }
+    tradesEl.innerHTML=h+'</tbody></table>';
+  }
 }
 
 async function refresh() {
-  let [
+  const [
     status, trades,
-    financeExpStatus, financeExpTrades, financeExpAllTrades,
-    crypto4hExpStatus, crypto4hExpTrades, crypto4hExpAllTrades,
-    cryptoDailyExpStatus, cryptoDailyExpTrades, cryptoDailyExpAllTrades,
-    trendV2ExpStatus, trendV2ExpTrades, trendV2ExpAllTrades
+    tvStatus,  tvTrades,  tvAll,
+    c4hStatus, c4hTrades, c4hAll,
+    cdStatus,  cdTrades,  cdAll,
+    finStatus, finTrades, finAll
   ] = await Promise.all([
-    fetchJSON('/api/status'),
-    fetchJSON('/api/trades'),
-    fetchJSON('/api/experiment-finance/status'),
-    fetchJSON('/api/experiment-finance/trades'),
-    fetchJSON('/api/experiment-finance/all-trades'),
-    fetchJSON('/api/experiment-crypto-4h/status'),
-    fetchJSON('/api/experiment-crypto-4h/trades'),
-    fetchJSON('/api/experiment-crypto-4h/all-trades'),
-    fetchJSON('/api/experiment-crypto-daily/status'),
-    fetchJSON('/api/experiment-crypto-daily/trades'),
-    fetchJSON('/api/experiment-crypto-daily/all-trades'),
-    fetchJSON('/api/experiment-trend-v2/status'),
-    fetchJSON('/api/experiment-trend-v2/trades'),
-    fetchJSON('/api/experiment-trend-v2/all-trades')
+    fetchJSON('/api/status'), fetchJSON('/api/trades'),
+    fetchJSON('/api/experiment-trend-v2/status'),    fetchJSON('/api/experiment-trend-v2/trades'),    fetchJSON('/api/experiment-trend-v2/all-trades'),
+    fetchJSON('/api/experiment-crypto-4h/status'),   fetchJSON('/api/experiment-crypto-4h/trades'),   fetchJSON('/api/experiment-crypto-4h/all-trades'),
+    fetchJSON('/api/experiment-crypto-daily/status'),fetchJSON('/api/experiment-crypto-daily/trades'),fetchJSON('/api/experiment-crypto-daily/all-trades'),
+    fetchJSON('/api/experiment-finance/status'),     fetchJSON('/api/experiment-finance/trades'),     fetchJSON('/api/experiment-finance/all-trades'),
   ]);
 
   if (status) {
-    const badge = document.getElementById('mode-badge');
-    badge.textContent = status.mode === 'live' ? 'LIVE' : 'DRY RUN';
-    badge.className = 'mode ' + (status.mode === 'live' ? 'mode-live' : 'mode-dry');
-
-    document.getElementById('account-balance').textContent = '$' + status.account_balance.toFixed(2);
-    document.getElementById('btc-price').textContent = formatPrice(status.btc_price);
-    const devEl = document.getElementById('btc-dev');
-    devEl.textContent = formatPct(status.btc_deviation_pct);
-    devEl.className = status.btc_deviation_pct >= 0 ? 'positive' : 'negative';
-
-    // 当前 market + UP/DN quotes
-    const fmtPrice = v => (v && v > 0) ? v.toFixed(3) : '--';
-    document.getElementById('market-name').textContent = status.market_question || '(no active market)';
-    document.getElementById('up-bid').textContent   = fmtPrice(status.up_bid);
-    document.getElementById('up-ask').textContent   = fmtPrice(status.up_ask);
-    document.getElementById('down-bid').textContent = fmtPrice(status.down_bid);
-    document.getElementById('down-ask').textContent = fmtPrice(status.down_ask);
-    const wsEl = document.getElementById('clob-ws');
-    if (wsEl) {
-      wsEl.textContent = (status.clob_ws_connected ? 'on' : 'off') + '/' + (status.clob_ws_subscribed || 0);
-      wsEl.className = status.clob_ws_connected ? 'positive' : 'negative';
-    }
-
-    const marketsContainer = document.getElementById('markets-container');
-    if (marketsContainer && status.markets && status.markets.length > 0) {
-      let mhtml = '<table><thead><tr><th>Coin</th><th>Market</th><th>Dev</th><th>Remaining</th><th>UP Bid/Ask</th><th>DN Bid/Ask</th></tr></thead><tbody>';
-      for (const m of status.markets) {
-        const dev = m.deviation_pct || 0;
-        mhtml += '<tr>';
-        mhtml += '<td style="font-weight:bold;color:#58a6ff;">' + (m.coin || '--') + '</td>';
-        mhtml += '<td>' + (m.question || '--') + '</td>';
-        mhtml += '<td class="' + (dev >= 0 ? 'positive' : 'negative') + '">' + formatPct(dev) + '</td>';
-        mhtml += '<td>' + (m.minutes_remaining ?? '--') + 'min</td>';
-        mhtml += '<td><span class="positive">' + fmtPrice(m.up_bid) + '</span>/<span class="positive">' + fmtPrice(m.up_ask) + '</span></td>';
-        mhtml += '<td><span class="negative">' + fmtPrice(m.down_bid) + '</span>/<span class="negative">' + fmtPrice(m.down_ask) + '</span></td>';
-        mhtml += '</tr>';
-      }
-      mhtml += '</tbody></table>';
-      marketsContainer.innerHTML = mhtml;
-    } else if (marketsContainer) {
-      let reason = 'No market loaded';
-      if ((status.loaded_market_count || 0) > 0) {
-        reason = 'No market in entry window or quotes not ready';
-      }
-      marketsContainer.innerHTML = '<div class="positions-empty">' + reason + '</div>';
-    }
-
-    document.getElementById('total-cost').textContent = '$' + status.total_cost.toFixed(2);
-    const upnlEl = document.getElementById('unrealized-pnl');
-    upnlEl.textContent = formatPnl(status.unrealized_pnl);
-    upnlEl.className = pnlClass(status.unrealized_pnl);
-
-    document.getElementById('remaining').textContent = status.minutes_remaining + 'min';
-    const volEl = document.getElementById('volatility');
-    volEl.textContent = (status.current_vol * 100).toFixed(2) + '%';
-    volEl.className = status.current_vol > status.avg_vol ? 'positive' : 'neutral';
-
-    document.getElementById('open-pos').textContent = status.open_positions;
-    document.getElementById('consec-losses').textContent = status.consecutive_losses;
-    document.getElementById('uptime').textContent = 'Uptime: ' + status.uptime + ' | Tick #' + status.tick_count;
-
-    // Strategy Rules 动态状态
-    const srMin = document.getElementById('sr-minutes');
-    const srDev = document.getElementById('sr-deviation');
-    const srVol = document.getElementById('sr-vol');
-    const srAvgVol = document.getElementById('sr-avgvol');
-    const srHint = document.getElementById('sr-regime-hint');
-    if (srMin) srMin.textContent = status.minutes_remaining;
-    if (srDev) {
-      srDev.textContent = formatPct(status.btc_deviation_pct);
-      srDev.className = pnlClass(status.btc_deviation_pct);
-    }
-    if (srVol)    srVol.textContent    = (status.current_vol * 100).toFixed(2) + '%';
-    if (srAvgVol) srAvgVol.textContent = (status.avg_vol    * 100).toFixed(2) + '%';
-    if (srHint) {
-      const min  = status.minutes_remaining || 0;
-      const absD = Math.abs(status.btc_deviation_pct || 0);
-      if (min <= 0 || min > 55) {
-        srHint.textContent = '等待下一根 K 线';
-        srHint.style.color = '#484f58';
-      } else if (absD <= 0.12 && min > 30 && min < 45) {
-        srHint.textContent = '▶ 符合 Quiet Reversion 窗口';
-        srHint.style.color = '#58a6ff';
-      } else if (absD >= 0.20 && min >= 25 && min < 45) {
-        srHint.textContent = '▶ 符合 Momentum Follow 窗口';
-        srHint.style.color = '#d29922';
-      } else if (absD > 0.12 && absD < 0.20) {
-        srHint.textContent = '⛔ 偏移在禁止区间 (0.12–0.20%)';
-        srHint.style.color = '#f85149';
-      } else {
-        srHint.textContent = '⏳ 不在入场时间窗口';
-        srHint.style.color = '#484f58';
-      }
-    }
-
-    // Positions — 仅有持仓时显示整个 section（P1-4）
-    const posSection   = document.getElementById('open-positions-section');
-    const posContainer = document.getElementById('positions-container');
-    if (status.positions && status.positions.length > 0) {
-      let html = '<table><thead><tr><th>ID</th><th>Coin</th><th>Outcome</th><th>Regime</th><th>Entry</th><th>Current</th><th>Shares</th><th>Unrealized P&L</th><th>TP Progress</th><th>MFE</th><th>MAE</th></tr></thead><tbody>';
+    const badge=document.getElementById('mode-badge');
+    badge.textContent=status.mode==='live'?'LIVE':'DRY RUN';
+    badge.className='mode '+(status.mode==='live'?'mode-live':'mode-dry');
+    document.getElementById('uptime').textContent='Uptime: '+(status.uptime||'--')+' · Tick #'+(status.tick_count||0);
+    document.getElementById('account-balance').textContent='$'+Number(status.account_balance||0).toFixed(2);
+    document.getElementById('btc-price').textContent=fmtPrice(status.btc_price);
+    document.getElementById('btc-price-bar').textContent=fmtPrice(status.btc_price);
+    const devEl=document.getElementById('btc-dev');
+    devEl.textContent=fmtPct(status.btc_deviation_pct); devEl.className=(status.btc_deviation_pct||0)>=0?'positive':'negative';
+    document.getElementById('remaining').textContent=status.minutes_remaining??'--';
+    const wsEl=document.getElementById('clob-ws');
+    wsEl.textContent=status.clob_ws_connected?'on':'off'; wsEl.className=status.clob_ws_connected?'positive':'negative';
+    const fmtP=v=>(v&&v>0)?v.toFixed(3):'--';
+    document.getElementById('market-name').textContent=status.market_question||'(no active market)';
+    document.getElementById('up-bid').textContent=fmtP(status.up_bid);
+    document.getElementById('up-ask').textContent=fmtP(status.up_ask);
+    document.getElementById('down-bid').textContent=fmtP(status.down_bid);
+    document.getElementById('down-ask').textContent=fmtP(status.down_ask);
+    const hintEl=document.getElementById('regime-hint');
+    const min=status.minutes_remaining||0, absD=Math.abs(status.btc_deviation_pct||0);
+    if (min<=0||min>55)                   { hintEl.textContent='⏳ 等待下一根 K 线'; hintEl.style.color='#484f58'; }
+    else if (absD>=0.20&&min>=35&&min<45) { hintEl.textContent='▶ Momentum 入场窗口'; hintEl.style.color='#d29922'; }
+    else if (absD<0.20&&min>=35&&min<45)  { hintEl.textContent='⛔ 偏移不足 0.20%'; hintEl.style.color='#7d8590'; }
+    else                                   { hintEl.textContent='⏳ 不在入场时间窗口'; hintEl.style.color='#484f58'; }
+    document.getElementById('open-pos').textContent=status.open_positions||0;
+    const upnlEl=document.getElementById('unrealized-pnl');
+    upnlEl.textContent=fmtPnl(status.unrealized_pnl||0); upnlEl.className=pnlCls(status.unrealized_pnl||0);
+    const posSection=document.getElementById('open-positions-section');
+    const posCont=document.getElementById('positions-container');
+    if (status.positions&&status.positions.length>0) {
+      let h='<table><thead><tr><th>Coin</th><th>方向</th><th>入场价</th><th>当前价</th><th>份数</th><th>UPnL</th><th>MFE</th><th>MAE</th></tr></thead><tbody>';
       for (const p of status.positions) {
-        const upnl = (p.current_price - p.entry_price) * p.shares * p.remaining_pct;
-        const coin = p.coin || inferCoin(p);
-        html += '<tr>';
-        html += '<td>' + p.id + '</td>';
-        html += '<td style="font-weight:bold;color:#58a6ff;">' + coin + '</td>';
-        html += '<td class="side-' + p.side.toLowerCase() + '">' + coin + ' ' + p.side + '</td>';
-        html += '<td>' + (p.regime || '--') + '</td>';
-        html += '<td>' + p.entry_price.toFixed(3) + '</td>';
-        html += '<td>' + p.current_price.toFixed(3) + '</td>';
-        html += '<td>' + p.shares.toFixed(0) + '</td>';
-        html += '<td class="' + pnlClass(upnl) + '">' + formatPnl(upnl) + '</td>';
-        html += '<td>' + ((1 - p.remaining_pct) * 100).toFixed(0) + '% sold</td>';
-        html += '<td class="positive">+' + (p.mfe * 100).toFixed(1) + 'c</td>';
-        html += '<td class="negative">-' + (p.mae * 100).toFixed(1) + 'c</td>';
-        html += '</tr>';
+        const upnl=(p.current_price-p.entry_price)*p.shares*p.remaining_pct;
+        h+='<tr><td style="font-weight:bold;color:#58a6ff;">'+(p.coin||inferCoin(p))+'</td>';
+        h+='<td class="side-'+p.side.toLowerCase()+'">'+p.side+'</td>';
+        h+='<td>'+p.entry_price.toFixed(3)+'</td><td>'+p.current_price.toFixed(3)+'</td><td>'+p.shares.toFixed(0)+'</td>';
+        h+='<td class="'+pnlCls(upnl)+'">'+fmtPnl(upnl)+'</td>';
+        h+='<td class="positive">+'+(p.mfe*100).toFixed(1)+'c</td><td class="negative">-'+(p.mae*100).toFixed(1)+'c</td></tr>';
       }
-      html += '</tbody></table>';
-      posContainer.innerHTML = html;
-      if (posSection) posSection.style.display = '';
-    } else {
-      if (posSection) posSection.style.display = 'none';
-    }
+      posCont.innerHTML=h+'</tbody></table>'; posSection.style.display='';
+    } else { posSection.style.display='none'; }
   }
 
-  const allMainTrades = Array.isArray(trades) ? trades : [];
-  const startTime = status ? Number(status.start_time || 0) : 0;
-  const sessionAllMainTrades = allMainTrades.filter(t => {
-    const ts = Number(t.exit_time || t.entry_time || 0);
-    return !startTime || !ts || ts >= startTime;
-  });
-  const scopedMainTrades = filterByMode(selectScope(sessionAllMainTrades, allMainTrades));
-  const mainSummary = summarizeTradeRecords(scopedMainTrades);
-  renderExperiment('finance-exp', financeExpStatus, selectScope(financeExpTrades, financeExpAllTrades));
-  renderExperiment('crypto-4h-exp', crypto4hExpStatus, selectScope(crypto4hExpTrades, crypto4hExpAllTrades));
-  renderExperiment('crypto-daily-exp', cryptoDailyExpStatus, selectScope(cryptoDailyExpTrades, cryptoDailyExpAllTrades));
-  renderExperiment('trend-v2-exp', trendV2ExpStatus, selectScope(trendV2ExpTrades, trendV2ExpAllTrades));
-  renderCoinPnl('main-coin-pnl', filterByMode(sessionAllMainTrades), filterByMode(allMainTrades));
-  renderCoinPnl('finance-exp-coin-pnl', Array.isArray(financeExpTrades) ? financeExpTrades : [], Array.isArray(financeExpAllTrades) ? financeExpAllTrades : (Array.isArray(financeExpTrades) ? financeExpTrades : []));
-  renderCoinPnl('crypto-4h-exp-coin-pnl', Array.isArray(crypto4hExpTrades) ? crypto4hExpTrades : [], Array.isArray(crypto4hExpAllTrades) ? crypto4hExpAllTrades : (Array.isArray(crypto4hExpTrades) ? crypto4hExpTrades : []));
-  renderCoinPnl('crypto-daily-exp-coin-pnl', Array.isArray(cryptoDailyExpTrades) ? cryptoDailyExpTrades : [], Array.isArray(cryptoDailyExpAllTrades) ? cryptoDailyExpAllTrades : (Array.isArray(cryptoDailyExpTrades) ? cryptoDailyExpTrades : []));
-  renderCoinPnl('trend-v2-exp-coin-pnl', Array.isArray(trendV2ExpTrades) ? trendV2ExpTrades : [], Array.isArray(trendV2ExpAllTrades) ? trendV2ExpAllTrades : (Array.isArray(trendV2ExpTrades) ? trendV2ExpTrades : []));
-
-  const pnlEl = document.getElementById('total-pnl');
-  pnlEl.textContent = formatPnl(mainSummary.pnl);
-  pnlEl.className = 'card-value ' + pnlClass(mainSummary.pnl);
-  document.getElementById('daily-pnl').textContent = scopeLabel();
-  document.getElementById('win-rate').textContent = mainSummary.winRate.toFixed(1) + '%';
-  document.getElementById('win-loss').textContent = mainSummary.wins + 'W / ' + mainSummary.losses + 'L';
-  document.getElementById('total-trades').textContent = mainSummary.total;
-
-  if (allMainTrades.length > 0) {
-    const tbody = document.getElementById('trades-body');
-    let html = '';
-    const filtered = scopedMainTrades;
-    const thCount = document.getElementById('th-count');
-
-    // P&L mini sparkline（cum P&L 按 exit_time 排序）
-    let cum = 0;
-    const sparkData = filtered.slice()
-      .sort((a, b) => (a.exit_time || 0) - (b.exit_time || 0))
-      .map(t => (cum += (t.pnl || 0)));
-    renderSparkline('pnl-spark', sparkData);
-
-    const groups = groupTrades(filtered)
-      .sort((a, b) => (b.exit_time || 0) - (a.exit_time || 0));
-    if (thCount) thCount.textContent = scopeLabel() + ' · ' + groups.length + ' entries / ' + filtered.length + ' exits';
-
-    if (groups.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades for current filter</td></tr>';
-    }
-
+  const allTrades=Array.isArray(trades)?trades:[];
+  const startTime=status?Number(status.start_time||0):0;
+  const sessionTrades=allTrades.filter(t=>{ const ts=Number(t.exit_time||t.entry_time||0); return !startTime||!ts||ts>=startTime; });
+  const scoped=filterByMode(selectScope(sessionTrades,allTrades));
+  const groups=groupTrades(scoped).sort((a,b)=>(b.exit_time||0)-(a.exit_time||0));
+  const wins=groups.filter(g=>g.pnl>0).length, losses=groups.filter(g=>g.pnl<0).length;
+  const closed=wins+losses, totalPnl=groups.reduce((s,g)=>s+g.pnl,0);
+  const winRate=closed>0?wins/closed*100:0;
+  const wrEl=document.getElementById('win-rate');
+  wrEl.textContent=closed>0?winRate.toFixed(1)+'%':'--%';
+  wrEl.className='metric-value '+(closed===0?'neutral':winRate>=50?'positive':'negative');
+  document.getElementById('win-loss').textContent=wins+'W / '+losses+'L';
+  const pnlEl=document.getElementById('total-pnl');
+  pnlEl.textContent=fmtPnl(totalPnl); pnlEl.className='metric-value '+pnlCls(totalPnl);
+  document.getElementById('pnl-sub').textContent=groups.length+' trades · EV '+(groups.length>0?fmtPnl(totalPnl/groups.length):'--');
+  renderCoinPnl('main-coin-pnl', scoped);
+  document.getElementById('th-count').textContent=groups.length+' entries · '+scoped.length+' exits';
+  const tbody=document.getElementById('trades-body');
+  if (!groups.length) { tbody.innerHTML='<tr><td colspan="9" class="empty">No trades yet</td></tr>'; }
+  else {
+    let h='';
     for (const t of groups) {
-      const splitCount = t.items.length;
-      html += '<tr>';
-      html += '<td>' + formatTime(t.exit_time || t.entry_time) + '</td>';
-      html += '<td>' + t.coin + '</td>';
-      html += '<td title="' + esc(t.market || t.id) + '">' + esc(t.label) + '</td>';
-      html += '<td class="side-' + String(t.side).toLowerCase() + '">' + t.side + '</td>';
-      html += '<td>' + t.entry_price.toFixed(3) + '</td>';
-      html += '<td>' + t.exit_price.toFixed(3) + '</td>';
-      html += '<td>' + t.shares.toFixed(1) + '</td>';
-      html += '<td>$' + t.cost.toFixed(3) + '</td>';
-      html += '<td>$' + t.revenue.toFixed(3) + '</td>';
-      html += '<td>$' + t.fee.toFixed(4) + '</td>';
-      html += '<td>' + renderReason(t.exit_reason) + '</td>';
-      html += '<td class="' + pnlClass(t.pnl) + '">' + formatPnl(t.pnl) + '</td>';
-      const mfe = ((t.max_price||0) - t.entry_price) * 100;
-      const mae = (t.entry_price - (t.min_price||t.entry_price)) * 100;
-      html += '<td class="positive">+' + mfe.toFixed(1) + 'c</td>';
-      html += '<td class="negative">-' + mae.toFixed(1) + 'c</td>';
-      const dur = t.hold_duration_sec || 0;
-      html += '<td>' + Math.floor(dur/60) + 'm' + (dur%60) + 's</td>';
-      html += '</tr>';
-      if (splitCount > 1) {
-        html += '<tr class="trade-detail-row"><td colspan="15">';
-        html += '<details class="trade-detail"><summary>展开 ' + t.coin + ' 当前时间段的 ' + splitCount + ' 笔卖出</summary>';
-        html += '<table><thead><tr><th>Time</th><th>ID</th><th>Side</th><th>Entry</th><th>Exit</th><th>Shares</th><th>Revenue</th><th>Fee</th><th>Reason</th><th>P&L</th></tr></thead><tbody>';
-        for (const part of t.items) {
-          const partRevenue = (part.shares || 0) * (part.exit_price || 0);
-          html += '<tr>';
-          html += '<td>' + formatTime(part.exit_time || part.entry_time) + '</td>';
-          html += '<td>' + normalizeTradeId(part.id) + '</td>';
-          html += '<td class="side-' + String(part.side || '').toLowerCase() + '">' + (part.side || '--') + '</td>';
-          html += '<td>' + Number(part.entry_price || 0).toFixed(3) + '</td>';
-          html += '<td>' + Number(part.exit_price || 0).toFixed(3) + '</td>';
-          html += '<td>' + Number(part.shares || 0).toFixed(1) + '</td>';
-          html += '<td>$' + partRevenue.toFixed(3) + '</td>';
-          html += '<td>$' + Number(part.fee || 0).toFixed(4) + '</td>';
-          html += '<td>' + renderReason(part.exit_reason) + '</td>';
-          html += '<td class="' + pnlClass(part.pnl || 0) + '">' + formatPnl(part.pnl || 0) + '</td>';
-          html += '</tr>';
+      h+='<tr><td>'+fmtTime(t.exit_time||t.entry_time)+'</td>';
+      h+='<td style="color:#58a6ff;font-weight:bold;">'+esc(t.coin)+'</td>';
+      h+='<td class="side-'+String(t.side).toLowerCase()+'">'+esc(t.side)+'</td>';
+      h+='<td>'+t.entry_price.toFixed(3)+'</td><td>'+t.exit_price.toFixed(3)+'</td>';
+      h+='<td>$'+t.cost.toFixed(2)+'</td>';
+      h+='<td class="'+pnlCls(t.pnl)+'">'+fmtPnl(t.pnl)+'</td>';
+      h+='<td>'+renderReason(t.exit_reason)+'</td><td>'+fmtDur(t.hold_sec)+'</td></tr>';
+      if (t.items.length>1) {
+        h+='<tr class="split-row"><td colspan="9"><details class="split-det"><summary>展开 '+t.items.length+' 笔分批卖出</summary>';
+        h+='<table><thead><tr><th>时间</th><th>入场</th><th>出场</th><th>份数</th><th>盈亏</th><th>原因</th></tr></thead><tbody>';
+        for (const p of t.items) {
+          h+='<tr><td>'+fmtTime(p.exit_time||p.entry_time)+'</td>';
+          h+='<td>'+Number(p.entry_price||0).toFixed(3)+'</td><td>'+Number(p.exit_price||0).toFixed(3)+'</td>';
+          h+='<td>'+Number(p.shares||0).toFixed(1)+'</td>';
+          h+='<td class="'+pnlCls(p.pnl||0)+'">'+fmtPnl(p.pnl||0)+'</td><td>'+renderReason(p.exit_reason)+'</td></tr>';
         }
-        html += '</tbody></table></details></td></tr>';
+        h+='</tbody></table></details></td></tr>';
       }
     }
-    if (groups.length > 0) tbody.innerHTML = html;
-  } else {
-    const tbody = document.getElementById('trades-body');
-    const thCount = document.getElementById('th-count');
-    if (thCount) thCount.textContent = '(0 trades)';
-    if (tbody) tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;color:#7d8590;padding:20px;">No trades yet</td></tr>';
-    renderSparkline('pnl-spark', []);
+    tbody.innerHTML=h;
   }
 
-  // Analytics section follows the same global scope + mode filter as the rest of the dashboard.
-  const analytics = analyticsFromTrades(scopedMainTrades);
-  if (analytics && analytics.has_data) {
-    const mm = analytics.mfe_mae;
-    document.getElementById('a-avg-mfe').textContent = '+' + (mm.avg_mfe * 100).toFixed(1) + 'c';
-    document.getElementById('a-avg-mae').textContent = '-' + (mm.avg_mae * 100).toFixed(1) + 'c';
-    document.getElementById('a-ratio').textContent = mm.ratio.toFixed(2);
-    document.getElementById('a-max-mfe').textContent = '+' + (mm.max_mfe * 100).toFixed(1) + 'c';
-
-    const d = analytics.duration;
-    document.getElementById('a-avg-dur').textContent = fmtDur(d.avg);
-    document.getElementById('a-min-dur').textContent = fmtDur(d.min);
-    document.getElementById('a-max-dur').textContent = fmtDur(d.max);
-
-    const sp = analytics.spread;
-    document.getElementById('a-spread').innerHTML =
-      '<span class="positive">' + (sp.avg_spread_winners * 100).toFixed(1) + 'c</span> / ' +
-      '<span class="negative">' + (sp.avg_spread_losers * 100).toFixed(1) + 'c</span>';
-
-    // Hour heatmap
-    const hmap = document.getElementById('hour-heatmap');
-    let hhtml = '';
-    for (let h = 0; h < 24; h++) {
-      const hd = analytics.hours[h.toString()] || {count:0,avg_pnl:0};
-      const bg = hd.count === 0 ? '#1e2d3d' : hd.avg_pnl > 0 ? '#1a3a2a' : '#3a1a1a';
-      const clr = hd.count === 0 ? '#484f58' : hd.avg_pnl > 0 ? '#3fb950' : '#f85149';
-      hhtml += '<div style="background:'+bg+';border-radius:4px;padding:6px;text-align:center;">';
-      hhtml += '<div style="font-size:0.65em;color:#7d8590;">'+h+'h</div>';
-      hhtml += '<div style="font-size:0.85em;color:'+clr+';font-weight:bold;">'+hd.count+'</div>';
-      if (hd.count > 0) hhtml += '<div style="font-size:0.6em;color:'+clr+';">'+formatPnl(hd.avg_pnl)+'</div>';
-      hhtml += '</div>';
-    }
-    hmap.innerHTML = hhtml;
-
-    // Exit reasons
-    const erDiv = document.getElementById('exit-reasons');
-    const reasons = analytics.exit_reasons;
-    const totalR = Object.values(reasons).reduce((a,b)=>a+b, 0);
-    let erhtml = '';
-    const reasonColors = {stop_price:'#f85149',stop_time:'#da3633',trailing_stop:'#d29922',tp0:'#56d364',tp1:'#3fb950',tp2:'#2ea043',expired:'#58a6ff',tp_filled:'#56d364'};
-    for (const [r, c] of Object.entries(reasons).sort((a,b)=>b[1]-a[1])) {
-      const pct = (c/totalR*100).toFixed(0);
-      const color = reasonColors[r] || '#7d8590';
-      const [reasonLabel] = reasonInfo(r);
-      erhtml += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">';
-      erhtml += '<span style="font-size:0.8em;width:120px;color:#e0e6ed;" title="'+r+'">'+reasonLabel+'</span>';
-      erhtml += '<div style="flex:1;height:16px;background:#1e2d3d;border-radius:3px;overflow:hidden;">';
-      erhtml += '<div style="width:'+pct+'%;height:100%;background:'+color+';"></div></div>';
-      erhtml += '<span style="font-size:0.75em;color:#7d8590;width:50px;">'+c+' ('+pct+'%)</span>';
-      erhtml += '</div>';
-    }
-    erDiv.innerHTML = erhtml;
-
-    // Day of week
-    const dowDiv = document.getElementById('day-of-week');
-    const dayOrder = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-    let dowhtml = '';
-    for (const dn of dayOrder) {
-      const dd = analytics.days[dn] || {count:0,avg_pnl:0};
-      const bg = dd.count === 0 ? '#1e2d3d' : dd.avg_pnl > 0 ? '#1a3a2a' : '#3a1a1a';
-      const clr = dd.count === 0 ? '#484f58' : dd.avg_pnl > 0 ? '#3fb950' : '#f85149';
-      dowhtml += '<div style="background:'+bg+';border-radius:4px;padding:8px;text-align:center;">';
-      dowhtml += '<div style="font-size:0.7em;color:#7d8590;">'+dn+'</div>';
-      dowhtml += '<div style="font-size:1em;color:'+clr+';font-weight:bold;">'+dd.count+'</div>';
-      if (dd.count > 0) dowhtml += '<div style="font-size:0.65em;color:'+clr+';">'+formatPnl(dd.avg_pnl)+'</div>';
-      dowhtml += '</div>';
-    }
-    dowDiv.innerHTML = dowhtml;
-
-    // Streak analysis
-    const st = analytics.streak;
-    const stDiv = document.getElementById('streak-analysis');
-    stDiv.innerHTML =
-      '<div style="margin-bottom:8px;">' +
-      '<span style="color:#7d8590;">After 2+ losses:</span> ' +
-      '<span class="' + pnlClass(st.after_2loss_avg_pnl) + '">' + formatPnl(st.after_2loss_avg_pnl) + '</span>' +
-      ' avg (' + st.after_2loss_count + ' trades)</div>' +
-      '<div><span style="color:#7d8590;">Normal:</span> ' +
-      '<span class="' + pnlClass(st.normal_avg_pnl) + '">' + formatPnl(st.normal_avg_pnl) + '</span>' +
-      ' avg (' + st.normal_count + ' trades)</div>';
-
-    // Core metrics
-    const pf = analytics.profit_factor;
-    document.getElementById('a-pf').textContent = pf.toFixed(2);
-    document.getElementById('a-pf').className = 'stat-value ' + (pf >= 1 ? 'positive' : 'negative');
-    const ev = analytics.ev_per_trade;
-    document.getElementById('a-ev').textContent = formatPnl(ev);
-    document.getElementById('a-ev').className = 'stat-value ' + pnlClass(ev);
-    document.getElementById('a-wl').innerHTML =
-      '<span class="positive">' + formatPnl(analytics.avg_win) + '</span>' +
-      ' / <span class="negative">' + formatPnl(analytics.avg_loss) + '</span>' +
-      '<div style="font-size:0.6em;color:#7d8590;">ratio ' + analytics.win_loss_ratio.toFixed(2) + '</div>';
-    document.getElementById('a-dd').textContent = '-$' + analytics.max_drawdown.toFixed(2) +
-      ' (' + analytics.max_drawdown_pct.toFixed(1) + '%)';
-
-    // MFE capture
-    const mc = analytics.mfe_capture;
-    document.getElementById('a-cap-all').textContent = (mc.avg * 100).toFixed(1) + '%';
-    document.getElementById('a-cap-win').textContent = (mc.avg_winners * 100).toFixed(1) + '%';
-    document.getElementById('a-cap-lose').textContent = (mc.avg_losers * 100).toFixed(1) + '%';
-    const tss = analytics.trailing_stop_stats;
-    const tsEl = document.getElementById('a-ts-avg');
-    tsEl.textContent = tss.count > 0 ? formatPnl(tss.avg_pnl) + ' (' + tss.count + ')' : 'N/A';
-    tsEl.className = 'stat-value ' + (tss.count > 0 ? pnlClass(tss.avg_pnl) : 'neutral');
-
-    // Direction analysis
-    const dirDiv = document.getElementById('direction-analysis');
-    const dirData = analytics.direction;
-    let dirHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">';
-    for (const side of ['UP','DOWN']) {
-      const d = dirData[side];
-      const clr = side === 'UP' ? '#3fb950' : '#f85149';
-      dirHtml += '<div style="background:#0d1117;border-radius:6px;padding:12px;border-left:3px solid '+clr+';">';
-      dirHtml += '<div style="font-weight:bold;color:'+clr+';margin-bottom:6px;">'+side+'</div>';
-      dirHtml += '<div style="font-size:0.8em;color:#7d8590;">Trades: <span style="color:#e0e6ed;">'+d.count+'</span></div>';
-      dirHtml += '<div style="font-size:0.8em;color:#7d8590;">Wins: <span style="color:#e0e6ed;">'+d.wins+' ('+d.win_rate.toFixed(1)+'%)</span></div>';
-      dirHtml += '<div style="font-size:0.8em;color:#7d8590;">Avg P&L: <span class="'+pnlClass(d.avg_pnl)+'">'+formatPnl(d.avg_pnl)+'</span></div>';
-      dirHtml += '<div style="font-size:0.8em;color:#7d8590;">Total: <span class="'+pnlClass(d.total_pnl)+'">'+formatPnl(d.total_pnl)+'</span></div>';
-      dirHtml += '</div>';
-    }
-    dirHtml += '</div>';
-    dirDiv.innerHTML = dirHtml;
-
-    // TP hit rates
-    const tpDiv = document.getElementById('tp-hit-rates');
-    const tpData = analytics.tp_hit_rates;
-    const tpColors = {tp0:'#56d364',tp1:'#3fb950',tp2:'#2ea043',trailing_stop:'#d29922'};
-    let tpHtml = '';
-    for (const [k, v] of Object.entries(tpData)) {
-      const color = tpColors[k] || '#7d8590';
-      tpHtml += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
-      tpHtml += '<span style="font-size:0.8em;width:100px;color:#e0e6ed;">'+k+'</span>';
-      tpHtml += '<div style="flex:1;height:18px;background:#1e2d3d;border-radius:3px;overflow:hidden;">';
-      tpHtml += '<div style="width:'+Math.max(v.pct,2)+'%;height:100%;background:'+color+';border-radius:3px;"></div></div>';
-      tpHtml += '<span style="font-size:0.75em;color:#7d8590;width:70px;">'+v.count+' ('+v.pct.toFixed(0)+'%)</span>';
-      tpHtml += '</div>';
-    }
-    tpDiv.innerHTML = tpHtml;
-
-    // Equity curve
-    const ecDiv = document.getElementById('equity-curve');
-    const ecData = analytics.equity_curve;
-    if (ecData && ecData.length > 1) {
-      const bals = ecData.map(e => e.balance);
-      const minB = Math.min(...bals), maxB = Math.max(...bals);
-      const range = maxB - minB || 1;
-      const w = ecDiv.clientWidth || 600, h = 150;
-      const padL = 50, padR = 10, padT = 10, padB = 25;
-      const gw = w - padL - padR, gh = h - padT - padB;
-      let pts = ecData.map((e, i) => {
-        const x = padL + (i / (ecData.length - 1)) * gw;
-        const y = padT + (1 - (e.balance - minB) / range) * gh;
-        return x.toFixed(1) + ',' + y.toFixed(1);
-      }).join(' ');
-      const lastBal = bals[bals.length-1];
-      const lineColor = lastBal >= bals[0] ? '#3fb950' : '#f85149';
-      let svg = '<svg width="'+w+'" height="'+h+'" style="display:block;">';
-      // grid lines
-      for (let i = 0; i <= 4; i++) {
-        const y = padT + (i/4) * gh;
-        const val = (maxB - (i/4) * range).toFixed(2);
-        svg += '<line x1="'+padL+'" y1="'+y+'" x2="'+(w-padR)+'" y2="'+y+'" stroke="#1e2d3d" stroke-width="1"/>';
-        svg += '<text x="'+(padL-4)+'" y="'+(y+4)+'" fill="#7d8590" font-size="10" text-anchor="end">$'+val+'</text>';
-      }
-      svg += '<polyline points="'+pts+'" fill="none" stroke="'+lineColor+'" stroke-width="2"/>';
-      // start/end markers
-      const firstPt = pts.split(' ')[0].split(',');
-      const lastPt = pts.split(' ').pop().split(',');
-      svg += '<circle cx="'+firstPt[0]+'" cy="'+firstPt[1]+'" r="3" fill="#58a6ff"/>';
-      svg += '<circle cx="'+lastPt[0]+'" cy="'+lastPt[1]+'" r="3" fill="'+lineColor+'"/>';
-      svg += '</svg>';
-      ecDiv.innerHTML = svg;
-    } else {
-      ecDiv.innerHTML = '<div style="color:#7d8590;text-align:center;padding:40px;">Not enough data</div>';
-    }
-
-    // Bucket renderer helper
-    function renderBuckets(containerId, data) {
-      const el = document.getElementById(containerId);
-      let html = '';
-      for (const [label, b] of Object.entries(data)) {
-        if (b.count === 0) continue;
-        const clr = b.avg_pnl >= 0 ? '#3fb950' : '#f85149';
-        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
-        html += '<span style="font-size:0.8em;width:70px;color:#e0e6ed;">'+label+'</span>';
-        html += '<div style="flex:1;display:flex;align-items:center;gap:6px;">';
-        html += '<span style="font-size:0.75em;color:#7d8590;">'+b.count+'trades</span>';
-        html += '<span style="font-size:0.75em;color:#7d8590;">WR:'+b.win_rate.toFixed(0)+'%</span>';
-        html += '<span style="font-size:0.8em;color:'+clr+';font-weight:bold;">'+formatPnl(b.avg_pnl)+'</span>';
-        html += '</div></div>';
-      }
-      el.innerHTML = html || '<div style="color:#7d8590;">No data</div>';
-    }
-    renderBuckets('entry-price-buckets', analytics.entry_price_buckets);
-    renderBuckets('btc-dev-buckets', analytics.btc_deviation_buckets);
-    renderBuckets('duration-buckets', analytics.duration_buckets);
-
-    // Trailing stop vs Price stop
-    const tsDiv = document.getElementById('trailing-vs-stop');
-    const tsStat = analytics.trailing_stop_stats;
-    tsDiv.innerHTML =
-      '<div style="margin-bottom:10px;">' +
-      '<div style="color:#d29922;font-weight:bold;margin-bottom:4px;">Trailing Stop</div>' +
-      '<span style="color:#7d8590;">Count: </span><span>' + tsStat.count + '</span> | ' +
-      '<span style="color:#7d8590;">Avg P&L: </span><span class="' + pnlClass(tsStat.avg_pnl) + '">' + formatPnl(tsStat.avg_pnl) + '</span>' +
-      '</div><div>' +
-      '<div style="color:#f85149;font-weight:bold;margin-bottom:4px;">Price Stop (-50%)</div>' +
-      '<span style="color:#7d8590;">Avg P&L: </span><span class="negative">' + formatPnl(tsStat.stop_price_avg_pnl) + '</span>' +
-      '</div>';
-  }
+  renderExperiment('trend-v2-exp',     tvStatus,  selectScope(Array.isArray(tvTrades)?tvTrades:[],  Array.isArray(tvAll)?tvAll:tvTrades));
+  renderExperiment('crypto-4h-exp',    c4hStatus, selectScope(Array.isArray(c4hTrades)?c4hTrades:[], Array.isArray(c4hAll)?c4hAll:c4hTrades));
+  renderExperiment('crypto-daily-exp', cdStatus,  selectScope(Array.isArray(cdTrades)?cdTrades:[],  Array.isArray(cdAll)?cdAll:cdTrades));
+  renderExperiment('finance-exp',      finStatus, selectScope(Array.isArray(finTrades)?finTrades:[], Array.isArray(finAll)?finAll:finTrades));
 }
 
 setInterval(refresh, REFRESH_MS);
