@@ -23,7 +23,7 @@
 
 ---
 
-## 二、当前活跃的 4 个实验策略
+## 二、当前活跃的 5 个实验策略
 
 ### 总表（按 main.cpp 实例化顺序）
 
@@ -33,6 +33,7 @@
 | `crypto_4h_experiment` | `crypto_4h_updown_v1` | `H` | `experiment_crypto_4h_updown_v1_trades.jsonl` | Crypto 4h | `evaluate_crypto_duration_updown_v1` (L1007, daily=false) |
 | `crypto_daily_experiment` | `crypto_daily_updown_v1` | `D` | `experiment_crypto_daily_updown_v1_trades.jsonl` | Crypto daily | 同上 (daily=true) |
 | **`trend_v2_experiment`** | `trend_follow` | `T` | `experiment_trend_v2_trades.jsonl` | Crypto 1h（仅 BTC/ETH/BNB） | `evaluate_trend_follow` (L329) |
+| **`trend_v3_experiment`** | `trend_v3` | `V` | `experiment_trend_v3_trades.jsonl` | Crypto 1h（仅 BTC） | `evaluate_trend_v3` |
 
 > **2026-05-30 退役 `eth_cheap_v1`**（原变量名 `experiment`，id 前缀 `C`，原占用 `/api/experiment/*` 路由）。逆势 cheap-value 失败族**第 3 例**，全量服务器日志（202 仓 / 05-16~05-29）净 **−$11.84 / 37% 胜率 / 每仓 −$0.059**。**非肥尾结构**——剔掉最大 2 笔反而 −$14.88，是 `stop_price` 持续放血（81 腿 −$27.83）。05-23 时还约平（+$0.078），W22（05-25~29 ETH 急跌段）单周崩 −$11.60，逆势抄便宜侧在趋势/高波动 regime 被直接碾过。与已退役的 `eth_late_cheap_v1` / `QUIET_REVERSION` 同族同结构，无可改杠杆。证据见 [`steps/step-retire-eth-cheap-v1.md`](./steps/step-retire-eth-cheap-v1.md)。dashboard 的 "ETH Cheap" tab + `/api/experiment/*` 路由一并移除。
 
@@ -220,6 +221,29 @@
 
 详细分析见 `docs/steps/step-trend-v2-revive.md`。
 
+### 2.7 `trend_v3`（dev-accel 门解锁高价带）—— 2026-06-02 新增
+
+`evaluate_trend_v3` @ experiment_engine.cpp（trend_follow 之后）
+
+合并 main + trend_v2 各自最优 + 「dev-accel 门」。**核心假设：用 ~90s dev 上升门筛出"会跟随"的动量，把被 main 砍掉的高价带（0.68-0.79）从负 EV 救成正 EV**，提高赚钱量。纯 shadow。
+
+| 条件 | 规则 |
+|---|---|
+| 标的 | 仅 BTC |
+| 时间窗口 | `40 ≤ minutes_remaining ≤ 45` |
+| 方向确认 | 上一 tick 同向（承自 trend_v2，1-tick） |
+| dev 阈值 | `abs(dev) ≥ 0.20%` |
+| spread | `≤ 0.01` |
+| **入场带（分层）** | `0.64–0.67`：免门；`0.68–0.79`：**必须过 dev-accel 门** |
+| **dev-accel 门** | ~90s 窗口内 `abs_dev` 上升 `> 0.01`（`tv3_dev_hist_` deque 维护，用 `now_ms`） |
+| 仓位 | `$1.00`（平，不抄 v2 的 DOWN $1.25，避免 size 混淆） |
+
+**TP / Exit**：复用 trend_v2 的 `compute_trend_follow_tp_levels` / `evaluate_trend_follow_exit`。
+
+**回测依据**：对 main 58 笔 BTC momentum，从 `main_candidates.jsonl` 逐 tick 重建入场前 ~90s dev 轨迹（按 coin=BTC + ts 窗口匹配，逐笔验证过）。dev 上升 **63%** vs 不升 **35%**（z≈1.9）；门控高价 E≥0.70 从 50%/−EV 劈成 accel **64%/+EV** vs not-accel 31%。in-sample、n 偏小 → shadow 出样本确认。落盘 `entry_price_bucket` 分 `cheap_0.64_0.67` / `high_gated_0.68_0.79`，`confidence_components` 记 `dev_rising/dev_flat/accel_warmup`。成功判据 = `high_gated` 桶复现 ~64%/+EV。
+
+详见 `docs/steps/step-trend-v3-shadow.md`。
+
 ### 2.5 `crypto_daily_updown_v1`（Crypto 全日 UP/DOWN）
 
 同 2.4，差异：
@@ -246,9 +270,9 @@
 | `FIN:*`（标普 / 黄金 / WTI …） | `finance_experiment` | L1258-1329 |
 | Crypto 4h 市场 | `crypto_4h_experiment` | L1249-1250 |
 | Crypto daily 市场 | `crypto_daily_experiment` | L1252 |
-| Crypto 1h（常规） | `trend_v2_experiment`（单 engine）| L1539 |
+| Crypto 1h（常规） | `trend_v2_experiment` + `trend_v3_experiment`（并行双 engine）| `trend_v2_experiment.on_market` / `trend_v3_experiment.on_market` 相邻两行 |
 
-注意 Crypto 1h 现在只剩 `trend_follow`（`trend_v2_experiment`）一个 engine 评估。曾经的双 engine 并行（`eth_cheap_v1` + `trend_follow`）已随 `eth_cheap_v1` 于 2026-05-30 退役而结束；`eth_late_cheap_v1` 更早于 2026-05-23 退役。
+注意 Crypto 1h 现在由 `trend_v2`（`trend_follow`）+ `trend_v3` 两个 engine 并行评估同一份 tick（2026-06-02 加 trend_v3）。两者独立持仓/jsonl，互不影响。曾经的旧双 engine（`eth_cheap_v1` + `trend_follow`）已随 `eth_cheap_v1` 于 2026-05-30 退役；`eth_late_cheap_v1` 更早于 2026-05-23 退役。
 
 ---
 
@@ -306,7 +330,8 @@ ExperimentEngine 内置：
 - `Experiment: finance_updown_v1`
 - `Experiment: crypto_4h_updown_v1`
 - `Experiment: crypto_daily_updown_v1`
-- `Experiment: trend_v2` (`Trend Follow v2 Experiment` 面板)
+- `Experiment: trend_v2` (`Trend Follow v2` 面板)
+- `Experiment: trend_v3` (`Trend Follow v3` 面板，dev-accel 门解锁高价带)
 
 每个 scope 独立显示资金曲线、胜率、PnL 分布、exit_reason 分桶、MFE 捕获率等指标。
 
