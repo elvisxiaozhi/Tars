@@ -141,6 +141,7 @@ tr:hover td { background: #161b22; }
 <div class="tabs">
   <button class="tab-btn" data-tab="main">Main Strategy</button>
   <button class="tab-btn" data-tab="regime">Trend Follow v2</button>
+  <button class="tab-btn" data-tab="trend-v3">Trend Follow v3</button>
   <button class="tab-btn" data-tab="crypto-4h">Crypto 4H</button>
   <button class="tab-btn" data-tab="crypto-daily">Crypto Daily</button>
   <button class="tab-btn" data-tab="finance">Finance</button>
@@ -267,6 +268,55 @@ tr:hover td { background: #161b22; }
   <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="trend-v2-exp-coin-pnl"></div></div>
   <div id="trend-v2-exp-positions"></div>
   <div id="trend-v2-exp-trades" style="margin-top:10px;"></div>
+</div>
+</div>
+
+<!-- ===== Trend Follow v3 ===== -->
+<div id="tab-trend-v3" class="tab-panel">
+<details class="dsec section" id="dd-trend-v3-rules">
+  <summary>Strategy Rules — Trend Follow v3 (shadow，dev-accel 门解锁高价带)</summary>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px;">
+    <div class="card">
+      <div class="card-title" style="color:#58a6ff;">入场条件</div>
+      <div class="card-body">
+        <div>· Coin：仅 BTC</div>
+        <div>· 时间窗口：40 ≤ 剩余 ≤ 45 min</div>
+        <div>· |偏移| ≥ 0.20%，1-tick 方向确认</div>
+        <div>· 价差 ≤ 1¢ · 仓位 $1.00</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#d29922;">分层入场带 + dev-accel 门</div>
+      <div class="card-body">
+        <div>· 0.64–0.67¢：免门（已验证 edge）</div>
+        <div>· 0.68–0.79¢：必须过 dev-accel 门</div>
+        <div>· 门 = ~90s 内 |偏移| 上升 &gt; 0.01</div>
+        <div>· 回测：上升 63% vs 不升 35%</div>
+        <div>· 门控高价 64%/+EV（解锁量）</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#3fb950;">止盈 / 止损（沿用 v2）</div>
+      <div class="card-body">
+        <div>· TP0 entry+10¢→50% · TP1 +15¢→50%</div>
+        <div>· 价格止损 ≤ entry −10¢</div>
+        <div>· 偏移穿零 → stop_btc · 死水退出</div>
+        <div>· Trailing（同 v2）</div>
+      </div>
+    </div>
+  </div>
+</details>
+<div class="section">
+  <div class="sec-title">Trend Follow v3 <span id="trend-v3-exp-summary" style="font-size:0.82em;font-weight:normal;color:#7d8590;"></span></div>
+  <div class="stats-grid">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value neutral" id="trend-v3-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&amp;L</div><div class="stat-value" id="trend-v3-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value neutral" id="trend-v3-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value neutral" id="trend-v3-exp-trades-count">--</div></div>
+  </div>
+  <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="trend-v3-exp-coin-pnl"></div></div>
+  <div id="trend-v3-exp-positions"></div>
+  <div id="trend-v3-exp-trades" style="margin-top:10px;"></div>
 </div>
 </div>
 
@@ -618,12 +668,14 @@ async function refresh() {
   const [
     status, trades,
     tvStatus,  tvTrades,  tvAll,
+    tv3Status, tv3Trades, tv3All,
     c4hStatus, c4hTrades, c4hAll,
     cdStatus,  cdTrades,  cdAll,
     finStatus, finTrades, finAll
   ] = await Promise.all([
     fetchJSON('/api/status'), fetchJSON('/api/trades'),
     fetchJSON('/api/experiment-trend-v2/status'),    fetchJSON('/api/experiment-trend-v2/trades'),    fetchJSON('/api/experiment-trend-v2/all-trades'),
+    fetchJSON('/api/experiment-trend-v3/status'),    fetchJSON('/api/experiment-trend-v3/trades'),    fetchJSON('/api/experiment-trend-v3/all-trades'),
     fetchJSON('/api/experiment-crypto-4h/status'),   fetchJSON('/api/experiment-crypto-4h/trades'),   fetchJSON('/api/experiment-crypto-4h/all-trades'),
     fetchJSON('/api/experiment-crypto-daily/status'),fetchJSON('/api/experiment-crypto-daily/trades'),fetchJSON('/api/experiment-crypto-daily/all-trades'),
     fetchJSON('/api/experiment-finance/status'),     fetchJSON('/api/experiment-finance/trades'),     fetchJSON('/api/experiment-finance/all-trades'),
@@ -718,6 +770,7 @@ async function refresh() {
   }
 
   renderExperiment('trend-v2-exp',     tvStatus,  selectScope(Array.isArray(tvTrades)?tvTrades:[],  Array.isArray(tvAll)?tvAll:tvTrades));
+  renderExperiment('trend-v3-exp',     tv3Status, selectScope(Array.isArray(tv3Trades)?tv3Trades:[], Array.isArray(tv3All)?tv3All:tv3Trades));
   renderExperiment('crypto-4h-exp',    c4hStatus, selectScope(Array.isArray(c4hTrades)?c4hTrades:[], Array.isArray(c4hAll)?c4hAll:c4hTrades));
   renderExperiment('crypto-daily-exp', cdStatus,  selectScope(Array.isArray(cdTrades)?cdTrades:[],  Array.isArray(cdAll)?cdAll:cdTrades));
   renderExperiment('finance-exp',      finStatus, selectScope(Array.isArray(finTrades)?finTrades:[], Array.isArray(finAll)?finAll:finTrades));

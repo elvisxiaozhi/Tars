@@ -1,8 +1,10 @@
 #pragma once
 
+#include <deque>
 #include <map>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <json.hpp>
@@ -44,6 +46,14 @@ public:
                                       const std::string& condition_id,
                                       const std::string& question,
                                       const TrendFollowContext& ctx);
+    // trend_v3：trend_v2 基底 + dev-accel 门解锁高价带（0.68-0.79 需 ~90s dev 上升）。
+    // 见 docs/steps/step-trend-v3-shadow.md。需要 now_ms 维护 dev 历史窗口。
+    EntrySignal evaluate_trend_v3(const BtcMarketData& md,
+                                  const ExperimentQuotes& quotes,
+                                  const std::string& condition_id,
+                                  const std::string& question,
+                                  const TrendFollowContext& ctx,
+                                  int64_t now_ms);
     EntrySignal evaluate_legacy_cheap_v2(const BtcMarketData& md,
                                          const ExperimentQuotes& quotes,
                                          const std::string& condition_id,
@@ -122,6 +132,8 @@ private:
     bool has_dev_prev1_ = false;
     Side trend_prev_side_ = Side::NONE;
     bool has_trend_prev_side_ = false;
+    // trend_v3 的 dev-accel 门：按 condition_id 维护 (now_ms, abs_dev) 历史，修剪到 ~95s 窗口。
+    std::deque<std::pair<int64_t, double>> tv3_dev_hist_;
 };
 
 class ExperimentEngine {

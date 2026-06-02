@@ -466,6 +466,123 @@ EntrySignal ExperimentStrategy::evaluate_trend_follow(
     return sig;
 }
 
+// trend_v3：trend_v2 基底（BTC、mr40-45、1-tick 方向确认、便宜带、复用 trend exit/TP）
+// + 核心新增「dev-accel 门」。设计与回测依据见 docs/steps/step-trend-v3-shadow.md。
+// 入场带分层：0.64-0.67 免门（已验证 edge）；0.68-0.79 必须过 dev-accel 门
+// （~90s 内 abs_dev 上升 >0.01）。回测：dev 上升 63% vs 不上升 35%；门控高价 64%/+EV。
+// 纯 shadow，不影响 main / trend_v2。
+EntrySignal ExperimentStrategy::evaluate_trend_v3(
+    const BtcMarketData& md,
+    const ExperimentQuotes& quotes,
+    const std::string& condition_id,
+    const std::string& question,
+    const TrendFollowContext& /*ctx*/,
+    int64_t now_ms) {
+    EntrySignal sig;
+    sig.condition_id = condition_id;
+    sig.market_question = question;
+    sig.coin = coin_;
+    sig.regime = StrategyRegime::TREND;
+
+    // 换市场重置 per-market 状态
+    if (condition_id != last_condition_id_) {
+        last_condition_id_ = condition_id;
+        trend_prev_side_ = Side::NONE;
+        has_trend_prev_side_ = false;
+        tv3_dev_hist_.clear();
+    }
+
+    double abs_dev = std::abs(md.deviation_pct);
+    // 每 poll 累积 dev 历史，修剪到 ~95s 窗口（dev-accel 门用）。在所有过滤之前累积，
+    // 保证入场判定时已攒够历史。
+    tv3_dev_hist_.emplace_back(now_ms, abs_dev);
+    while (tv3_dev_hist_.size() > 1 && now_ms - tv3_dev_hist_.front().first > 95000) {
+        tv3_dev_hist_.pop_front();
+    }
+
+    if (coin_ != "BTC") {
+        sig.reject_reason = "trend_v3_coin_filter";
+        return sig;
+    }
+    if (md.minutes_remaining < 40 || md.minutes_remaining > 45) {
+        sig.reject_reason = "trend_v3_time_window";
+        return sig;
+    }
+
+    Side side = md.deviation_pct > 0 ? Side::UP :
+                md.deviation_pct < 0 ? Side::DOWN : Side::NONE;
+    if (side == Side::NONE) {
+        sig.reject_reason = "no_direction";
+        return sig;
+    }
+
+    // 1-tick 方向确认（承自 trend_v2）：上一 poll 同向，防假突破
+    bool direction_confirmed = has_trend_prev_side_ && trend_prev_side_ == side;
+    trend_prev_side_ = side;
+    has_trend_prev_side_ = true;
+    if (!direction_confirmed) {
+        sig.reject_reason = "trend_v3_direction_not_confirmed";
+        return sig;
+    }
+
+    if (abs_dev < 0.20) {
+        sig.reject_reason = "trend_v3_dev_too_small";
+        return sig;
+    }
+
+    double ask = side == Side::UP ? quotes.up_ask : quotes.down_ask;
+    double bid = side == Side::UP ? quotes.up_bid : quotes.down_bid;
+    std::string token = side == Side::UP ? quotes.up_token_id : quotes.down_token_id;
+    if (bid <= 0 || ask <= 0) {
+        sig.reject_reason = "trend_v3_invalid_quote";
+        return sig;
+    }
+    if (ask - bid > 0.010001) {
+        sig.reject_reason = "trend_v3_spread_wide";
+        return sig;
+    }
+
+    double entry_price = std::max(0.01, ask - 0.01);
+    if (entry_price < 0.64 || entry_price > 0.79 + 1e-9) {
+        sig.reject_reason = "trend_v3_entry_range";
+        return sig;
+    }
+
+    // dev-accel 门：~90s 窗口内 abs_dev 上升（>0.01）。仅对高价（>0.67）强制要求。
+    // 便宜带 0.64-0.67 免门（已验证 edge，且回测里便宜单基本都自带上升）。
+    bool have_window = tv3_dev_hist_.size() >= 3 &&
+                       now_ms - tv3_dev_hist_.front().first >= 50000;
+    bool dev_rising = have_window &&
+                      (abs_dev - tv3_dev_hist_.front().second) > 0.01;
+    bool high_entry = entry_price > 0.67 + 1e-9;
+    if (high_entry) {
+        if (!have_window) {
+            sig.reject_reason = "trend_v3_accel_warmup";
+            return sig;
+        }
+        if (!dev_rising) {
+            sig.reject_reason = "trend_v3_high_entry_no_accel";
+            return sig;
+        }
+    }
+
+    sig.valid = true;
+    sig.side = side;
+    sig.market_ask = ask;
+    sig.entry_price = entry_price;
+    sig.size_usdc = 1.00;
+    sig.shares = sig.size_usdc / sig.entry_price;
+    sig.token_id = token;
+    sig.entry_price_bucket = high_entry ? "high_gated_0.68_0.79" : "cheap_0.64_0.67";
+    sig.confidence_components =
+        std::string(high_entry ? "high_entry" : "cheap_entry") +
+        (have_window ? (dev_rising ? ",dev_rising" : ",dev_flat") : ",accel_warmup");
+    spdlog::info("SIGNAL [{} trend_v3]: {} {} @ {:.3f} (ask={:.3f}, dev={:+.2f}%, {})",
+                 coin_, side == Side::UP ? "UP" : "DOWN", question,
+                 entry_price, ask, md.deviation_pct, sig.entry_price_bucket);
+    return sig;
+}
+
 EntrySignal ExperimentStrategy::evaluate_legacy_cheap_v2(
     const BtcMarketData& md,
     const ExperimentQuotes& quotes,
@@ -1908,7 +2025,7 @@ void ExperimentEngine::on_market(const std::string& coin,
             exit = strat_it->second.evaluate_late_window_exit(pos, current_price, md);
         } else if (strategy_name_ == "eth_only_v1" || strategy_name_ == "eth_cheap_v1") {
             exit = strat_it->second.evaluate_eth_only_exit(pos, current_price, md);
-        } else if (strategy_name_ == "trend_follow") {
+        } else if (strategy_name_ == "trend_follow" || strategy_name_ == "trend_v3") {
             exit = strat_it->second.evaluate_trend_follow_exit(pos, current_price, md, trend_ctx);
         } else {
             exit = strat_it->second.evaluate_exit(pos, current_price, md);
@@ -1979,6 +2096,9 @@ void ExperimentEngine::on_market(const std::string& coin,
     } else if (strategy_name_ == "trend_follow") {
         sig = strat_it->second.evaluate_trend_follow(md, quotes, entry.market.condition_id,
                                                      entry.market.question, trend_ctx);
+    } else if (strategy_name_ == "trend_v3") {
+        sig = strat_it->second.evaluate_trend_v3(md, quotes, entry.market.condition_id,
+                                                 entry.market.question, trend_ctx, now_ms);
     } else if (strategy_name_ == "legacy_cheap_v2") {
         sig = strat_it->second.evaluate_legacy_cheap_v2(md, quotes, entry.market.condition_id,
                                                         entry.market.question, trend_ctx);
@@ -2036,7 +2156,7 @@ void ExperimentEngine::on_market(const std::string& coin,
         pos.tp_levels = strat_it->second.compute_late_window_tp_levels(sig.entry_price);
     } else if (strategy_name_ == "eth_only_v1" || strategy_name_ == "eth_cheap_v1") {
         pos.tp_levels = strat_it->second.compute_eth_only_tp_levels(sig.entry_price, sig.regime);
-    } else if (strategy_name_ == "trend_follow") {
+    } else if (strategy_name_ == "trend_follow" || strategy_name_ == "trend_v3") {
         pos.tp_levels = strat_it->second.compute_trend_follow_tp_levels(sig.entry_price);
     } else {
         pos.tp_levels = strat_it->second.compute_tp_levels(sig.entry_price, sig.regime);
