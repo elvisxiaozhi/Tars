@@ -50,6 +50,12 @@ _bot_port = 5819
 _bot_bin = None
 _bot_config = None
 
+# Persisted "desired state" of the bot, survives manager restarts (needrestart /
+# reboot / manual). Only an explicit /api/shutdown writes "stopped"; everything
+# else (crash, cgroup-kill on manager restart, reboot) leaves it "running" so the
+# bot is brought back. Default "running" (fail toward availability).
+_DESIRED_STATE_FILE = ROOT / "logs" / "bot.desired"
+
 
 # ---------------------------------------------------------------------------
 # Dashboard HTML loader
@@ -101,6 +107,23 @@ def _check_bot_alive():
 # ---------------------------------------------------------------------------
 # Bot lifecycle monitor
 # ---------------------------------------------------------------------------
+
+def _read_desired_state():
+    """Last intended bot state ('running'|'stopped'), persisted across manager
+    restarts. Default 'running' if absent/unreadable (fail toward availability)."""
+    try:
+        return "stopped" if _DESIRED_STATE_FILE.read_text().strip() == "stopped" else "running"
+    except Exception:
+        return "running"
+
+
+def _write_desired_state(state):
+    try:
+        _DESIRED_STATE_FILE.parent.mkdir(exist_ok=True)
+        _DESIRED_STATE_FILE.write_text(state)
+    except Exception as e:
+        print(f"[manager] failed to persist desired state: {e}", flush=True)
+
 
 def _spawn_bot():
     """Spawn the bot subprocess. CALLER MUST HOLD _lock.
@@ -246,6 +269,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             _auto_restart = True       # a manual start re-enables auto-restart
             _bot_restart_count = 0
+            _write_desired_state("running")  # persist intent across manager restarts
             pid, err = _spawn_bot()
             if err:
                 self._json(500, {"error": err})
@@ -258,6 +282,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         global _bot_status, _auto_restart
         with _lock:
             _auto_restart = False      # intentional stop: do not auto-restart
+            _write_desired_state("stopped")  # persist intent: stay down across manager restarts
         sc, ct, body = _proxy_to_bot("/api/shutdown", "POST")
         if sc is not None:
             with _lock:
@@ -321,12 +346,29 @@ def main():
     # start monitor thread
     threading.Thread(target=_monitor_loop, daemon=True, name="bot-monitor").start()
 
-    # check if bot already running before we started
+    # check if bot already running before we started (e.g. survived a manager-only restart)
     global _bot_status
-    if _check_bot_alive():
+    already_running = _check_bot_alive()
+    if already_running:
         with _lock:
             _bot_status = "running"
         print("[manager] detected bot already running", flush=True)
+
+    # Desired-state reconciliation on startup: if the bot isn't running but its last
+    # intent was "running", spawn it. Makes the manager resilient to needrestart /
+    # reboot / manager restarts (which cgroup-kill the bot) WITHOUT resurrecting a bot
+    # stopped on purpose (an explicit /api/shutdown persisted "stopped").
+    if not already_running and _bot_bin:
+        desired = _read_desired_state()
+        if desired == "running":
+            with _lock:
+                pid, err = _spawn_bot()
+            if err:
+                print(f"[manager] startup auto-spawn failed: {err}", flush=True)
+            else:
+                print(f"[manager] startup auto-spawn (desired=running) pid={pid}", flush=True)
+        else:
+            print("[manager] startup: bot desired=stopped → not spawning", flush=True)
 
     server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
     display_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
