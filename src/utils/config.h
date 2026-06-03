@@ -113,12 +113,17 @@ struct PolygonConfig {
     std::string neg_risk_adapter    = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296";
 };
 
-// Polymarket 实际费率（截至 2026-04 docs.polymarket.com）：
-// maker 0%；Crypto category taker 7.2%；公式 fee = shares × rate × p × (1-p)
+// Polymarket 实际费率与最小单（截至 2026-03 docs.polymarket.com/trading/fees + help center）：
+// - 只有 taker 付费，maker 免费；公式 fee = shares × rate × p × (1-p)
+// - 分类费率：Crypto 0.07、Finance 0.04（本 bot 只涉及这两类）
+// - 最小单：限价单（入场=maker）≥ 5 股；市价单（离场=taker）≥ $1 名义额
 struct FeeConfig {
     double maker_fee_rate = 0.0;
-    double taker_fee_rate = 0.072;
+    double taker_fee_rate = 0.07;           // Crypto category（BTC/ETH/SOL/...）
+    double finance_taker_fee_rate = 0.04;   // Finance category（SPX/GOLD 实验）
     double gas_per_tx_usdc = 0.0;
+    double min_order_usdc = 1.0;            // 市价卖单最小名义额
+    double min_order_shares = 5.0;          // 限价买单最小份额
 };
 
 struct AppConfig {

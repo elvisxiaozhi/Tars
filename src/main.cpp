@@ -55,7 +55,7 @@ static std::string find_config(const char* argv0) {
     return "config/config.json";
 }
 
-// Polymarket 真实费率模型：maker 0%；Crypto taker 7.2% × p × (1-p)；额外 gas/tx
+// Polymarket 真实费率模型：maker 0%；taker = rate × p × (1-p)（Crypto 7%，见 FeeConfig）；额外 gas/tx
 static double calc_fee(double shares, double price, bool is_taker,
                        const polymarket::FeeConfig& fees) {
     double rate = is_taker ? fees.taker_fee_rate : fees.maker_fee_rate;
@@ -1610,8 +1610,12 @@ int main(int argc, char* argv[]) {
                             }
                             sig = fresh_sig;
                         }
-                        double shares = sig.shares;
-                        double size = sig.size_usdc;
+                        // 交易所最小单（执行层约束，不动策略决策）：限价买单 ≥ min_order_shares 股，
+                        // 且名义额 ≥ min_order_usdc（否则离场市价卖单 <$1 现实卖不掉）。份额托到下限后重算 size。
+                        double min_shares = std::max(cfg.fees.min_order_shares,
+                                                     cfg.fees.min_order_usdc / sig.entry_price);
+                        double shares = std::max(sig.shares, min_shares);
+                        double size = shares * sig.entry_price;
                         // 入场是限价 ask-1¢ 挂单，maker 角色，免 trading fee
                         double fee = calc_fee(shares, sig.entry_price, /*is_taker=*/false, cfg.fees);
 
@@ -1864,8 +1868,15 @@ int main(int argc, char* argv[]) {
                 // 检查止盈
                 for (auto& tp : pos.tp_levels) {
                     if (tp.triggered) continue;
+                    if (pos.shares_remaining_pct < 0.01) break;  // 已清仓（含 dust 规则）无份额可卖
                     if (current_price >= tp.trigger_price) {
                         double sell_shares = pos.shares * tp.sell_pct * pos.shares_remaining_pct;
+                        // 交易所最小单：市价卖单 <$1 现实下不出。若这一档或卖后剩余 <$1，则一次性清掉剩余整仓。
+                        double remaining_now = pos.shares * pos.shares_remaining_pct;
+                        if (sell_shares * current_price < cfg.fees.min_order_usdc ||
+                            (remaining_now - sell_shares) * current_price < cfg.fees.min_order_usdc) {
+                            sell_shares = remaining_now;
+                        }
 
                         // LIVE partial TP uses FAK at a 0.01 floor: fill immediately
                         // against available bids, cancel any leftover, and account by real fill.

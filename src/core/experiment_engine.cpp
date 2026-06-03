@@ -151,8 +151,8 @@ std::string cheap_background_alignment(Side side, const BtcMarketData* md) {
     return "mixed";
 }
 
-double fee(double shares, double price, bool taker, const FeeConfig& fees) {
-    double rate = taker ? fees.taker_fee_rate : fees.maker_fee_rate;
+// taker 费率由调用方按品类传入（Crypto 0.07 / Finance 0.04）；maker 免费故入场不计费。
+double fee(double shares, double price, double rate, const FeeConfig& fees) {
     return shares * rate * price * (1.0 - price) + fees.gas_per_tx_usdc;
 }
 
@@ -1973,12 +1973,21 @@ void ExperimentEngine::on_market(const std::string& coin,
             pos.mfe_at_15min = current_price;
         }
 
+        double taker_rate = strategy_name_ == "finance_updown_v1"
+            ? cfg_.fees.finance_taker_fee_rate : cfg_.fees.taker_fee_rate;
         for (auto& tp : pos.tp_levels) {
             if (tp.triggered || current_price < tp.trigger_price) continue;
+            if (pos.shares_remaining_pct < 0.01) break;  // 已清仓（含 dust 规则）无份额可卖
             double sell_shares = pos.shares * pos.shares_remaining_pct * tp.sell_pct;
+            // 交易所最小单：市价卖单 <$1 现实下不出。若这一档或卖后剩余 <$1，则一次性清掉剩余整仓。
+            double remaining_now = pos.shares * pos.shares_remaining_pct;
+            if (sell_shares * current_price < cfg_.fees.min_order_usdc ||
+                (remaining_now - sell_shares) * current_price < cfg_.fees.min_order_usdc) {
+                sell_shares = remaining_now;
+            }
             double sell_value = sell_shares * current_price;
             double cost_basis = sell_shares * pos.entry_price;
-            double exit_fee = fee(sell_shares, current_price, true, cfg_.fees);
+            double exit_fee = fee(sell_shares, current_price, taker_rate, cfg_.fees);
             double pnl = sell_value - cost_basis - exit_fee;
             pos.shares_remaining_pct = pos.shares > 0
                 ? std::max(0.0, (pos.shares * pos.shares_remaining_pct - sell_shares) / pos.shares)
@@ -2034,7 +2043,7 @@ void ExperimentEngine::on_market(const std::string& coin,
             double remaining_shares = pos.shares * pos.shares_remaining_pct;
             double sell_value = remaining_shares * exit.exit_price;
             double cost_basis = remaining_shares * pos.entry_price;
-            double exit_fee = fee(remaining_shares, exit.exit_price, true, cfg_.fees);
+            double exit_fee = fee(remaining_shares, exit.exit_price, taker_rate, cfg_.fees);
             double pnl = sell_value - cost_basis - exit_fee;
             pos.realized_pnl += pnl;
             pos.closed = true;
@@ -2115,6 +2124,16 @@ void ExperimentEngine::on_market(const std::string& coin,
         quiet_trades_this_hour_ >= cfg_.strategy.max_quiet_trades_per_hour) {
         reject_counts_["quiet_hour_trades"]++;
         return;
+    }
+    // 交易所最小单（执行层约束，不动策略决策）：限价买单 ≥ min_order_shares 股，
+    // 且名义额 ≥ min_order_usdc（保证离场可市价卖出）。份额托到下限后重算 size。
+    {
+        double min_shares = std::max(cfg_.fees.min_order_shares,
+                                     cfg_.fees.min_order_usdc / sig.entry_price);
+        if (sig.shares < min_shares) {
+            sig.shares = min_shares;
+            sig.size_usdc = sig.shares * sig.entry_price;
+        }
     }
     if (sig.size_usdc > balance_) {
         reject_counts_["insufficient_balance"]++;

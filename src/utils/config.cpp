@@ -219,8 +219,11 @@ AppConfig load_config(const std::string& path) {
     if (root.contains("fees")) {
         auto& fe = root["fees"];
         cfg.fees.maker_fee_rate = jdbl(fe, "maker_fee_rate", 0.0);
-        cfg.fees.taker_fee_rate = jdbl(fe, "taker_fee_rate", 0.072);
+        cfg.fees.taker_fee_rate = jdbl(fe, "taker_fee_rate", 0.07);
+        cfg.fees.finance_taker_fee_rate = jdbl(fe, "finance_taker_fee_rate", 0.04);
         cfg.fees.gas_per_tx_usdc = jdbl(fe, "gas_per_tx_usdc", 0.0);
+        cfg.fees.min_order_usdc = jdbl(fe, "min_order_usdc", 1.0);
+        cfg.fees.min_order_shares = jdbl(fe, "min_order_shares", 5.0);
     }
 
     // experiment: isolated paper-only strategy simulator
