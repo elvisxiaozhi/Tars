@@ -458,6 +458,12 @@ int main(int argc, char* argv[]) {
     // 见 docs/steps/step-trend-v3-shadow.md。
     polymarket::ExperimentEngine trend_v3_experiment(
         cfg, "trend_v3", "./logs/experiment_trend_v3_trades.jsonl", "V");
+    // held-to-expiry shadow（近零费）：买入后不设 TP/止损，持有到 1h 结算(0/1)。
+    // held_favorite=晚段买确定性赢家；held_momentum=中段买便宜顺势侧。见 docs/strategy-experiments.md。
+    polymarket::ExperimentEngine held_favorite_experiment(
+        cfg, "held_favorite_v1", "./logs/experiment_held_favorite_v1_trades.jsonl", "K");
+    polymarket::ExperimentEngine held_momentum_experiment(
+        cfg, "held_momentum_v1", "./logs/experiment_held_momentum_v1_trades.jsonl", "M");
 
     // 显示用 balance：LIVE 模式取真实 vault cash；dry_run 取虚拟 risk balance
     auto display_balance = [&]() {
@@ -1018,6 +1024,24 @@ int main(int argc, char* argv[]) {
     api.on_trend_v3_experiment_all_trades([&]() -> std::string {
         return trend_v3_experiment.all_trades_json();
     });
+    api.on_held_favorite_experiment_status([&]() -> std::string {
+        return held_favorite_experiment.status_json();
+    });
+    api.on_held_favorite_experiment_trades([&]() -> std::string {
+        return held_favorite_experiment.trades_json();
+    });
+    api.on_held_favorite_experiment_all_trades([&]() -> std::string {
+        return held_favorite_experiment.all_trades_json();
+    });
+    api.on_held_momentum_experiment_status([&]() -> std::string {
+        return held_momentum_experiment.status_json();
+    });
+    api.on_held_momentum_experiment_trades([&]() -> std::string {
+        return held_momentum_experiment.trades_json();
+    });
+    api.on_held_momentum_experiment_all_trades([&]() -> std::string {
+        return held_momentum_experiment.all_trades_json();
+    });
 
     // POST /api/shutdown — 优雅停止 bot（前端"Stop Bot"按钮触发）
     // 设 g_running=false → 主循环退出 → emergency_close_all 兜底 → 进程退出
@@ -1128,6 +1152,8 @@ int main(int argc, char* argv[]) {
                     crypto_daily_experiment.reset_candle(result.coin);
                     trend_v2_experiment.reset_candle(result.coin);
                     trend_v3_experiment.reset_candle(result.coin);
+                    held_favorite_experiment.reset_candle(result.coin);
+                    held_momentum_experiment.reset_candle(result.coin);
                     spdlog::info("New candle [{}]: reset per-coin/global hour trade flags",
                                  result.coin);
                 }
@@ -1144,6 +1170,8 @@ int main(int argc, char* argv[]) {
                 crypto_daily_experiment.reset_global_hour();
                 trend_v2_experiment.reset_global_hour();
                 trend_v3_experiment.reset_global_hour();
+                held_favorite_experiment.reset_global_hour();
+                held_momentum_experiment.reset_global_hour();
                 spdlog::info("New global hour: reset global trade counters");
             }
             if (newest_candle_open != 0) {
@@ -1539,6 +1567,8 @@ int main(int argc, char* argv[]) {
                 exp_quotes.down_token_id = quotes.down_token_id;
                 trend_v2_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
                 trend_v3_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
+                held_favorite_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
+                held_momentum_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
 
                 if (!entry_window) {
                     continue;

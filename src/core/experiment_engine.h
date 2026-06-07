@@ -84,6 +84,17 @@ public:
                                                    const std::string& condition_id,
                                                    const std::string& question,
                                                    bool daily);
+    // held-to-expiry shadow（近零费：入场 maker + 到期结算无离场费）。买入后不设 TP/止损，
+    // 持有到 1h 结算（0/1）。held_favorite：晚段(剩≤12min)买确定性赢家(0.80-0.93)；
+    // held_momentum：中段(20-40min)买便宜顺势侧(0.45-0.62)。见 docs/strategy-experiments.md。
+    EntrySignal evaluate_held_favorite_v1(const BtcMarketData& md,
+                                          const ExperimentQuotes& quotes,
+                                          const std::string& condition_id,
+                                          const std::string& question);
+    EntrySignal evaluate_held_momentum_v1(const BtcMarketData& md,
+                                          const ExperimentQuotes& quotes,
+                                          const std::string& condition_id,
+                                          const std::string& question);
 
     std::vector<TakeProfitLevel> compute_tp_levels(double entry_price,
                                                    StrategyRegime regime) const;

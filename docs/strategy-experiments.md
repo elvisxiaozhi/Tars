@@ -1,6 +1,6 @@
 # 实验策略（Experiment Strategies）
 
-> 最后更新：2026-05-17（branch `experimental-simulator`）。本文档描述**与主策略并行运行的 5 个 shadow 实验策略**，它们只跑模拟、不下真单，用于评估"如果换成 X 策略会怎样"。
+> 最后更新：2026-06-07（branch `experimental-simulator`）。本文档描述**与主策略并行运行的 7 个 shadow 实验策略**，它们只跑模拟、不下真单，用于评估"如果换成 X 策略会怎样"。
 >
 > 主策略文档见 [`strategy-btc-1h.md`](./strategy-btc-1h.md)。本文档**不**重复主策略。
 >
@@ -23,7 +23,7 @@
 
 ---
 
-## 二、当前活跃的 5 个实验策略
+## 二、当前活跃的 7 个实验策略
 
 ### 总表（按 main.cpp 实例化顺序）
 
@@ -34,6 +34,10 @@
 | `crypto_daily_experiment` | `crypto_daily_updown_v1` | `D` | `experiment_crypto_daily_updown_v1_trades.jsonl` | Crypto daily | 同上 (daily=true) |
 | **`trend_v2_experiment`** | `trend_follow` | `T` | `experiment_trend_v2_trades.jsonl` | Crypto 1h（仅 BTC/ETH/BNB） | `evaluate_trend_follow` (L329) |
 | **`trend_v3_experiment`** | `trend_v3` | `V` | `experiment_trend_v3_trades.jsonl` | Crypto 1h（仅 BTC） | `evaluate_trend_v3` |
+| **`held_favorite_experiment`** | `held_favorite_v1` | `K` | `experiment_held_favorite_v1_trades.jsonl` | Crypto 1h（仅 BTC） | `evaluate_held_favorite_v1` |
+| **`held_momentum_experiment`** | `held_momentum_v1` | `M` | `experiment_held_momentum_v1_trades.jsonl` | Crypto 1h（仅 BTC） | `evaluate_held_momentum_v1` |
+
+> **2026-06-07 新增 `held_favorite_v1` + `held_momentum_v1`（持有到期·近零费族）**。结构性绕开"taker 费杀手"：入场 maker(免费) + 持有到 1h 结算(0/1，无离场费) → 近零费。`held_favorite`=晚段(剩 2-12min)买已明确领先的 favorite(0.80-0.93)，赌大幅 move 尾盘不反转；`held_momentum`=中段(20-40min)买便宜顺势侧(0.45-0.62)，赌 move 延续到收盘。均仅 BTC、**不设 TP/止损**、$1 名义(经 5 股下限托底)。**区别于已退役 cheap-value 失败族**：买顺势/favorite 侧赌延续，非逆势抄便宜侧赌反弹。判据=分桶真实到期胜率 > 入场价。设计与动机见 [`steps/step-held-to-expiry-shadows.md`](./steps/step-held-to-expiry-shadows.md)。
 
 > **2026-05-30 退役 `eth_cheap_v1`**（原变量名 `experiment`，id 前缀 `C`，原占用 `/api/experiment/*` 路由）。逆势 cheap-value 失败族**第 3 例**，全量服务器日志（202 仓 / 05-16~05-29）净 **−$11.84 / 37% 胜率 / 每仓 −$0.059**。**非肥尾结构**——剔掉最大 2 笔反而 −$14.88，是 `stop_price` 持续放血（81 腿 −$27.83）。05-23 时还约平（+$0.078），W22（05-25~29 ETH 急跌段）单周崩 −$11.60，逆势抄便宜侧在趋势/高波动 regime 被直接碾过。与已退役的 `eth_late_cheap_v1` / `QUIET_REVERSION` 同族同结构，无可改杠杆。证据见 [`steps/step-retire-eth-cheap-v1.md`](./steps/step-retire-eth-cheap-v1.md)。dashboard 的 "ETH Cheap" tab + `/api/experiment/*` 路由一并移除。
 
