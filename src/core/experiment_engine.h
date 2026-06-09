@@ -95,6 +95,12 @@ public:
                                           const ExperimentQuotes& quotes,
                                           const std::string& condition_id,
                                           const std::string& question);
+    // contrarian_hold_v1：中段买便宜 underdog(dev 反方向侧, 0.38-0.48)持有到期，赌反转。
+    // 是 held_momentum 的镜像（favored 侧实测 43%<价 → underdog +EV，低确认+regime 依赖，待验证）。
+    EntrySignal evaluate_contrarian_hold_v1(const BtcMarketData& md,
+                                            const ExperimentQuotes& quotes,
+                                            const std::string& condition_id,
+                                            const std::string& question);
 
     std::vector<TakeProfitLevel> compute_tp_levels(double entry_price,
                                                    StrategyRegime regime) const;

@@ -457,6 +457,10 @@ int main(int argc, char* argv[]) {
     // 已退役（2026-06-10）：trend_v3 / held_favorite_v1 / held_momentum_v1 —— 同属"买顺势 favorite
     // 赌延续"动量族，无可证明 edge（held_momentum hold-to-expiry 实测 favored 侧 43%<入场价；详见
     // docs/strategy-experiments.md 退役记录）。evaluate_* 代码保留作回放参考，此处不再实例化。
+    // contrarian_hold_v1：买便宜 underdog(dev 反方向侧)持有到期赌反转——held_momentum 镜像，
+    // 低确认验证用（见 docs/steps/step-contrarian-hold-shadow.md）。纯 shadow，独立持仓/jsonl。
+    polymarket::ExperimentEngine contrarian_hold_experiment(
+        cfg, "contrarian_hold_v1", "./logs/experiment_contrarian_hold_v1_trades.jsonl", "R");
 
     // 显示用 balance：LIVE 模式取真实 vault cash；dry_run 取虚拟 risk balance
     auto display_balance = [&]() {
@@ -1009,6 +1013,15 @@ int main(int argc, char* argv[]) {
         return trend_v2_experiment.all_trades_json();
     });
     // (trend_v3 / held_favorite / held_momentum 的 API 回调已随退役移除 2026-06-10)
+    api.on_contrarian_hold_experiment_status([&]() -> std::string {
+        return contrarian_hold_experiment.status_json();
+    });
+    api.on_contrarian_hold_experiment_trades([&]() -> std::string {
+        return contrarian_hold_experiment.trades_json();
+    });
+    api.on_contrarian_hold_experiment_all_trades([&]() -> std::string {
+        return contrarian_hold_experiment.all_trades_json();
+    });
 
     // POST /api/shutdown — 优雅停止 bot（前端"Stop Bot"按钮触发）
     // 设 g_running=false → 主循环退出 → emergency_close_all 兜底 → 进程退出
@@ -1118,6 +1131,7 @@ int main(int argc, char* argv[]) {
                     crypto_4h_experiment.reset_candle(result.coin);
                     crypto_daily_experiment.reset_candle(result.coin);
                     trend_v2_experiment.reset_candle(result.coin);
+                    contrarian_hold_experiment.reset_candle(result.coin);
                     spdlog::info("New candle [{}]: reset per-coin/global hour trade flags",
                                  result.coin);
                 }
@@ -1133,6 +1147,7 @@ int main(int argc, char* argv[]) {
                 crypto_4h_experiment.reset_global_hour();
                 crypto_daily_experiment.reset_global_hour();
                 trend_v2_experiment.reset_global_hour();
+                contrarian_hold_experiment.reset_global_hour();
                 spdlog::info("New global hour: reset global trade counters");
             }
             if (newest_candle_open != 0) {
@@ -1527,6 +1542,7 @@ int main(int argc, char* argv[]) {
                 exp_quotes.up_token_id = quotes.up_token_id;
                 exp_quotes.down_token_id = quotes.down_token_id;
                 trend_v2_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
+                contrarian_hold_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
 
                 if (!entry_window) {
                     continue;

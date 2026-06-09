@@ -23,7 +23,7 @@
 
 ---
 
-## 二、当前活跃的 4 个实验策略
+## 二、当前活跃的 5 个实验策略
 
 ### 总表（按 main.cpp 实例化顺序）
 
@@ -33,6 +33,9 @@
 | `crypto_4h_experiment` | `crypto_4h_updown_v1` | `H` | `experiment_crypto_4h_updown_v1_trades.jsonl` | Crypto 4h | `evaluate_crypto_duration_updown_v1` (L1007, daily=false) |
 | `crypto_daily_experiment` | `crypto_daily_updown_v1` | `D` | `experiment_crypto_daily_updown_v1_trades.jsonl` | Crypto daily | 同上 (daily=true) |
 | **`trend_v2_experiment`** | `trend_follow` | `T` | `experiment_trend_v2_trades.jsonl` | Crypto 1h（仅 BTC/ETH/BNB） | `evaluate_trend_follow` (L329) |
+| **`contrarian_hold_experiment`** | `contrarian_hold_v1` | `R` | `experiment_contrarian_hold_v1_trades.jsonl` | Crypto 1h（仅 BTC） | `evaluate_contrarian_hold_v1` |
+
+> **2026-06-10 新增 `contrarian_hold_v1`（反向 · 持有到期）—— ⚠️ 低确认验证,非高确认策略**。中段(20-40min)买**便宜的 underdog**(dev 反方向侧, 0.38-0.48),不设 TP/止损,持有到 1h 结算(0/1),近零费。是已退役 `held_momentum` 的**镜像**:那边 favored 侧 hold-to-expiry 实测只赢 43%<入场价 → underdog 侧理论 +EV(0.57−0.40≈+0.17/股)。**这是全部数据里唯一指向 +EV 的方向,但置信极弱**:证据只有 n=21、p≈0.05、且是同一批市场反看;更要命 contrarian 是动量的镜像 → **在趋势 regime 必然翻负**,现在 +EV 多半只是当前震荡市。**纯验证用,绝不能当结论上 live。** 判据(先定死):分桶 underdog 真实胜率 > 入场价 + net 正 + 样本 ≥80-100 + **跨一次 regime 翻面(含趋势段)仍正**;趋势段大幅放血即证伪退役。设计见 [`steps/step-contrarian-hold-shadow.md`](./steps/step-contrarian-hold-shadow.md)。
 
 > **⚠️ 2026-06-10 退役 `trend_v3`(V) + `held_favorite_v1`(K) + `held_momentum_v1`(M) —— "买顺势 favorite 赌延续"动量族无 edge。** 三者与 main/trend_v2 同属一个赌。真实费 era 数据(各跑数天)：全员净负,且**毛 edge≈0**——带管理的 trend_v2 毛 +$0.66/124 笔(≈每笔 0)、main/v3 毛微负;纯持有的 held_momentum 直接负:**favored 侧 hold-to-expiry 实测只赢 43%,远低于入场价 0.60(EV/股≈−0.17)**。结论:这一族买在**市场隐含概率**上,结构性零 edge,再生变体不会变出 edge。另:`held_favorite` 因 bot 在距收盘 ~20min 即切走当前小时盘(数据下限 mr≈20),其 2–12min 窗口**永远触发不了**(0 成交)。三者 `evaluate_*` 代码按惯例保留在 experiment_engine.cpp 作回放参考,**不再实例化,dashboard tab + API 路由一并移除**。证据见 [`steps/step-retire-held-and-trendv3.md`](./steps/step-retire-held-and-trendv3.md)。**❌ 不要再以"买顺势 favorite / 持有到期"的任何变体重做这一族。**
 >

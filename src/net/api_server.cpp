@@ -30,6 +30,9 @@ struct ApiServer::Impl {
     ApiDataCallback trend_v2_experiment_status_cb;
     ApiDataCallback trend_v2_experiment_trades_cb;
     ApiDataCallback trend_v2_experiment_all_trades_cb;
+    ApiDataCallback contrarian_hold_experiment_status_cb;
+    ApiDataCallback contrarian_hold_experiment_trades_cb;
+    ApiDataCallback contrarian_hold_experiment_all_trades_cb;
     ApiDataCallback shutdown_cb;
     std::string dashboard_html;
 
@@ -88,6 +91,15 @@ struct ApiServer::Impl {
         }
         if (target == "/api/experiment-trend-v2/all-trades" && trend_v2_experiment_all_trades_cb) {
             return make_response(http::status::ok, trend_v2_experiment_all_trades_cb(), "application/json");
+        }
+        if (target == "/api/experiment-contrarian-hold/status" && contrarian_hold_experiment_status_cb) {
+            return make_response(http::status::ok, contrarian_hold_experiment_status_cb(), "application/json");
+        }
+        if (target == "/api/experiment-contrarian-hold/trades" && contrarian_hold_experiment_trades_cb) {
+            return make_response(http::status::ok, contrarian_hold_experiment_trades_cb(), "application/json");
+        }
+        if (target == "/api/experiment-contrarian-hold/all-trades" && contrarian_hold_experiment_all_trades_cb) {
+            return make_response(http::status::ok, contrarian_hold_experiment_all_trades_cb(), "application/json");
         }
         if (target == "/api/shutdown" && shutdown_cb) {
             // 仅接受 POST/DELETE，避免 GET 误触发（如浏览器预取）
@@ -150,6 +162,9 @@ void ApiServer::on_crypto_daily_experiment_all_trades(ApiDataCallback cb) { impl
 void ApiServer::on_trend_v2_experiment_status(ApiDataCallback cb) { impl_->trend_v2_experiment_status_cb = std::move(cb); }
 void ApiServer::on_trend_v2_experiment_trades(ApiDataCallback cb) { impl_->trend_v2_experiment_trades_cb = std::move(cb); }
 void ApiServer::on_trend_v2_experiment_all_trades(ApiDataCallback cb) { impl_->trend_v2_experiment_all_trades_cb = std::move(cb); }
+void ApiServer::on_contrarian_hold_experiment_status(ApiDataCallback cb) { impl_->contrarian_hold_experiment_status_cb = std::move(cb); }
+void ApiServer::on_contrarian_hold_experiment_trades(ApiDataCallback cb) { impl_->contrarian_hold_experiment_trades_cb = std::move(cb); }
+void ApiServer::on_contrarian_hold_experiment_all_trades(ApiDataCallback cb) { impl_->contrarian_hold_experiment_all_trades_cb = std::move(cb); }
 void ApiServer::on_shutdown(ApiDataCallback cb) { impl_->shutdown_cb = std::move(cb); }
 void ApiServer::set_dashboard_html(const std::string& html) { impl_->dashboard_html = html; }
 

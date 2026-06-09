@@ -688,6 +688,59 @@ EntrySignal ExperimentStrategy::evaluate_held_momentum_v1(
     return sig;
 }
 
+// contrarian_hold_v1：中段(20-40min) 买便宜的 underdog(dev 反方向侧, 0.38-0.48)，持有到期赌反转。
+// held_momentum 的镜像：那边 favored 侧 hold-to-expiry 只赢 43%<入场价 → underdog 侧理论 +EV。
+// ⚠️ 低确认(n 小)+大概率 regime 依赖(动量镜像，趋势市翻负)，纯验证用。
+EntrySignal ExperimentStrategy::evaluate_contrarian_hold_v1(
+    const BtcMarketData& md,
+    const ExperimentQuotes& quotes,
+    const std::string& condition_id,
+    const std::string& question) {
+    EntrySignal sig;
+    sig.condition_id = condition_id;
+    sig.market_question = question;
+    sig.coin = coin_;
+    sig.regime = StrategyRegime::QUIET_REVERSION;  // 反转赌（仅标签，路由按 strategy_name_）
+
+    if (coin_ != "BTC") { sig.reject_reason = "contra_coin_filter"; return sig; }
+    if (md.minutes_remaining < 20 || md.minutes_remaining > 40) {
+        sig.reject_reason = "contra_time_window"; return sig;
+    }
+    // 必须确有一个 move 可 fade
+    if (std::abs(md.deviation_pct) < 0.08) {
+        sig.reject_reason = "contra_dev_too_small"; return sig;
+    }
+    // 买 dev 的反方向侧（便宜的 underdog）
+    Side side = md.deviation_pct > 0 ? Side::DOWN :
+                md.deviation_pct < 0 ? Side::UP : Side::NONE;
+    if (side == Side::NONE) { sig.reject_reason = "no_direction"; return sig; }
+
+    double ask = side == Side::UP ? quotes.up_ask : quotes.down_ask;
+    double bid = side == Side::UP ? quotes.up_bid : quotes.down_bid;
+    std::string token = side == Side::UP ? quotes.up_token_id : quotes.down_token_id;
+    if (bid <= 0 || ask <= 0) { sig.reject_reason = "contra_invalid_quote"; return sig; }
+    if (ask - bid > 0.020001) { sig.reject_reason = "contra_spread_wide"; return sig; }
+
+    double entry_price = std::max(0.01, ask - 0.01);
+    if (entry_price < 0.38 || entry_price > 0.48 + 1e-9) {
+        sig.reject_reason = "contra_price_band"; return sig;
+    }
+
+    sig.valid = true;
+    sig.side = side;
+    sig.market_ask = ask;
+    sig.entry_price = entry_price;
+    sig.size_usdc = 1.00;
+    sig.shares = sig.size_usdc / sig.entry_price;
+    sig.token_id = token;
+    sig.entry_price_bucket = entry_price < 0.43 ? "und_0.38_0.43" : "und_0.43_0.48";
+    sig.confidence_components = "held_to_expiry,contrarian";
+    spdlog::info("SIGNAL [{} contrarian_hold_v1]: {} {} @ {:.3f} (ask={:.3f}, dev={:+.2f}%, mr={}, {})",
+                 coin_, side == Side::UP ? "UP" : "DOWN", question,
+                 entry_price, ask, md.deviation_pct, md.minutes_remaining, sig.entry_price_bucket);
+    return sig;
+}
+
 EntrySignal ExperimentStrategy::evaluate_legacy_cheap_v2(
     const BtcMarketData& md,
     const ExperimentQuotes& quotes,
@@ -2141,7 +2194,8 @@ void ExperimentEngine::on_market(const std::string& coin,
             exit = strat_it->second.evaluate_eth_only_exit(pos, current_price, md);
         } else if (strategy_name_ == "trend_follow" || strategy_name_ == "trend_v3") {
             exit = strat_it->second.evaluate_trend_follow_exit(pos, current_price, md, trend_ctx);
-        } else if (strategy_name_ == "held_favorite_v1" || strategy_name_ == "held_momentum_v1") {
+        } else if (strategy_name_ == "held_favorite_v1" || strategy_name_ == "held_momentum_v1" ||
+                   strategy_name_ == "contrarian_hold_v1") {
             exit = ExitSignal{};  // 持有到期，永不主动离场（close_expired 结算 0/1）
         } else {
             exit = strat_it->second.evaluate_exit(pos, current_price, md);
@@ -2221,6 +2275,9 @@ void ExperimentEngine::on_market(const std::string& coin,
     } else if (strategy_name_ == "held_momentum_v1") {
         sig = strat_it->second.evaluate_held_momentum_v1(md, quotes, entry.market.condition_id,
                                                          entry.market.question);
+    } else if (strategy_name_ == "contrarian_hold_v1") {
+        sig = strat_it->second.evaluate_contrarian_hold_v1(md, quotes, entry.market.condition_id,
+                                                          entry.market.question);
     } else if (strategy_name_ == "legacy_cheap_v2") {
         sig = strat_it->second.evaluate_legacy_cheap_v2(md, quotes, entry.market.condition_id,
                                                         entry.market.question, trend_ctx);
@@ -2290,7 +2347,8 @@ void ExperimentEngine::on_market(const std::string& coin,
         pos.tp_levels = strat_it->second.compute_eth_only_tp_levels(sig.entry_price, sig.regime);
     } else if (strategy_name_ == "trend_follow" || strategy_name_ == "trend_v3") {
         pos.tp_levels = strat_it->second.compute_trend_follow_tp_levels(sig.entry_price);
-    } else if (strategy_name_ == "held_favorite_v1" || strategy_name_ == "held_momentum_v1") {
+    } else if (strategy_name_ == "held_favorite_v1" || strategy_name_ == "held_momentum_v1" ||
+               strategy_name_ == "contrarian_hold_v1") {
         pos.tp_levels = {};  // 持有到期，无 TP
     } else {
         pos.tp_levels = strat_it->second.compute_tp_levels(sig.entry_price, sig.regime);

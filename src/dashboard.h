@@ -141,6 +141,7 @@ tr:hover td { background: #161b22; }
 <div class="tabs">
   <button class="tab-btn" data-tab="main">Main Strategy</button>
   <button class="tab-btn" data-tab="regime">Trend Follow v2</button>
+  <button class="tab-btn" data-tab="contra-hold">Contrarian Hold</button>
   <button class="tab-btn" data-tab="crypto-4h">Crypto 4H</button>
   <button class="tab-btn" data-tab="crypto-daily">Crypto Daily</button>
   <button class="tab-btn" data-tab="finance">Finance</button>
@@ -267,6 +268,53 @@ tr:hover td { background: #161b22; }
   <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="trend-v2-exp-coin-pnl"></div></div>
   <div id="trend-v2-exp-positions"></div>
   <div id="trend-v2-exp-trades" style="margin-top:10px;"></div>
+</div>
+</div>
+
+<!-- ===== Contrarian Hold ===== -->
+<div id="tab-contra-hold" class="tab-panel">
+<details class="dsec section" id="dd-contra-hold-rules">
+  <summary>Strategy Rules — Contrarian Hold (shadow，反向·持有到期·近零费 · ⚠️ 低确认验证)</summary>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px;">
+    <div class="card">
+      <div class="card-title" style="color:#58a6ff;">入场条件</div>
+      <div class="card-body">
+        <div>· Coin：仅 BTC</div>
+        <div>· 时间窗口：剩余 20–40 min（中段）</div>
+        <div>· 买 underdog（dev 反方向/便宜侧）</div>
+        <div>· |偏移| ≥ 0.08% · 入场价 0.38–0.48 · 价差 ≤ 2¢</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#d29922;">持有到期 + 费用</div>
+      <div class="card-body">
+        <div>· 不设 TP / 不设止损</div>
+        <div>· 持有到 1h 结算（0/1）</div>
+        <div>· 入场 maker + 到期免费 → 近零费</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:#3fb950;">论点 / 验证（⚠️ 低确认）</div>
+      <div class="card-body">
+        <div>· held_momentum 镜像：favored 侧 43%&lt;价</div>
+        <div>· 赌中段 move 到收盘反转</div>
+        <div>· 判据：分桶真实胜率 &gt; 入场价</div>
+        <div>· 风险：动量镜像，趋势市会翻负</div>
+      </div>
+    </div>
+  </div>
+</details>
+<div class="section">
+  <div class="sec-title">Contrarian Hold <span id="contra-hold-exp-summary" style="font-size:0.82em;font-weight:normal;color:#7d8590;"></span></div>
+  <div class="stats-grid">
+    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value neutral" id="contra-hold-exp-balance">--</div></div>
+    <div class="stat"><div class="stat-label">P&amp;L</div><div class="stat-value" id="contra-hold-exp-pnl">--</div></div>
+    <div class="stat"><div class="stat-label">Open</div><div class="stat-value neutral" id="contra-hold-exp-open">--</div></div>
+    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value neutral" id="contra-hold-exp-trades-count">--</div></div>
+  </div>
+  <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="contra-hold-exp-coin-pnl"></div></div>
+  <div id="contra-hold-exp-positions"></div>
+  <div id="contra-hold-exp-trades" style="margin-top:10px;"></div>
 </div>
 </div>
 
@@ -618,12 +666,14 @@ async function refresh() {
   const [
     status, trades,
     tvStatus,  tvTrades,  tvAll,
+    chStatus,  chTrades,  chAll,
     c4hStatus, c4hTrades, c4hAll,
     cdStatus,  cdTrades,  cdAll,
     finStatus, finTrades, finAll
   ] = await Promise.all([
     fetchJSON('/api/status'), fetchJSON('/api/trades'),
     fetchJSON('/api/experiment-trend-v2/status'),    fetchJSON('/api/experiment-trend-v2/trades'),    fetchJSON('/api/experiment-trend-v2/all-trades'),
+    fetchJSON('/api/experiment-contrarian-hold/status'),fetchJSON('/api/experiment-contrarian-hold/trades'),fetchJSON('/api/experiment-contrarian-hold/all-trades'),
     fetchJSON('/api/experiment-crypto-4h/status'),   fetchJSON('/api/experiment-crypto-4h/trades'),   fetchJSON('/api/experiment-crypto-4h/all-trades'),
     fetchJSON('/api/experiment-crypto-daily/status'),fetchJSON('/api/experiment-crypto-daily/trades'),fetchJSON('/api/experiment-crypto-daily/all-trades'),
     fetchJSON('/api/experiment-finance/status'),     fetchJSON('/api/experiment-finance/trades'),     fetchJSON('/api/experiment-finance/all-trades'),
@@ -718,6 +768,7 @@ async function refresh() {
   }
 
   renderExperiment('trend-v2-exp',     tvStatus,  selectScope(Array.isArray(tvTrades)?tvTrades:[],  Array.isArray(tvAll)?tvAll:tvTrades));
+  renderExperiment('contra-hold-exp',  chStatus,  selectScope(Array.isArray(chTrades)?chTrades:[],  Array.isArray(chAll)?chAll:chTrades));
   renderExperiment('crypto-4h-exp',    c4hStatus, selectScope(Array.isArray(c4hTrades)?c4hTrades:[], Array.isArray(c4hAll)?c4hAll:c4hTrades));
   renderExperiment('crypto-daily-exp', cdStatus,  selectScope(Array.isArray(cdTrades)?cdTrades:[],  Array.isArray(cdAll)?cdAll:cdTrades));
   renderExperiment('finance-exp',      finStatus, selectScope(Array.isArray(finTrades)?finTrades:[], Array.isArray(finAll)?finAll:finTrades));
