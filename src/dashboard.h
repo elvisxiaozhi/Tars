@@ -141,9 +141,6 @@ tr:hover td { background: #161b22; }
 <div class="tabs">
   <button class="tab-btn" data-tab="main">Main Strategy</button>
   <button class="tab-btn" data-tab="regime">Trend Follow v2</button>
-  <button class="tab-btn" data-tab="trend-v3">Trend Follow v3</button>
-  <button class="tab-btn" data-tab="held-fav">Held Favorite</button>
-  <button class="tab-btn" data-tab="held-mom">Held Momentum</button>
   <button class="tab-btn" data-tab="crypto-4h">Crypto 4H</button>
   <button class="tab-btn" data-tab="crypto-daily">Crypto Daily</button>
   <button class="tab-btn" data-tab="finance">Finance</button>
@@ -270,149 +267,6 @@ tr:hover td { background: #161b22; }
   <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="trend-v2-exp-coin-pnl"></div></div>
   <div id="trend-v2-exp-positions"></div>
   <div id="trend-v2-exp-trades" style="margin-top:10px;"></div>
-</div>
-</div>
-
-<!-- ===== Trend Follow v3 ===== -->
-<div id="tab-trend-v3" class="tab-panel">
-<details class="dsec section" id="dd-trend-v3-rules">
-  <summary>Strategy Rules — Trend Follow v3 (shadow，dev-accel 门解锁高价带)</summary>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px;">
-    <div class="card">
-      <div class="card-title" style="color:#58a6ff;">入场条件</div>
-      <div class="card-body">
-        <div>· Coin：仅 BTC</div>
-        <div>· 时间窗口：40 ≤ 剩余 ≤ 45 min</div>
-        <div>· |偏移| ≥ 0.20%，1-tick 方向确认</div>
-        <div>· 价差 ≤ 1¢ · 仓位 $1.00</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title" style="color:#d29922;">分层入场带 + dev-accel 门</div>
-      <div class="card-body">
-        <div>· 0.64–0.67¢：免门（已验证 edge）</div>
-        <div>· 0.68–0.79¢：必须过 dev-accel 门</div>
-        <div>· 门 = ~90s 内 |偏移| 上升 &gt; 0.01</div>
-        <div>· 回测：上升 63% vs 不升 35%</div>
-        <div>· 门控高价 64%/+EV（解锁量）</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title" style="color:#3fb950;">止盈 / 止损（沿用 v2）</div>
-      <div class="card-body">
-        <div>· TP0 entry+10¢→50% · TP1 +15¢→50%</div>
-        <div>· 价格止损 ≤ entry −10¢</div>
-        <div>· 偏移穿零 → stop_btc · 死水退出</div>
-        <div>· Trailing（同 v2）</div>
-      </div>
-    </div>
-  </div>
-</details>
-<div class="section">
-  <div class="sec-title">Trend Follow v3 <span id="trend-v3-exp-summary" style="font-size:0.82em;font-weight:normal;color:#7d8590;"></span></div>
-  <div class="stats-grid">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value neutral" id="trend-v3-exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&amp;L</div><div class="stat-value" id="trend-v3-exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value neutral" id="trend-v3-exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value neutral" id="trend-v3-exp-trades-count">--</div></div>
-  </div>
-  <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="trend-v3-exp-coin-pnl"></div></div>
-  <div id="trend-v3-exp-positions"></div>
-  <div id="trend-v3-exp-trades" style="margin-top:10px;"></div>
-</div>
-</div>
-
-<!-- ===== Held Favorite ===== -->
-<div id="tab-held-fav" class="tab-panel">
-<details class="dsec section" id="dd-held-fav-rules">
-  <summary>Strategy Rules — Held Favorite (shadow，晚段确定性赢家·持有到期·近零费)</summary>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px;">
-    <div class="card">
-      <div class="card-title" style="color:#58a6ff;">入场条件</div>
-      <div class="card-body">
-        <div>· Coin：仅 BTC</div>
-        <div>· 时间窗口：剩余 2–12 min（晚段）</div>
-        <div>· 买 favorite（ask 更高侧），dev 须同向</div>
-        <div>· 入场价 0.80–0.93 · 价差 ≤ 3¢</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title" style="color:#d29922;">持有到期 + 费用</div>
-      <div class="card-body">
-        <div>· 不设 TP / 不设止损</div>
-        <div>· 持有到 1h 结算（0/1）</div>
-        <div>· 入场 maker + 到期免费 → 近零费</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title" style="color:#3fb950;">论点 / 验证</div>
-      <div class="card-body">
-        <div>· 大幅 move 尾盘极少反转</div>
-        <div>· 赌市场低估晚段 favorite</div>
-        <div>· 判据：分桶真实胜率 &gt; 入场价</div>
-        <div>· 风险：罕见尾盘急反转（肥尾）</div>
-      </div>
-    </div>
-  </div>
-</details>
-<div class="section">
-  <div class="sec-title">Held Favorite <span id="held-fav-exp-summary" style="font-size:0.82em;font-weight:normal;color:#7d8590;"></span></div>
-  <div class="stats-grid">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value neutral" id="held-fav-exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&amp;L</div><div class="stat-value" id="held-fav-exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value neutral" id="held-fav-exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value neutral" id="held-fav-exp-trades-count">--</div></div>
-  </div>
-  <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="held-fav-exp-coin-pnl"></div></div>
-  <div id="held-fav-exp-positions"></div>
-  <div id="held-fav-exp-trades" style="margin-top:10px;"></div>
-</div>
-</div>
-
-<!-- ===== Held Momentum ===== -->
-<div id="tab-held-mom" class="tab-panel">
-<details class="dsec section" id="dd-held-mom-rules">
-  <summary>Strategy Rules — Held Momentum (shadow，中段便宜顺势侧·持有到期·近零费)</summary>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px;">
-    <div class="card">
-      <div class="card-title" style="color:#58a6ff;">入场条件</div>
-      <div class="card-body">
-        <div>· Coin：仅 BTC</div>
-        <div>· 时间窗口：剩余 20–40 min（中段）</div>
-        <div>· 顺势侧（dev 方向），|dev| ≥ 0.08%</div>
-        <div>· 入场价 0.45–0.62 · 价差 ≤ 2¢</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title" style="color:#d29922;">持有到期 + 费用</div>
-      <div class="card-body">
-        <div>· 不设 TP / 不设止损</div>
-        <div>· 持有到 1h 结算（0/1）</div>
-        <div>· 入场 maker + 到期免费 → 近零费</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title" style="color:#3fb950;">论点 / 验证</div>
-      <div class="card-body">
-        <div>· move 启动倾向延续到收盘</div>
-        <div>· 比 0.65 高位入场 R:R 更好</div>
-        <div>· 区别于已退役 cheap-value：顺势非逆势</div>
-        <div>· 判据：分桶真实胜率 &gt; 入场价</div>
-      </div>
-    </div>
-  </div>
-</details>
-<div class="section">
-  <div class="sec-title">Held Momentum <span id="held-mom-exp-summary" style="font-size:0.82em;font-weight:normal;color:#7d8590;"></span></div>
-  <div class="stats-grid">
-    <div class="stat"><div class="stat-label">Balance</div><div class="stat-value neutral" id="held-mom-exp-balance">--</div></div>
-    <div class="stat"><div class="stat-label">P&amp;L</div><div class="stat-value" id="held-mom-exp-pnl">--</div></div>
-    <div class="stat"><div class="stat-label">Open</div><div class="stat-value neutral" id="held-mom-exp-open">--</div></div>
-    <div class="stat"><div class="stat-label">Trades</div><div class="stat-value neutral" id="held-mom-exp-trades-count">--</div></div>
-  </div>
-  <div class="section"><div class="sec-title" style="border:none;margin-bottom:6px;">Coin P&amp;L</div><div id="held-mom-exp-coin-pnl"></div></div>
-  <div id="held-mom-exp-positions"></div>
-  <div id="held-mom-exp-trades" style="margin-top:10px;"></div>
 </div>
 </div>
 
@@ -764,21 +618,15 @@ async function refresh() {
   const [
     status, trades,
     tvStatus,  tvTrades,  tvAll,
-    tv3Status, tv3Trades, tv3All,
     c4hStatus, c4hTrades, c4hAll,
     cdStatus,  cdTrades,  cdAll,
-    finStatus, finTrades, finAll,
-    hfStatus,  hfTrades,  hfAll,
-    hmStatus,  hmTrades,  hmAll
+    finStatus, finTrades, finAll
   ] = await Promise.all([
     fetchJSON('/api/status'), fetchJSON('/api/trades'),
     fetchJSON('/api/experiment-trend-v2/status'),    fetchJSON('/api/experiment-trend-v2/trades'),    fetchJSON('/api/experiment-trend-v2/all-trades'),
-    fetchJSON('/api/experiment-trend-v3/status'),    fetchJSON('/api/experiment-trend-v3/trades'),    fetchJSON('/api/experiment-trend-v3/all-trades'),
     fetchJSON('/api/experiment-crypto-4h/status'),   fetchJSON('/api/experiment-crypto-4h/trades'),   fetchJSON('/api/experiment-crypto-4h/all-trades'),
     fetchJSON('/api/experiment-crypto-daily/status'),fetchJSON('/api/experiment-crypto-daily/trades'),fetchJSON('/api/experiment-crypto-daily/all-trades'),
     fetchJSON('/api/experiment-finance/status'),     fetchJSON('/api/experiment-finance/trades'),     fetchJSON('/api/experiment-finance/all-trades'),
-    fetchJSON('/api/experiment-held-favorite/status'),fetchJSON('/api/experiment-held-favorite/trades'),fetchJSON('/api/experiment-held-favorite/all-trades'),
-    fetchJSON('/api/experiment-held-momentum/status'),fetchJSON('/api/experiment-held-momentum/trades'),fetchJSON('/api/experiment-held-momentum/all-trades'),
   ]);
 
   if (status) {
@@ -870,12 +718,9 @@ async function refresh() {
   }
 
   renderExperiment('trend-v2-exp',     tvStatus,  selectScope(Array.isArray(tvTrades)?tvTrades:[],  Array.isArray(tvAll)?tvAll:tvTrades));
-  renderExperiment('trend-v3-exp',     tv3Status, selectScope(Array.isArray(tv3Trades)?tv3Trades:[], Array.isArray(tv3All)?tv3All:tv3Trades));
   renderExperiment('crypto-4h-exp',    c4hStatus, selectScope(Array.isArray(c4hTrades)?c4hTrades:[], Array.isArray(c4hAll)?c4hAll:c4hTrades));
   renderExperiment('crypto-daily-exp', cdStatus,  selectScope(Array.isArray(cdTrades)?cdTrades:[],  Array.isArray(cdAll)?cdAll:cdTrades));
   renderExperiment('finance-exp',      finStatus, selectScope(Array.isArray(finTrades)?finTrades:[], Array.isArray(finAll)?finAll:finTrades));
-  renderExperiment('held-fav-exp',     hfStatus,  selectScope(Array.isArray(hfTrades)?hfTrades:[],  Array.isArray(hfAll)?hfAll:hfTrades));
-  renderExperiment('held-mom-exp',     hmStatus,  selectScope(Array.isArray(hmTrades)?hmTrades:[],  Array.isArray(hmAll)?hmAll:hmTrades));
 }
 
 setInterval(refresh, REFRESH_MS);

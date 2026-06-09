@@ -454,16 +454,9 @@ int main(int argc, char* argv[]) {
         cfg, "crypto_daily_updown_v1", "./logs/experiment_crypto_daily_updown_v1_trades.jsonl", "D");
     polymarket::ExperimentEngine trend_v2_experiment(
         cfg, "trend_follow", "./logs/experiment_trend_v2_trades.jsonl", "T");
-    // trend_v3：trend_v2 基底 + dev-accel 门解锁高价带。纯 shadow，独立持仓/jsonl。
-    // 见 docs/steps/step-trend-v3-shadow.md。
-    polymarket::ExperimentEngine trend_v3_experiment(
-        cfg, "trend_v3", "./logs/experiment_trend_v3_trades.jsonl", "V");
-    // held-to-expiry shadow（近零费）：买入后不设 TP/止损，持有到 1h 结算(0/1)。
-    // held_favorite=晚段买确定性赢家；held_momentum=中段买便宜顺势侧。见 docs/strategy-experiments.md。
-    polymarket::ExperimentEngine held_favorite_experiment(
-        cfg, "held_favorite_v1", "./logs/experiment_held_favorite_v1_trades.jsonl", "K");
-    polymarket::ExperimentEngine held_momentum_experiment(
-        cfg, "held_momentum_v1", "./logs/experiment_held_momentum_v1_trades.jsonl", "M");
+    // 已退役（2026-06-10）：trend_v3 / held_favorite_v1 / held_momentum_v1 —— 同属"买顺势 favorite
+    // 赌延续"动量族，无可证明 edge（held_momentum hold-to-expiry 实测 favored 侧 43%<入场价；详见
+    // docs/strategy-experiments.md 退役记录）。evaluate_* 代码保留作回放参考，此处不再实例化。
 
     // 显示用 balance：LIVE 模式取真实 vault cash；dry_run 取虚拟 risk balance
     auto display_balance = [&]() {
@@ -1015,33 +1008,7 @@ int main(int argc, char* argv[]) {
     api.on_trend_v2_experiment_all_trades([&]() -> std::string {
         return trend_v2_experiment.all_trades_json();
     });
-    api.on_trend_v3_experiment_status([&]() -> std::string {
-        return trend_v3_experiment.status_json();
-    });
-    api.on_trend_v3_experiment_trades([&]() -> std::string {
-        return trend_v3_experiment.trades_json();
-    });
-    api.on_trend_v3_experiment_all_trades([&]() -> std::string {
-        return trend_v3_experiment.all_trades_json();
-    });
-    api.on_held_favorite_experiment_status([&]() -> std::string {
-        return held_favorite_experiment.status_json();
-    });
-    api.on_held_favorite_experiment_trades([&]() -> std::string {
-        return held_favorite_experiment.trades_json();
-    });
-    api.on_held_favorite_experiment_all_trades([&]() -> std::string {
-        return held_favorite_experiment.all_trades_json();
-    });
-    api.on_held_momentum_experiment_status([&]() -> std::string {
-        return held_momentum_experiment.status_json();
-    });
-    api.on_held_momentum_experiment_trades([&]() -> std::string {
-        return held_momentum_experiment.trades_json();
-    });
-    api.on_held_momentum_experiment_all_trades([&]() -> std::string {
-        return held_momentum_experiment.all_trades_json();
-    });
+    // (trend_v3 / held_favorite / held_momentum 的 API 回调已随退役移除 2026-06-10)
 
     // POST /api/shutdown — 优雅停止 bot（前端"Stop Bot"按钮触发）
     // 设 g_running=false → 主循环退出 → emergency_close_all 兜底 → 进程退出
@@ -1151,9 +1118,6 @@ int main(int argc, char* argv[]) {
                     crypto_4h_experiment.reset_candle(result.coin);
                     crypto_daily_experiment.reset_candle(result.coin);
                     trend_v2_experiment.reset_candle(result.coin);
-                    trend_v3_experiment.reset_candle(result.coin);
-                    held_favorite_experiment.reset_candle(result.coin);
-                    held_momentum_experiment.reset_candle(result.coin);
                     spdlog::info("New candle [{}]: reset per-coin/global hour trade flags",
                                  result.coin);
                 }
@@ -1169,9 +1133,6 @@ int main(int argc, char* argv[]) {
                 crypto_4h_experiment.reset_global_hour();
                 crypto_daily_experiment.reset_global_hour();
                 trend_v2_experiment.reset_global_hour();
-                trend_v3_experiment.reset_global_hour();
-                held_favorite_experiment.reset_global_hour();
-                held_momentum_experiment.reset_global_hour();
                 spdlog::info("New global hour: reset global trade counters");
             }
             if (newest_candle_open != 0) {
@@ -1566,9 +1527,6 @@ int main(int argc, char* argv[]) {
                 exp_quotes.up_token_id = quotes.up_token_id;
                 exp_quotes.down_token_id = quotes.down_token_id;
                 trend_v2_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
-                trend_v3_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
-                held_favorite_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
-                held_momentum_experiment.on_market(coin, md, entry, exp_quotes, now_ms());
 
                 if (!entry_window) {
                     continue;

@@ -23,7 +23,7 @@
 
 ---
 
-## 二、当前活跃的 7 个实验策略
+## 二、当前活跃的 4 个实验策略
 
 ### 总表（按 main.cpp 实例化顺序）
 
@@ -33,11 +33,10 @@
 | `crypto_4h_experiment` | `crypto_4h_updown_v1` | `H` | `experiment_crypto_4h_updown_v1_trades.jsonl` | Crypto 4h | `evaluate_crypto_duration_updown_v1` (L1007, daily=false) |
 | `crypto_daily_experiment` | `crypto_daily_updown_v1` | `D` | `experiment_crypto_daily_updown_v1_trades.jsonl` | Crypto daily | 同上 (daily=true) |
 | **`trend_v2_experiment`** | `trend_follow` | `T` | `experiment_trend_v2_trades.jsonl` | Crypto 1h（仅 BTC/ETH/BNB） | `evaluate_trend_follow` (L329) |
-| **`trend_v3_experiment`** | `trend_v3` | `V` | `experiment_trend_v3_trades.jsonl` | Crypto 1h（仅 BTC） | `evaluate_trend_v3` |
-| **`held_favorite_experiment`** | `held_favorite_v1` | `K` | `experiment_held_favorite_v1_trades.jsonl` | Crypto 1h（仅 BTC） | `evaluate_held_favorite_v1` |
-| **`held_momentum_experiment`** | `held_momentum_v1` | `M` | `experiment_held_momentum_v1_trades.jsonl` | Crypto 1h（仅 BTC） | `evaluate_held_momentum_v1` |
 
-> **2026-06-07 新增 `held_favorite_v1` + `held_momentum_v1`（持有到期·近零费族）**。结构性绕开"taker 费杀手"：入场 maker(免费) + 持有到 1h 结算(0/1，无离场费) → 近零费。`held_favorite`=晚段(剩 2-12min)买已明确领先的 favorite(0.80-0.93)，赌大幅 move 尾盘不反转；`held_momentum`=中段(20-40min)买便宜顺势侧(0.45-0.62)，赌 move 延续到收盘。均仅 BTC、**不设 TP/止损**、$1 名义(经 5 股下限托底)。**区别于已退役 cheap-value 失败族**：买顺势/favorite 侧赌延续，非逆势抄便宜侧赌反弹。判据=分桶真实到期胜率 > 入场价。设计与动机见 [`steps/step-held-to-expiry-shadows.md`](./steps/step-held-to-expiry-shadows.md)。
+> **⚠️ 2026-06-10 退役 `trend_v3`(V) + `held_favorite_v1`(K) + `held_momentum_v1`(M) —— "买顺势 favorite 赌延续"动量族无 edge。** 三者与 main/trend_v2 同属一个赌。真实费 era 数据(各跑数天)：全员净负,且**毛 edge≈0**——带管理的 trend_v2 毛 +$0.66/124 笔(≈每笔 0)、main/v3 毛微负;纯持有的 held_momentum 直接负:**favored 侧 hold-to-expiry 实测只赢 43%,远低于入场价 0.60(EV/股≈−0.17)**。结论:这一族买在**市场隐含概率**上,结构性零 edge,再生变体不会变出 edge。另:`held_favorite` 因 bot 在距收盘 ~20min 即切走当前小时盘(数据下限 mr≈20),其 2–12min 窗口**永远触发不了**(0 成交)。三者 `evaluate_*` 代码按惯例保留在 experiment_engine.cpp 作回放参考,**不再实例化,dashboard tab + API 路由一并移除**。证据见 [`steps/step-retire-held-and-trendv3.md`](./steps/step-retire-held-and-trendv3.md)。**❌ 不要再以"买顺势 favorite / 持有到期"的任何变体重做这一族。**
+>
+> （退役前设计存档:held 双策略 [`steps/step-held-to-expiry-shadows.md`](./steps/step-held-to-expiry-shadows.md);trend_v3 [`steps/step-trend-v3-shadow.md`](./steps/step-trend-v3-shadow.md)。）
 
 > **2026-05-30 退役 `eth_cheap_v1`**（原变量名 `experiment`，id 前缀 `C`，原占用 `/api/experiment/*` 路由）。逆势 cheap-value 失败族**第 3 例**，全量服务器日志（202 仓 / 05-16~05-29）净 **−$11.84 / 37% 胜率 / 每仓 −$0.059**。**非肥尾结构**——剔掉最大 2 笔反而 −$14.88，是 `stop_price` 持续放血（81 腿 −$27.83）。05-23 时还约平（+$0.078），W22（05-25~29 ETH 急跌段）单周崩 −$11.60，逆势抄便宜侧在趋势/高波动 regime 被直接碾过。与已退役的 `eth_late_cheap_v1` / `QUIET_REVERSION` 同族同结构，无可改杠杆。证据见 [`steps/step-retire-eth-cheap-v1.md`](./steps/step-retire-eth-cheap-v1.md)。dashboard 的 "ETH Cheap" tab + `/api/experiment/*` 路由一并移除。
 

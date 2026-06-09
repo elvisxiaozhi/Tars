@@ -30,15 +30,6 @@ struct ApiServer::Impl {
     ApiDataCallback trend_v2_experiment_status_cb;
     ApiDataCallback trend_v2_experiment_trades_cb;
     ApiDataCallback trend_v2_experiment_all_trades_cb;
-    ApiDataCallback trend_v3_experiment_status_cb;
-    ApiDataCallback trend_v3_experiment_trades_cb;
-    ApiDataCallback trend_v3_experiment_all_trades_cb;
-    ApiDataCallback held_favorite_experiment_status_cb;
-    ApiDataCallback held_favorite_experiment_trades_cb;
-    ApiDataCallback held_favorite_experiment_all_trades_cb;
-    ApiDataCallback held_momentum_experiment_status_cb;
-    ApiDataCallback held_momentum_experiment_trades_cb;
-    ApiDataCallback held_momentum_experiment_all_trades_cb;
     ApiDataCallback shutdown_cb;
     std::string dashboard_html;
 
@@ -97,33 +88,6 @@ struct ApiServer::Impl {
         }
         if (target == "/api/experiment-trend-v2/all-trades" && trend_v2_experiment_all_trades_cb) {
             return make_response(http::status::ok, trend_v2_experiment_all_trades_cb(), "application/json");
-        }
-        if (target == "/api/experiment-trend-v3/status" && trend_v3_experiment_status_cb) {
-            return make_response(http::status::ok, trend_v3_experiment_status_cb(), "application/json");
-        }
-        if (target == "/api/experiment-trend-v3/trades" && trend_v3_experiment_trades_cb) {
-            return make_response(http::status::ok, trend_v3_experiment_trades_cb(), "application/json");
-        }
-        if (target == "/api/experiment-trend-v3/all-trades" && trend_v3_experiment_all_trades_cb) {
-            return make_response(http::status::ok, trend_v3_experiment_all_trades_cb(), "application/json");
-        }
-        if (target == "/api/experiment-held-favorite/status" && held_favorite_experiment_status_cb) {
-            return make_response(http::status::ok, held_favorite_experiment_status_cb(), "application/json");
-        }
-        if (target == "/api/experiment-held-favorite/trades" && held_favorite_experiment_trades_cb) {
-            return make_response(http::status::ok, held_favorite_experiment_trades_cb(), "application/json");
-        }
-        if (target == "/api/experiment-held-favorite/all-trades" && held_favorite_experiment_all_trades_cb) {
-            return make_response(http::status::ok, held_favorite_experiment_all_trades_cb(), "application/json");
-        }
-        if (target == "/api/experiment-held-momentum/status" && held_momentum_experiment_status_cb) {
-            return make_response(http::status::ok, held_momentum_experiment_status_cb(), "application/json");
-        }
-        if (target == "/api/experiment-held-momentum/trades" && held_momentum_experiment_trades_cb) {
-            return make_response(http::status::ok, held_momentum_experiment_trades_cb(), "application/json");
-        }
-        if (target == "/api/experiment-held-momentum/all-trades" && held_momentum_experiment_all_trades_cb) {
-            return make_response(http::status::ok, held_momentum_experiment_all_trades_cb(), "application/json");
         }
         if (target == "/api/shutdown" && shutdown_cb) {
             // 仅接受 POST/DELETE，避免 GET 误触发（如浏览器预取）
@@ -186,15 +150,6 @@ void ApiServer::on_crypto_daily_experiment_all_trades(ApiDataCallback cb) { impl
 void ApiServer::on_trend_v2_experiment_status(ApiDataCallback cb) { impl_->trend_v2_experiment_status_cb = std::move(cb); }
 void ApiServer::on_trend_v2_experiment_trades(ApiDataCallback cb) { impl_->trend_v2_experiment_trades_cb = std::move(cb); }
 void ApiServer::on_trend_v2_experiment_all_trades(ApiDataCallback cb) { impl_->trend_v2_experiment_all_trades_cb = std::move(cb); }
-void ApiServer::on_trend_v3_experiment_status(ApiDataCallback cb) { impl_->trend_v3_experiment_status_cb = std::move(cb); }
-void ApiServer::on_trend_v3_experiment_trades(ApiDataCallback cb) { impl_->trend_v3_experiment_trades_cb = std::move(cb); }
-void ApiServer::on_trend_v3_experiment_all_trades(ApiDataCallback cb) { impl_->trend_v3_experiment_all_trades_cb = std::move(cb); }
-void ApiServer::on_held_favorite_experiment_status(ApiDataCallback cb) { impl_->held_favorite_experiment_status_cb = std::move(cb); }
-void ApiServer::on_held_favorite_experiment_trades(ApiDataCallback cb) { impl_->held_favorite_experiment_trades_cb = std::move(cb); }
-void ApiServer::on_held_favorite_experiment_all_trades(ApiDataCallback cb) { impl_->held_favorite_experiment_all_trades_cb = std::move(cb); }
-void ApiServer::on_held_momentum_experiment_status(ApiDataCallback cb) { impl_->held_momentum_experiment_status_cb = std::move(cb); }
-void ApiServer::on_held_momentum_experiment_trades(ApiDataCallback cb) { impl_->held_momentum_experiment_trades_cb = std::move(cb); }
-void ApiServer::on_held_momentum_experiment_all_trades(ApiDataCallback cb) { impl_->held_momentum_experiment_all_trades_cb = std::move(cb); }
 void ApiServer::on_shutdown(ApiDataCallback cb) { impl_->shutdown_cb = std::move(cb); }
 void ApiServer::set_dashboard_html(const std::string& html) { impl_->dashboard_html = html; }
 
